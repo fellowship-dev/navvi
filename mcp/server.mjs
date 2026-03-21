@@ -30,6 +30,7 @@ const PIDFILE_RECORD = path.join(os.tmpdir(), '.navvi-ffmpeg.pid');
 const STATEFILE = path.join(os.tmpdir(), '.navvi-mode');
 const RECORDINGS_DIR = path.join(os.tmpdir(), 'navvi-recordings');
 const SNAPSHOT_DIR = path.join(os.tmpdir(), 'navvi-snapshots');
+const ACTION_LOG = path.join(os.tmpdir(), '.navvi-actions.jsonl');
 
 let pinchtabApi = process.env.PINCHTAB_API || `http://127.0.0.1:${PINCHTAB_PORT}`;
 let pinchtabToken = process.env.PINCHTAB_TOKEN || '';
@@ -44,6 +45,17 @@ if (!pinchtabToken) {
 }
 
 // --- Helpers ---
+
+/** Log an action timestamp during recording (for smart trim) */
+function logAction(action, detail) {
+  const stateFile = path.join(os.tmpdir(), '.navvi-recording.json');
+  try {
+    const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    if (!state.active) return;
+  } catch { return; } // no active recording
+  const entry = JSON.stringify({ ts: Date.now(), action, detail });
+  fs.appendFileSync(ACTION_LOG, entry + '\n');
+}
 
 function sh(cmd) {
   try {
@@ -363,8 +375,13 @@ const TOOLS = [
   },
   {
     name: 'navvi_record_stop',
-    description: 'Stop an active recording. Returns the file path, size, and duration. Do NOT use Read on the video file.',
-    inputSchema: { type: 'object', properties: {} },
+    description: 'Stop an active recording. Returns the file path, size, and duration. When trim is enabled (default), also produces a trimmed version that keeps only frames around actions (open/click/fill/press). Do NOT use Read on the video file.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        trim: { type: 'boolean', description: 'Produce a trimmed version that cuts dead time between actions (default: true). Original is always preserved.' },
+      },
+    },
   },
   {
     name: 'navvi_record_gif',
@@ -550,6 +567,7 @@ async function handleTool(name, args) {
       if (!instId) return 'Error: no running instance. Use navvi_up first.';
       const tabId = await getFirstTab(instId);
       if (!tabId) return 'Error: no open tab.';
+      logAction('open', args.url);
       const result = await apiCall('POST', `/tabs/${tabId}/navigate`, { url: args.url });
 
       let msg = `Opened ${args.url}` + (result.tabId ? ` (tab: ${result.tabId})` : '');
@@ -585,11 +603,12 @@ async function handleTool(name, args) {
       const tabId = await getFirstTab(instId);
       if (!tabId) return 'Error: no open tab.';
       if (args.x !== undefined && args.y !== undefined) {
-        // Coordinate-based click (for CAPTCHAs, canvas, elements not in a11y tree)
+        logAction('click', `(${args.x}, ${args.y})`);
         await apiCall('POST', `/tabs/${tabId}/action`, { type: 'mouse', kind: 'click', x: args.x, y: args.y });
         return `Clicked at (${args.x}, ${args.y})`;
       }
       if (!args.ref) return 'Error: provide either ref or x,y coordinates.';
+      logAction('click', args.ref);
       await apiCall('POST', `/tabs/${tabId}/action`, { type: 'mouse', kind: 'click', ref: args.ref });
       return `Clicked ${args.ref}`;
     }
@@ -600,6 +619,10 @@ async function handleTool(name, args) {
       const tabId = await getFirstTab(instId);
       if (!tabId) return 'Error: no open tab.';
       const charDelay = args.delay !== undefined ? args.delay : 25;
+
+      // Log fill action with estimated duration so trim knows how long typing takes
+      const fillDurationMs = args.value.length * (charDelay || 25);
+      logAction('fill', { ref: args.ref, text: args.value, durationMs: fillDurationMs });
 
       // Click to focus, then type char-by-char
       await apiCall('POST', `/tabs/${tabId}/action`, { type: 'mouse', kind: 'click', ref: args.ref });
@@ -636,6 +659,7 @@ async function handleTool(name, args) {
       if (!instId) return 'Error: no running instance.';
       const tabId = await getFirstTab(instId);
       if (!tabId) return 'Error: no open tab.';
+      logAction('press', args.key);
       await apiCall('POST', `/tabs/${tabId}/action`, { type: 'keyboard', kind: 'press', key: args.key });
       return `Pressed ${args.key}`;
     }
@@ -717,6 +741,9 @@ async function handleTool(name, args) {
 
       const state = { active: true, framesDir, ts, fps, duration, tabId, frames: 0, startTime: Date.now() };
       fs.writeFileSync(stateFile, JSON.stringify(state));
+
+      // Clear action log for fresh recording
+      try { fs.unlinkSync(ACTION_LOG); } catch {}
 
       // Capture loop: PinchTab screenshots via HTTP API
       const captureScript = `
@@ -843,16 +870,13 @@ run();
       fs.writeFileSync(concatFile, concatLines.join('\n') + '\n');
       const assembleResult = sh(`"${ffmpegBin}" -y -f concat -safe 0 -i "${concatFile}" -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p "${outputFile}" 2>&1`);
 
-      // Clean up frames dir
-      try {
-        const frameFiles = fs.readdirSync(framesDir);
-        for (const f of frameFiles) fs.unlinkSync(path.join(framesDir, f));
-        fs.rmdirSync(framesDir);
-      } catch {}
-      try { fs.unlinkSync(stateFile); } catch {}
-
       if (!fs.existsSync(outputFile)) {
-        // Check for capture log
+        // Clean up on failure
+        try {
+          for (const f of fs.readdirSync(framesDir)) fs.unlinkSync(path.join(framesDir, f));
+          fs.rmdirSync(framesDir);
+        } catch {}
+        try { fs.unlinkSync(stateFile); } catch {}
         const logGlob = fs.readdirSync(RECORDINGS_DIR).filter(f => f.startsWith('capture-') && f.endsWith('.log'));
         const logHint = logGlob.length > 0 ? `\nCapture log: ${path.join(RECORDINGS_DIR, logGlob[logGlob.length - 1])}` : '';
         return `Failed to assemble video.\n${assembleResult}${logHint}`;
@@ -860,8 +884,79 @@ run();
 
       const sizeKB = Math.round(fs.statSync(outputFile).size / 1024);
       const durationSec = (frames / fps).toFixed(1);
+      let result = `Recording stopped.\nFile: ${outputFile}\nFrames: ${frames} at ${fps}fps\nDuration: ${durationSec}s\nSize: ${sizeKB}KB`;
 
-      return `Recording stopped.\nFile: ${outputFile}\nFrames: ${frames} at ${fps}fps\nDuration: ${durationSec}s\nSize: ${sizeKB}KB\n\nConvert to GIF with navvi_record_gif.`;
+      // --- Smart trim: cut dead time between actions ---
+      const shouldTrim = args.trim !== false;
+      if (shouldTrim && fs.existsSync(ACTION_LOG)) {
+        try {
+          const actions = fs.readFileSync(ACTION_LOG, 'utf8').trim().split('\n')
+            .map(line => JSON.parse(line));
+
+          if (actions.length > 0 && frameFiles.length > 0) {
+            const recordingStart = finalState.startTime;
+            const frameDurationMs = 1000 / fps;
+
+            // For each action, compute which frames to keep:
+            // 1s before action → action → N seconds after
+            // fill actions: keep for their full typing duration + 2s after
+            // other actions: keep 3s after (enough for page response)
+            const BEFORE_MS = 1000;
+            const AFTER_MS = 3000;
+            const keepFrames = new Set();
+
+            for (const action of actions) {
+              const actionOffsetMs = action.ts - recordingStart;
+              const actionFrame = Math.floor(actionOffsetMs / frameDurationMs);
+
+              const beforeFrames = Math.ceil(BEFORE_MS / frameDurationMs);
+              // For fill, extend after by typing duration
+              let afterMs = AFTER_MS;
+              if (action.action === 'fill' && action.detail && action.detail.durationMs) {
+                afterMs = action.detail.durationMs + AFTER_MS;
+              }
+              const afterFrames = Math.ceil(afterMs / frameDurationMs);
+
+              const start = Math.max(0, actionFrame - beforeFrames);
+              const end = Math.min(frameFiles.length - 1, actionFrame + afterFrames);
+              for (let i = start; i <= end; i++) keepFrames.add(i);
+            }
+
+            // Only trim if we're actually cutting something (at least 20% reduction)
+            if (keepFrames.size < frameFiles.length * 0.8) {
+              const trimmedFrames = frameFiles.filter((_, i) => keepFrames.has(i));
+              const trimConcatFile = path.join(framesDir, 'concat-trimmed.txt');
+              const trimLines = trimmedFrames.map(f => `file '${path.join(framesDir, f)}'\nduration ${(1/fps).toFixed(4)}`);
+              if (trimmedFrames.length > 0) trimLines.push(`file '${path.join(framesDir, trimmedFrames[trimmedFrames.length - 1])}'`);
+              fs.writeFileSync(trimConcatFile, trimLines.join('\n') + '\n');
+
+              const trimmedFile = path.join(RECORDINGS_DIR, `${ts}-trimmed.mp4`);
+              sh(`"${ffmpegBin}" -y -f concat -safe 0 -i "${trimConcatFile}" -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p "${trimmedFile}" 2>&1`);
+
+              if (fs.existsSync(trimmedFile)) {
+                const trimSizeKB = Math.round(fs.statSync(trimmedFile).size / 1024);
+                const trimDurationSec = (trimmedFrames.length / fps).toFixed(1);
+                result += `\n\nTrimmed: ${trimmedFile}\nFrames: ${trimmedFrames.length} at ${fps}fps\nDuration: ${trimDurationSec}s\nSize: ${trimSizeKB}KB`;
+              }
+            } else {
+              result += '\n\n(Trim skipped — not enough dead time to cut.)';
+            }
+          }
+        } catch (trimErr) {
+          result += `\n\n(Trim failed: ${trimErr.message})`;
+        }
+        try { fs.unlinkSync(ACTION_LOG); } catch {}
+      }
+
+      // Clean up frames dir
+      try {
+        for (const f of fs.readdirSync(framesDir)) fs.unlinkSync(path.join(framesDir, f));
+        fs.rmdirSync(framesDir);
+      } catch {}
+      try { fs.unlinkSync(stateFile); } catch {}
+
+      result += '\n\nConvert to GIF with navvi_record_gif.';
+      return result;
     }
 
     case 'navvi_record_gif': {
