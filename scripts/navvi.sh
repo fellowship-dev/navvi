@@ -10,6 +10,8 @@
 #   ./scripts/navvi.sh snapshot                     Get accessibility tree
 #   ./scripts/navvi.sh action <type> <ref> [value]  Perform action on element
 #   ./scripts/navvi.sh screenshot [output-path]     Capture page screenshot
+#   ./scripts/navvi.sh creds <persona> [service]     Look up credentials via gopass
+#   ./scripts/navvi.sh login <persona> <service>     Auto-login to a service
 
 set -euo pipefail
 
@@ -233,6 +235,81 @@ case "$CMD" in
     echo "Screenshot saved to $OUTPUT"
     ;;
 
+  creds)
+    PERSONA="${1:?Usage: navvi.sh creds <persona> [service]}"
+    SERVICE="${2:-}"
+    GOPASS_PATH="navvi/$PERSONA"
+
+    if ! command -v gopass &>/dev/null; then
+      echo "Error: gopass not installed"
+      exit 1
+    fi
+
+    if [ -n "$SERVICE" ]; then
+      # Show specific service credentials
+      if ! gopass show "$GOPASS_PATH/$SERVICE" 2>/dev/null; then
+        echo "Error: no credentials at $GOPASS_PATH/$SERVICE"
+        echo "Add with: gopass insert $GOPASS_PATH/$SERVICE"
+        exit 1
+      fi
+    else
+      # List available credentials for this persona
+      echo "Credentials for $PERSONA:"
+      gopass ls "$GOPASS_PATH" 2>/dev/null || echo "  (none — add with: gopass insert $GOPASS_PATH/<service>)"
+    fi
+    ;;
+
+  login)
+    PERSONA="${1:?Usage: navvi.sh login <persona> <service>}"
+    SERVICE="${2:?Usage: navvi.sh login <persona> <service>}"
+    GOPASS_PATH="navvi/$PERSONA/$SERVICE"
+
+    # Check instance is running
+    ID=$(get_instance "$PERSONA")
+    if [ -z "$ID" ]; then
+      echo "Error: persona $PERSONA is not running. Run: navvi.sh up $PERSONA"
+      exit 1
+    fi
+
+    # Get credentials from gopass
+    PASS_OUTPUT=$(gopass show "$GOPASS_PATH" 2>/dev/null)
+    if [ -z "$PASS_OUTPUT" ]; then
+      echo "Error: no credentials at $GOPASS_PATH"
+      exit 1
+    fi
+
+    PASSWORD=$(echo "$PASS_OUTPUT" | head -1)
+    USERNAME=$(echo "$PASS_OUTPUT" | grep "^username:" | sed 's/^username:[[:space:]]*//')
+    URL=$(echo "$PASS_OUTPUT" | grep "^url:" | sed 's/^url:[[:space:]]*//')
+    TOTP_URI=$(echo "$PASS_OUTPUT" | grep "^totp:" | sed 's/^totp:[[:space:]]*//')
+
+    echo "Login: $PERSONA → $SERVICE"
+    [ -n "$URL" ] && echo "  URL:      $URL"
+    [ -n "$USERNAME" ] && echo "  Username: $USERNAME"
+    echo "  Password: ****"
+    [ -n "$TOTP_URI" ] && echo "  TOTP:     available"
+
+    # Output credentials as JSON for agent consumption (not to terminal)
+    # Agent reads this to fill forms via PinchTab actions
+    CREDS_JSON="{\"service\":\"$SERVICE\""
+    [ -n "$USERNAME" ] && CREDS_JSON="$CREDS_JSON,\"username\":\"$USERNAME\""
+    CREDS_JSON="$CREDS_JSON,\"password\":\"$PASSWORD\""
+    [ -n "$URL" ] && CREDS_JSON="$CREDS_JSON,\"url\":\"$URL\""
+    if [ -n "$TOTP_URI" ]; then
+      TOTP_CODE=$(gopass otp "$GOPASS_PATH" 2>/dev/null || echo "")
+      [ -n "$TOTP_CODE" ] && CREDS_JSON="$CREDS_JSON,\"totp\":\"$TOTP_CODE\""
+    fi
+    CREDS_JSON="$CREDS_JSON}"
+
+    # Write to temp file for agent to read, not stdout
+    CREDS_FILE="/tmp/.navvi-creds-$$"
+    echo "$CREDS_JSON" > "$CREDS_FILE"
+    echo "  Credentials written to $CREDS_FILE (auto-deleted in 30s)"
+
+    # Auto-delete after 30s
+    (sleep 30 && rm -f "$CREDS_FILE") &
+    ;;
+
   *)
     echo "Unknown command: $CMD"
     echo ""
@@ -248,6 +325,10 @@ case "$CMD" in
     echo "  snapshot                     Get accessibility tree"
     echo "  action <type> <ref> [value]  Click, fill, etc."
     echo "  screenshot [path]            Capture page"
+    echo ""
+    echo "Credentials:"
+    echo "  creds <persona> [service]    Look up gopass credentials"
+    echo "  login <persona> <service>    Get credentials for auto-login"
     exit 1
     ;;
 esac
