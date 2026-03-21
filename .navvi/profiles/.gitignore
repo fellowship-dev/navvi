@@ -1,0 +1,3 @@
+# Browser profiles contain cookies and session data — never commit
+*
+!.gitignore
