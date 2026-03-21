@@ -4,7 +4,8 @@
       "command": "node",
       "args": ["mcp/server.mjs"],
       "env": {
-        "PINCHTAB_API": "http://127.0.0.1:9867"
+        "PINCHTAB_API": "http://127.0.0.1:9867",
+        "PINCHTAB_BIN": "pinchtab"
       }
     }
   }

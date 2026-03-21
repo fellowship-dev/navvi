@@ -34,6 +34,7 @@ const ACTION_LOG = path.join(os.tmpdir(), '.navvi-actions.jsonl');
 
 let pinchtabApi = process.env.PINCHTAB_API || `http://127.0.0.1:${PINCHTAB_PORT}`;
 let pinchtabToken = process.env.PINCHTAB_TOKEN || '';
+const pinchtabBin = process.env.PINCHTAB_BIN || which('pinchtab') || 'pinchtab';
 
 // Auto-read token from PinchTab config if not set
 if (!pinchtabToken) {
@@ -112,7 +113,17 @@ function apiCall(method, apiPath, body) {
       let data = '';
       res.on('data', (chunk) => (data += chunk));
       res.on('end', () => {
-        try { resolve(JSON.parse(data)); } catch { resolve(data); }
+        let parsed;
+        try { parsed = JSON.parse(data); } catch { parsed = data; }
+        // Surface PinchTab errors instead of silently resolving
+        if (res.statusCode >= 400) {
+          const errMsg = (parsed && parsed.error) || (parsed && parsed.message) || data || `HTTP ${res.statusCode}`;
+          return reject(new Error(`PinchTab ${method} ${apiPath} failed (${res.statusCode}): ${errMsg}`));
+        }
+        if (parsed && typeof parsed === 'object' && parsed.error && !parsed.ok) {
+          return reject(new Error(`PinchTab ${method} ${apiPath}: ${parsed.error}`));
+        }
+        resolve(parsed);
       });
     });
     req.on('error', reject);
@@ -186,8 +197,8 @@ function saveSnapshotToFile(snapshot) {
 function checkLocalDeps() {
   const missing = [];
 
-  // Check PinchTab
-  const pt = which('pinchtab');
+  // Check PinchTab (respects PINCHTAB_BIN env var)
+  const pt = which(pinchtabBin);
   if (!pt) {
     missing.push({
       name: 'PinchTab',
@@ -285,6 +296,7 @@ const TOOLS = [
       properties: {
         persona: { type: 'string', description: 'Persona name (e.g. "fry-dev")' },
         mode: { type: 'string', enum: ['headed', 'headless'], default: 'headed' },
+        stealth: { type: 'string', enum: ['off', 'light', 'full'], description: 'Stealth level override. If omitted, reads from persona YAML (default: light).' },
       },
       required: ['persona'],
     },
@@ -419,7 +431,7 @@ async function handleTool(name, args) {
         }
 
         // Start PinchTab locally
-        const child = spawn('pinchtab', ['server'], {
+        const child = spawn(pinchtabBin, ['server'], {
           detached: true,
           stdio: 'ignore',
         });
@@ -541,12 +553,33 @@ async function handleTool(name, args) {
     case 'navvi_up': {
       if (!isPinchtabReachable()) return 'PinchTab not reachable. Run navvi_start first.';
       const { persona, mode = 'headed' } = args;
-      const result = await apiCall('POST', '/instances/launch', {
+
+      // Read persona YAML for stealth config (arg override takes precedence)
+      let stealthLevel = args.stealth || '';
+      if (!stealthLevel) {
+        try {
+          const ymlPath = path.join(process.cwd(), '.navvi', 'personas', `${persona}.yml`);
+          const yml = fs.readFileSync(ymlPath, 'utf8');
+          // Simple YAML parse: look for stealth field under browser
+          const stealthMatch = yml.match(/^\s*stealth:\s*(.+)/m);
+          if (stealthMatch) {
+            const val = stealthMatch[1].trim().toLowerCase();
+            if (['off', 'light', 'full'].includes(val)) stealthLevel = val;
+          }
+        } catch {} // persona YAML missing — use PinchTab default
+      }
+
+      const launchParams = {
         name: persona,
         mode,
         profile: `.navvi/profiles/${persona}`,
-      });
-      return `Instance launched: ${result.id || JSON.stringify(result)}`;
+      };
+      if (stealthLevel) launchParams.stealthLevel = stealthLevel;
+
+      const result = await apiCall('POST', '/instances/launch', launchParams);
+      let msg = `Instance launched: ${result.id || JSON.stringify(result)}`;
+      if (stealthLevel) msg += ` (stealth: ${stealthLevel})`;
+      return msg;
     }
 
     case 'navvi_down': {
@@ -624,34 +657,75 @@ async function handleTool(name, args) {
       const fillDurationMs = args.value.length * (charDelay || 25);
       logAction('fill', { ref: args.ref, text: args.value, durationMs: fillDurationMs });
 
-      // Click to focus, then type char-by-char
-      await apiCall('POST', `/tabs/${tabId}/action`, { type: 'mouse', kind: 'click', ref: args.ref });
-      for (let i = 0; i < args.value.length; i++) {
-        await apiCall('POST', `/tabs/${tabId}/action`, {
-          type: 'keyboard', kind: 'type', ref: args.ref, text: args.value[i],
-        });
-        if (charDelay > 0) await new Promise((r) => setTimeout(r, charDelay));
-      }
-
-      // Verify: re-inspect and check the element's value/name changed
-      let msg = `Filled ${args.ref} with "${args.value}"${charDelay ? ` (${charDelay}ms/char)` : ''}`;
-      try {
+      // Verify helper: check if element contains expected value
+      async function verifyFill() {
         const snapshot = await apiCall('GET', `/tabs/${tabId}/snapshot`);
         const data = typeof snapshot === 'string' ? JSON.parse(snapshot) : snapshot;
         const nodes = data.nodes || [];
         const target = nodes.find((n) => n.ref === args.ref);
+        saveSnapshotToFile(snapshot);
         if (target) {
           const actual = target.value || target.name || '';
-          if (actual.includes(args.value)) {
-            msg += `\nVerified: value contains "${args.value}"`;
-          } else {
-            msg += `\nWARNING: element value is "${actual}" — expected "${args.value}". The fill may have failed. Try navvi_click on the element first, then retry.`;
-          }
+          if (actual.includes(args.value)) return { ok: true, actual };
+          return { ok: false, actual };
         }
-        saveSnapshotToFile(snapshot);
-      } catch {}
+        return { ok: false, actual: '' };
+      }
 
-      return msg;
+      // Strategy 1: Click + char-by-char keystroke events (most realistic)
+      const strategies = [
+        {
+          name: 'type',
+          desc: 'keystroke',
+          run: async () => {
+            await apiCall('POST', `/tabs/${tabId}/action`, { type: 'mouse', kind: 'click', ref: args.ref });
+            for (let i = 0; i < args.value.length; i++) {
+              await apiCall('POST', `/tabs/${tabId}/action`, {
+                type: 'keyboard', kind: 'type', ref: args.ref, text: args.value[i],
+              });
+              if (charDelay > 0) await new Promise((r) => setTimeout(r, charDelay));
+            }
+          },
+        },
+        // Strategy 2: Direct fill (sets value property, fires change)
+        {
+          name: 'fill',
+          desc: 'direct',
+          run: async () => {
+            await apiCall('POST', `/tabs/${tabId}/action`, { type: 'fill', ref: args.ref, value: args.value });
+          },
+        },
+        // Strategy 3: Click to focus + insertText (paste-like, no individual key events)
+        {
+          name: 'insertText',
+          desc: 'insertText',
+          run: async () => {
+            await apiCall('POST', `/tabs/${tabId}/action`, { type: 'mouse', kind: 'click', ref: args.ref });
+            await apiCall('POST', `/tabs/${tabId}/action`, { type: 'keyboard', kind: 'insertText', text: args.value });
+          },
+        },
+      ];
+
+      const errors = [];
+      for (const strategy of strategies) {
+        try {
+          await strategy.run();
+          const result = await verifyFill();
+          if (result.ok) {
+            let msg = `Filled ${args.ref} with "${args.value}" (strategy: ${strategy.desc})`;
+            if (errors.length > 0) msg += `\nFailed strategies: ${errors.map(e => e.name).join(', ')}`;
+            msg += `\nVerified: value contains "${args.value}"`;
+            return msg;
+          }
+          errors.push({ name: strategy.desc, reason: `value is "${result.actual}"` });
+        } catch (e) {
+          errors.push({ name: strategy.desc, reason: e.message });
+        }
+      }
+
+      // All strategies failed
+      const failDetail = errors.map(e => `  ${e.name}: ${e.reason}`).join('\n');
+      return `Error: all fill strategies failed for ${args.ref} with "${args.value}":\n${failDetail}`;
     }
 
     case 'navvi_press': {

@@ -17,7 +17,7 @@ Each persona lives in `.navvi/personas/<name>.yml`. One file per identity.
 | `credentials` | string | — | Bitwarden entry name (env var ref with `$`) |
 | `services` | list | `[]` | Services this persona uses (for seeding/status) |
 | `seed_urls` | list | `[]` | URLs to visit on first launch (build browsing history) |
-| `browser.stealth` | bool | `true` | Enable stealth patches (webdriver, UA spoofing) |
+| `browser.stealth` | string | `light` | Stealth level: `off`, `light`, or `full` (matches PinchTab) |
 | `browser.locale` | string | `en-US` | Browser locale |
 | `browser.timezone` | string | — | Timezone override |
 | `browser.viewport` | string | `1280x720` | Default viewport size |
@@ -40,7 +40,7 @@ seed_urls:
   - https://github.com/trending
   - https://lobste.rs
 browser:
-  stealth: true
+  stealth: light
   locale: en-US
   timezone: America/Santiago
   mode: headed

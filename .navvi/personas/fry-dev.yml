@@ -11,7 +11,7 @@ seed_urls:
   - https://github.com/trending
   - https://lobste.rs
 browser:
-  stealth: true
+  stealth: full
   locale: en-US
   timezone: America/Santiago
   mode: headed
