@@ -11,7 +11,7 @@
       "version": "lts"
     }
   },
-  "forwardPorts": [6080, 5901, 9222],
+  "forwardPorts": [6080, 5901, 9222, 9867],
   "mounts": [
     "source=navvi-profiles,target=${containerWorkspaceFolder}/.navvi/profiles,type=volume"
   ],
