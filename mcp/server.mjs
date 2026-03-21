@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 /**
- * Navvi MCP Server — Codespace lifecycle + PinchTab browser control.
+ * Navvi MCP Server v0.3.0 — local + remote browser automation.
  *
- * Codespace tools (work locally, manage remote compute):
- *   navvi_codespaces_list, navvi_codespace_start, navvi_codespace_stop,
- *   navvi_codespace_connect, navvi_codespace_disconnect
+ * Lifecycle:
+ *   navvi_start (local|remote), navvi_stop, navvi_status, navvi_list
  *
- * Browser tools (work once connected to a Codespace):
- *   navvi_up, navvi_down, navvi_status,
- *   navvi_open, navvi_snapshot, navvi_click, navvi_fill, navvi_screenshot
+ * Browser control (PinchTab):
+ *   navvi_up, navvi_down, navvi_open, navvi_snapshot,
+ *   navvi_click, navvi_fill, navvi_screenshot
  *
  * Speaks MCP stdio protocol. Zero dependencies (Node built-ins only).
  */
@@ -22,11 +21,13 @@ const os = require('os');
 const REPO = process.env.NAVVI_REPO || 'Fellowship-dev/navvi';
 const MACHINE_TYPE = process.env.NAVVI_MACHINE || 'basicLinux32gb';
 const PINCHTAB_PORT = 9867;
-const PIDFILE = path.join(os.tmpdir(), '.navvi-port-forward.pid');
+const PIDFILE_FWD = path.join(os.tmpdir(), '.navvi-port-forward.pid');
+const PIDFILE_LOCAL = path.join(os.tmpdir(), '.navvi-pinchtab-local.pid');
+const STATEFILE = path.join(os.tmpdir(), '.navvi-mode');
 
 let pinchtabApi = process.env.PINCHTAB_API || `http://127.0.0.1:${PINCHTAB_PORT}`;
 
-// --- Shell helper ---
+// --- Helpers ---
 
 function sh(cmd) {
   try {
@@ -36,7 +37,34 @@ function sh(cmd) {
   }
 }
 
-// --- HTTP helper (no deps) ---
+function which(bin) {
+  try {
+    return execSync(`which ${bin} 2>/dev/null`, { encoding: 'utf8' }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function killPidfile(pidfile) {
+  if (!fs.existsSync(pidfile)) return;
+  try {
+    const pid = parseInt(fs.readFileSync(pidfile, 'utf8').trim());
+    process.kill(pid);
+  } catch {}
+  try { fs.unlinkSync(pidfile); } catch {}
+}
+
+function getMode() {
+  try { return fs.readFileSync(STATEFILE, 'utf8').trim(); } catch { return null; }
+}
+
+function setMode(mode) {
+  fs.writeFileSync(STATEFILE, mode);
+}
+
+function clearMode() {
+  try { fs.unlinkSync(STATEFILE); } catch {}
+}
 
 function apiCall(method, apiPath, body) {
   return new Promise((resolve, reject) => {
@@ -53,11 +81,7 @@ function apiCall(method, apiPath, body) {
       let data = '';
       res.on('data', (chunk) => (data += chunk));
       res.on('end', () => {
-        try {
-          resolve(JSON.parse(data));
-        } catch {
-          resolve(data);
-        }
+        try { resolve(JSON.parse(data)); } catch { resolve(data); }
       });
     });
     req.on('error', reject);
@@ -88,54 +112,106 @@ async function getFirstTab(instanceId) {
   return tabs[0].id;
 }
 
+// --- Dependency checks ---
+
+function checkLocalDeps() {
+  const missing = [];
+
+  // Check PinchTab
+  const pt = which('pinchtab');
+  if (!pt) {
+    missing.push({
+      name: 'PinchTab',
+      install: [
+        'brew install anthropics/tap/pinchtab',
+        'npm install -g @anthropic-ai/pinchtab',
+        'curl -fsSL https://github.com/anthropics/pinchtab/releases/latest/download/pinchtab-darwin-arm64 -o /usr/local/bin/pinchtab && chmod +x /usr/local/bin/pinchtab',
+      ],
+    });
+  }
+
+  // Check Chrome or Chromium
+  const chromePaths = [
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+  ];
+  const hasChrome = chromePaths.some((p) => fs.existsSync(p)) || which('chromium') || which('google-chrome');
+  if (!hasChrome) {
+    missing.push({
+      name: 'Chrome or Chromium',
+      install: [
+        'brew install --cask google-chrome',
+        'brew install --cask chromium',
+      ],
+    });
+  }
+
+  return missing;
+}
+
+function checkRemoteDeps() {
+  const missing = [];
+  if (!which('gh')) {
+    missing.push({
+      name: 'GitHub CLI (gh)',
+      install: ['brew install gh'],
+    });
+  }
+  return missing;
+}
+
+function formatMissing(missing) {
+  let msg = 'Missing dependencies:\n\n';
+  for (const dep of missing) {
+    msg += `${dep.name} — install with any of:\n`;
+    for (const cmd of dep.install) {
+      msg += `  $ ${cmd}\n`;
+    }
+    msg += '\n';
+  }
+  msg += 'Install the missing dependencies and try again.';
+  return msg;
+}
+
 // --- MCP Tool Definitions ---
 
 const TOOLS = [
-  // Codespace lifecycle
   {
-    name: 'navvi_codespaces_list',
-    description: 'List available Navvi Codespaces (running and stopped).',
+    name: 'navvi_start',
+    description: 'Start Navvi in local or remote mode. Local runs PinchTab directly on your machine. Remote spins up a GitHub Codespace and port-forwards PinchTab.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', enum: ['local', 'remote'], description: 'Run locally or in a Codespace' },
+        name: { type: 'string', description: 'Codespace name to resume (remote mode only, optional)' },
+      },
+      required: ['mode'],
+    },
+  },
+  {
+    name: 'navvi_stop',
+    description: 'Stop Navvi — kills local PinchTab or stops Codespace + port forward.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Codespace name (remote mode, optional — stops first running if omitted)' },
+      },
+    },
+  },
+  {
+    name: 'navvi_status',
+    description: 'Show current Navvi state — mode (local/remote/off), PinchTab reachability, running browser instances.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
-    name: 'navvi_codespace_start',
-    description: 'Start a new Navvi Codespace or resume a stopped one. Returns codespace name.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: 'Codespace name (optional — creates new if omitted, resumes if provided)' },
-      },
-    },
-  },
-  {
-    name: 'navvi_codespace_stop',
-    description: 'Stop a running Navvi Codespace.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: 'Codespace name (optional — stops first running one if omitted)' },
-      },
-    },
-  },
-  {
-    name: 'navvi_codespace_connect',
-    description: 'Forward PinchTab port from a running Codespace to localhost. Must be called after start and before browser tools.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: 'Codespace name (optional — connects to first running one if omitted)' },
-      },
-    },
-  },
-  {
-    name: 'navvi_codespace_disconnect',
-    description: 'Stop port forwarding to the Codespace.',
+    name: 'navvi_list',
+    description: 'List available Codespaces for Navvi (remote mode).',
     inputSchema: { type: 'object', properties: {} },
   },
   // Browser control (PinchTab)
   {
     name: 'navvi_up',
-    description: 'Launch a browser instance for a persona inside the connected Codespace. Returns instance ID.',
+    description: 'Launch a browser instance for a persona. Requires navvi_start first.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -156,11 +232,6 @@ const TOOLS = [
     },
   },
   {
-    name: 'navvi_status',
-    description: 'List running browser instances and connection status.',
-    inputSchema: { type: 'object', properties: {} },
-  },
-  {
     name: 'navvi_open',
     description: 'Open a URL in the active browser instance.',
     inputSchema: {
@@ -173,7 +244,7 @@ const TOOLS = [
   },
   {
     name: 'navvi_snapshot',
-    description: 'Get the accessibility tree of the current page. Returns structured elements with refs for interaction. Much cheaper than screenshots (~800 tokens).',
+    description: 'Get the accessibility tree of the current page (~800 tokens).',
     inputSchema: { type: 'object', properties: {} },
   },
   {
@@ -210,90 +281,147 @@ const TOOLS = [
 
 async function handleTool(name, args) {
   switch (name) {
-    // --- Codespace lifecycle ---
+    // --- Lifecycle ---
 
-    case 'navvi_codespaces_list': {
-      const output = sh(`gh cs list --repo ${REPO} --json name,state,createdAt,machine -q '.[] | "\\(.name)  \\(.state)  \\(.machine.displayName // "unknown")  \\(.createdAt)"'`);
-      if (!output) return `No Codespaces found for ${REPO}.\nCreate one with navvi_codespace_start.`;
-      return `Navvi Codespaces:\n${output}`;
+    case 'navvi_start': {
+      const currentMode = getMode();
+      if (currentMode) {
+        return `Navvi is already running in ${currentMode} mode.\nUse navvi_stop first, or navvi_status to check.`;
+      }
+
+      if (args.mode === 'local') {
+        // Check dependencies
+        const missing = checkLocalDeps();
+        if (missing.length > 0) return formatMissing(missing);
+
+        // Check if PinchTab is already running
+        if (isPinchtabReachable()) {
+          setMode('local');
+          return 'Navvi started (local). PinchTab was already running on port ' + PINCHTAB_PORT + '.';
+        }
+
+        // Start PinchTab locally
+        const child = spawn('pinchtab', ['--port', String(PINCHTAB_PORT)], {
+          detached: true,
+          stdio: 'ignore',
+        });
+        child.unref();
+        fs.writeFileSync(PIDFILE_LOCAL, String(child.pid));
+
+        // Wait for PinchTab to be ready
+        await new Promise((r) => setTimeout(r, 2000));
+        const reachable = isPinchtabReachable();
+        if (reachable) {
+          setMode('local');
+          return `Navvi started (local). PinchTab running on port ${PINCHTAB_PORT} (PID ${child.pid}).\nLaunch a browser with navvi_up.`;
+        } else {
+          return `PinchTab started (PID ${child.pid}) but not yet reachable.\nIt may need a moment — try navvi_status in a few seconds.`;
+        }
+      }
+
+      if (args.mode === 'remote') {
+        // Check dependencies
+        const missing = checkRemoteDeps();
+        if (missing.length > 0) return formatMissing(missing);
+
+        let csName = args.name;
+        if (csName) {
+          // Resume existing
+          sh(`gh cs start -c ${csName}`);
+        } else {
+          // Try to find an existing stopped one first
+          const stopped = sh(`gh cs list --repo ${REPO} --json name,state -q '.[] | select(.state=="Shutdown") | .name'`);
+          if (stopped) {
+            csName = stopped.split('\n')[0];
+            sh(`gh cs start -c ${csName}`);
+          } else {
+            csName = sh(`gh cs create --repo ${REPO} --machine ${MACHINE_TYPE} --json name -q '.name'`);
+          }
+        }
+
+        if (!csName) return 'Failed to start Codespace. Check gh auth status.';
+
+        // Port forward
+        killPidfile(PIDFILE_FWD);
+        const child = spawn('gh', ['cs', 'ports', 'forward', `${PINCHTAB_PORT}:${PINCHTAB_PORT}`, '-c', csName], {
+          detached: true,
+          stdio: 'ignore',
+        });
+        child.unref();
+        fs.writeFileSync(PIDFILE_FWD, String(child.pid));
+
+        await new Promise((r) => setTimeout(r, 3000));
+        const reachable = isPinchtabReachable();
+        setMode('remote:' + csName);
+        return `Navvi started (remote). Codespace: ${csName}\n  Port forward: localhost:${PINCHTAB_PORT} → Codespace\n  PinchTab: ${reachable ? 'reachable' : 'not yet reachable (may need to start PinchTab inside the Codespace)'}\nLaunch a browser with navvi_up.`;
+      }
+
+      return 'Invalid mode. Use "local" or "remote".';
     }
 
-    case 'navvi_codespace_start': {
-      if (args.name) {
-        // Resume existing
-        sh(`gh cs start -c ${args.name}`);
-        return `Started Codespace: ${args.name}\nConnect with navvi_codespace_connect.`;
+    case 'navvi_stop': {
+      const currentMode = getMode();
+      if (!currentMode) return 'Navvi is not running.';
+
+      if (currentMode === 'local') {
+        killPidfile(PIDFILE_LOCAL);
+        clearMode();
+        return 'Navvi stopped (local). PinchTab killed.';
       }
-      // Create new
-      const output = sh(`gh cs create --repo ${REPO} --machine ${MACHINE_TYPE} --json name -q '.name'`);
-      return `Created Codespace: ${output}\nConnect with navvi_codespace_connect.`;
+
+      if (currentMode.startsWith('remote:')) {
+        const csName = args.name || currentMode.split(':')[1];
+        killPidfile(PIDFILE_FWD);
+        if (csName) sh(`gh cs stop -c ${csName}`);
+        clearMode();
+        return `Navvi stopped (remote). Codespace ${csName} stopped, port forward killed.`;
+      }
+
+      clearMode();
+      return 'Navvi stopped.';
     }
 
-    case 'navvi_codespace_stop': {
-      let csName = args.name;
-      if (!csName) {
-        csName = sh(`gh cs list --repo ${REPO} --json name,state -q '.[] | select(.state=="Available") | .name' | head -1`);
-      }
-      if (!csName) return 'No running Codespace found.';
-      sh(`gh cs stop -c ${csName}`);
-      // Also disconnect if forwarding
-      if (fs.existsSync(PIDFILE)) {
-        try {
-          const pid = fs.readFileSync(PIDFILE, 'utf8').trim();
-          process.kill(parseInt(pid));
-        } catch {}
-        fs.unlinkSync(PIDFILE);
-      }
-      return `Stopped Codespace: ${csName}`;
-    }
-
-    case 'navvi_codespace_connect': {
-      // Kill existing forward if any
-      if (fs.existsSync(PIDFILE)) {
-        try {
-          const pid = fs.readFileSync(PIDFILE, 'utf8').trim();
-          process.kill(parseInt(pid));
-        } catch {}
-        fs.unlinkSync(PIDFILE);
-      }
-
-      let csName = args.name;
-      if (!csName) {
-        csName = sh(`gh cs list --repo ${REPO} --json name,state -q '.[] | select(.state=="Available") | .name' | head -1`);
-      }
-      if (!csName) return 'No running Codespace found. Start one with navvi_codespace_start.';
-
-      // Start port forward in background
-      const child = spawn('gh', ['cs', 'ports', 'forward', `${PINCHTAB_PORT}:${PINCHTAB_PORT}`, '-c', csName], {
-        detached: true,
-        stdio: 'ignore',
-      });
-      child.unref();
-      fs.writeFileSync(PIDFILE, String(child.pid));
-
-      // Wait a moment for the tunnel to establish
-      await new Promise((r) => setTimeout(r, 3000));
-
+    case 'navvi_status': {
+      const currentMode = getMode();
       const reachable = isPinchtabReachable();
-      return `Connected to ${csName}\n  Port forward: localhost:${PINCHTAB_PORT} → Codespace\n  PinchTab: ${reachable ? 'reachable' : 'not yet reachable (PinchTab may need to be started inside the Codespace)'}`;
+      let status = `Mode: ${currentMode || 'off'}\nPinchTab: ${reachable ? 'reachable' : 'not reachable'}`;
+
+      if (fs.existsSync(PIDFILE_LOCAL)) {
+        status += `\nLocal PinchTab PID: ${fs.readFileSync(PIDFILE_LOCAL, 'utf8').trim()}`;
+      }
+      if (fs.existsSync(PIDFILE_FWD)) {
+        status += `\nPort forward PID: ${fs.readFileSync(PIDFILE_FWD, 'utf8').trim()}`;
+      }
+
+      if (reachable) {
+        try {
+          const instances = await apiCall('GET', '/instances');
+          if (Array.isArray(instances) && instances.length > 0) {
+            status += '\n\nBrowser instances:\n' +
+              instances.map((i) => `  ${i.name || 'unnamed'} — ${i.id} (${i.mode || 'unknown'})`).join('\n');
+          } else {
+            status += '\n\nNo browser instances running. Launch one with navvi_up.';
+          }
+        } catch {
+          status += '\n\nCould not list instances.';
+        }
+      }
+      return status;
     }
 
-    case 'navvi_codespace_disconnect': {
-      if (!fs.existsSync(PIDFILE)) return 'No active port forward.';
-      try {
-        const pid = fs.readFileSync(PIDFILE, 'utf8').trim();
-        process.kill(parseInt(pid));
-        fs.unlinkSync(PIDFILE);
-        return 'Disconnected. Port forward stopped.';
-      } catch (e) {
-        fs.unlinkSync(PIDFILE);
-        return `Disconnected (process may have already exited).`;
-      }
+    case 'navvi_list': {
+      const missing = checkRemoteDeps();
+      if (missing.length > 0) return formatMissing(missing);
+
+      const output = sh(`gh cs list --repo ${REPO} --json name,state,createdAt,machine -q '.[] | "\\(.name)  \\(.state)  \\(.machine.displayName // "unknown")  \\(.createdAt)"'`);
+      if (!output) return `No Codespaces found for ${REPO}.\nCreate one with navvi_start --mode remote.`;
+      return `Navvi Codespaces:\n${output}`;
     }
 
     // --- Browser control (PinchTab) ---
 
     case 'navvi_up': {
+      if (!isPinchtabReachable()) return 'PinchTab not reachable. Run navvi_start first.';
       const { persona, mode = 'headed' } = args;
       const result = await apiCall('POST', '/instances/launch', {
         name: persona,
@@ -304,6 +432,7 @@ async function handleTool(name, args) {
     }
 
     case 'navvi_down': {
+      if (!isPinchtabReachable()) return 'PinchTab not reachable.';
       const instances = await apiCall('GET', '/instances');
       if (!Array.isArray(instances) || instances.length === 0) return 'No running instances.';
       const toStop = args.persona
@@ -313,28 +442,6 @@ async function handleTool(name, args) {
         await apiCall('DELETE', `/instances/${inst.id}`);
       }
       return `Stopped ${toStop.length} instance(s).`;
-    }
-
-    case 'navvi_status': {
-      const connected = isPinchtabReachable();
-      let status = `PinchTab: ${connected ? 'connected' : 'not connected'}`;
-      if (fs.existsSync(PIDFILE)) {
-        status += ` (port forward PID: ${fs.readFileSync(PIDFILE, 'utf8').trim()})`;
-      }
-      if (connected) {
-        try {
-          const instances = await apiCall('GET', '/instances');
-          if (Array.isArray(instances) && instances.length > 0) {
-            status += '\n\nRunning instances:\n' +
-              instances.map((i) => `  ${i.name} — ${i.id} (${i.mode || 'unknown'})`).join('\n');
-          } else {
-            status += '\n\nNo browser instances running. Launch one with navvi_up.';
-          }
-        } catch {
-          status += '\n\nCould not list instances.';
-        }
-      }
-      return status;
     }
 
     case 'navvi_open': {
@@ -426,7 +533,7 @@ async function handleMessage(msg) {
         result: {
           protocolVersion: '2024-11-05',
           capabilities: { tools: {} },
-          serverInfo: { name: 'navvi', version: '0.2.0' },
+          serverInfo: { name: 'navvi', version: '0.3.0' },
         },
       });
       break;
@@ -472,14 +579,10 @@ async function handleMessage(msg) {
   }
 }
 
-// Cleanup port forward on exit
+// Cleanup on exit
 process.on('exit', () => {
-  if (fs.existsSync(PIDFILE)) {
-    try {
-      process.kill(parseInt(fs.readFileSync(PIDFILE, 'utf8').trim()));
-      fs.unlinkSync(PIDFILE);
-    } catch {}
-  }
+  killPidfile(PIDFILE_LOCAL);
+  killPidfile(PIDFILE_FWD);
 });
 
-process.stderr.write('Navvi MCP server started (v0.2.0)\n');
+process.stderr.write('Navvi MCP server started (v0.3.0)\n');
