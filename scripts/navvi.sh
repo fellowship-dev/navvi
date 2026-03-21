@@ -1,35 +1,199 @@
 #!/bin/bash
-# Navvi CLI — thin wrapper around PinchTab HTTP API.
+# Navvi CLI — persona lifecycle + PinchTab HTTP API wrapper.
 # Usage:
-#   ./scripts/navvi.sh launch <persona> [--headed]
-#   ./scripts/navvi.sh open <url>
-#   ./scripts/navvi.sh snapshot
-#   ./scripts/navvi.sh action <type> <ref> [value]
-#   ./scripts/navvi.sh screenshot [output-path]
-#   ./scripts/navvi.sh status
+#   ./scripts/navvi.sh up <persona> [--headless]    Launch persona instance
+#   ./scripts/navvi.sh down [persona]               Stop instance(s)
+#   ./scripts/navvi.sh reset <persona>              Wipe cookies, keep config
+#   ./scripts/navvi.sh seed <persona>               Visit seed_urls to build history
+#   ./scripts/navvi.sh status                       List running instances
+#   ./scripts/navvi.sh open <url>                   Open URL in active tab
+#   ./scripts/navvi.sh snapshot                     Get accessibility tree
+#   ./scripts/navvi.sh action <type> <ref> [value]  Perform action on element
+#   ./scripts/navvi.sh screenshot [output-path]     Capture page screenshot
+
+set -euo pipefail
 
 API="http://127.0.0.1:9867"
+NAVVI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+PERSONAS_DIR="$NAVVI_DIR/.navvi/personas"
+PROFILES_DIR="$NAVVI_DIR/.navvi/profiles"
+
 CMD="${1:?Usage: navvi.sh <command> [args...]}"
 shift
 
+# Read a field from a persona YAML (simple grep, no yq dependency)
+read_persona_field() {
+  local persona="$1" field="$2"
+  local file="$PERSONAS_DIR/$persona.yml"
+  if [ ! -f "$file" ]; then
+    echo ""
+    return
+  fi
+  grep "^${field}:" "$file" 2>/dev/null | sed "s/^${field}:[[:space:]]*//" | sed 's/^"\(.*\)"$/\1/'
+}
+
+# Get default mode from persona YAML, fallback to headed
+get_mode() {
+  local persona="$1"
+  local mode
+  mode=$(grep "mode:" "$PERSONAS_DIR/$persona.yml" 2>/dev/null | tail -1 | sed 's/.*mode:[[:space:]]*//')
+  echo "${mode:-headed}"
+}
+
+# Get instance ID by persona name
+get_instance() {
+  local persona="$1"
+  curl -sf "$API/instances" 2>/dev/null | jq -r ".[] | select(.name==\"$persona\") | .id // empty" 2>/dev/null
+}
+
+# Get first tab of an instance
+get_tab() {
+  local inst="$1"
+  curl -sf "$API/instances/$inst/tabs" 2>/dev/null | jq -r '.[0].id // empty' 2>/dev/null
+}
+
 case "$CMD" in
-  launch)
-    PERSONA="${1:-default}"
-    MODE="headless"
-    [ "$2" = "--headed" ] && MODE="headed"
-    PROFILE_DIR="$(pwd)/.navvi/profiles/$PERSONA"
+  up)
+    PERSONA="${1:?Usage: navvi.sh up <persona> [--headless]}"
+    MODE=$(get_mode "$PERSONA")
+    [ "${2:-}" = "--headless" ] && MODE="headless"
+
+    # Check if persona definition exists
+    if [ ! -f "$PERSONAS_DIR/$PERSONA.yml" ]; then
+      echo "Error: persona not found: $PERSONAS_DIR/$PERSONA.yml"
+      echo "Available personas:"
+      ls "$PERSONAS_DIR"/*.yml 2>/dev/null | xargs -I{} basename {} .yml | sed 's/^/  /'
+      exit 1
+    fi
+
+    PROFILE_DIR="$PROFILES_DIR/$PERSONA"
     mkdir -p "$PROFILE_DIR"
+
+    # Check if already running
+    EXISTING=$(get_instance "$PERSONA")
+    if [ -n "$EXISTING" ]; then
+      echo "Persona $PERSONA already running (instance: $EXISTING)"
+      exit 0
+    fi
+
+    echo "Launching $PERSONA ($MODE)..."
     RESULT=$(curl -sf -X POST "$API/instances/launch" \
       -H "Content-Type: application/json" \
       -d "{\"name\":\"$PERSONA\",\"mode\":\"$MODE\",\"profile\":\"$PROFILE_DIR\"}")
-    echo "$RESULT" | jq -r '.id // "Error: could not launch instance"'
+    ID=$(echo "$RESULT" | jq -r '.id // empty')
+
+    if [ -z "$ID" ]; then
+      echo "Error: failed to launch instance"
+      echo "$RESULT"
+      exit 1
+    fi
+
+    DESC=$(read_persona_field "$PERSONA" "description")
+    echo "Up: $PERSONA ($DESC)"
+    echo "  Instance: $ID"
+    echo "  Profile:  $PROFILE_DIR"
+    echo "  API:      $API"
+    ;;
+
+  down)
+    PERSONA="${1:-}"
+    if [ -z "$PERSONA" ]; then
+      # Stop all instances
+      INSTANCES=$(curl -sf "$API/instances" | jq -r '.[].id // empty')
+      if [ -z "$INSTANCES" ]; then
+        echo "No running instances."
+        exit 0
+      fi
+      echo "$INSTANCES" | while read -r ID; do
+        curl -sf -X DELETE "$API/instances/$ID" > /dev/null
+        echo "Stopped instance: $ID"
+      done
+    else
+      ID=$(get_instance "$PERSONA")
+      if [ -z "$ID" ]; then
+        echo "Persona $PERSONA is not running."
+        exit 0
+      fi
+      curl -sf -X DELETE "$API/instances/$ID" > /dev/null
+      echo "Down: $PERSONA (instance: $ID)"
+    fi
+    ;;
+
+  reset)
+    PERSONA="${1:?Usage: navvi.sh reset <persona>}"
+    PROFILE_DIR="$PROFILES_DIR/$PERSONA"
+
+    # Stop if running
+    ID=$(get_instance "$PERSONA")
+    if [ -n "$ID" ]; then
+      curl -sf -X DELETE "$API/instances/$ID" > /dev/null
+      echo "Stopped running instance."
+    fi
+
+    # Wipe profile
+    if [ -d "$PROFILE_DIR" ]; then
+      rm -rf "$PROFILE_DIR"
+      echo "Reset: wiped profile for $PERSONA"
+    else
+      echo "No profile to reset for $PERSONA"
+    fi
+    ;;
+
+  seed)
+    PERSONA="${1:?Usage: navvi.sh seed <persona>}"
+    PERSONA_FILE="$PERSONAS_DIR/$PERSONA.yml"
+    if [ ! -f "$PERSONA_FILE" ]; then
+      echo "Error: persona not found: $PERSONA_FILE"
+      exit 1
+    fi
+
+    # Check instance is running
+    ID=$(get_instance "$PERSONA")
+    if [ -z "$ID" ]; then
+      echo "Persona $PERSONA is not running. Run: navvi.sh up $PERSONA"
+      exit 1
+    fi
+
+    # Extract seed_urls from YAML (lines after seed_urls: that start with "  - ")
+    URLS=$(sed -n '/^seed_urls:/,/^[^ ]/{ /^  - /p; }' "$PERSONA_FILE" | sed 's/^  - //')
+    if [ -z "$URLS" ]; then
+      echo "No seed_urls defined for $PERSONA"
+      exit 0
+    fi
+
+    echo "Seeding $PERSONA with browsing history..."
+    echo "$URLS" | while read -r URL; do
+      echo "  Visiting: $URL"
+      curl -sf -X POST "$API/instances/$ID/tabs/open" \
+        -H "Content-Type: application/json" \
+        -d "{\"url\":\"$URL\"}" > /dev/null
+      sleep 2
+    done
+    echo "Seed complete."
+    ;;
+
+  status)
+    INSTANCES=$(curl -sf "$API/instances" 2>/dev/null)
+    if [ -z "$INSTANCES" ] || [ "$INSTANCES" = "[]" ]; then
+      echo "No running instances."
+      echo ""
+      echo "Available personas:"
+      ls "$PERSONAS_DIR"/*.yml 2>/dev/null | while read -r F; do
+        NAME=$(basename "$F" .yml)
+        DESC=$(read_persona_field "$NAME" "description")
+        echo "  $NAME — $DESC"
+      done
+      exit 0
+    fi
+    echo "Running instances:"
+    echo "$INSTANCES" | jq -r '.[] | "  \(.name) — \(.id) (\(.mode // "unknown"))"'
     ;;
 
   open)
     URL="${1:?Usage: navvi.sh open <url>}"
     INST=$(curl -sf "$API/instances" | jq -r '.[0].id // empty')
     if [ -z "$INST" ]; then
-      echo "Error: no running instance. Run: navvi.sh launch <persona>"
+      echo "Error: no running instance. Run: navvi.sh up <persona>"
       exit 1
     fi
     curl -sf -X POST "$API/instances/$INST/tabs/open" \
@@ -39,7 +203,7 @@ case "$CMD" in
 
   snapshot)
     INST=$(curl -sf "$API/instances" | jq -r '.[0].id // empty')
-    TAB=$(curl -sf "$API/instances/$INST/tabs" | jq -r '.[0].id // empty')
+    TAB=$(get_tab "$INST")
     if [ -z "$TAB" ]; then
       echo "Error: no open tab"
       exit 1
@@ -50,9 +214,9 @@ case "$CMD" in
   action)
     TYPE="${1:?Usage: navvi.sh action <type> <ref> [value]}"
     REF="${2:?Usage: navvi.sh action <type> <ref> [value]}"
-    VALUE="$3"
+    VALUE="${3:-}"
     INST=$(curl -sf "$API/instances" | jq -r '.[0].id // empty')
-    TAB=$(curl -sf "$API/instances/$INST/tabs" | jq -r '.[0].id // empty')
+    TAB=$(get_tab "$INST")
     BODY="{\"type\":\"$TYPE\",\"ref\":\"$REF\""
     [ -n "$VALUE" ] && BODY="$BODY,\"value\":\"$VALUE\""
     BODY="$BODY}"
@@ -64,18 +228,26 @@ case "$CMD" in
   screenshot)
     OUTPUT="${1:-/tmp/navvi-screenshot.png}"
     INST=$(curl -sf "$API/instances" | jq -r '.[0].id // empty')
-    TAB=$(curl -sf "$API/instances/$INST/tabs" | jq -r '.[0].id // empty')
+    TAB=$(get_tab "$INST")
     curl -sf "$API/tabs/$TAB/screenshot" -o "$OUTPUT"
     echo "Screenshot saved to $OUTPUT"
     ;;
 
-  status)
-    curl -sf "$API/instances" | jq .
-    ;;
-
   *)
     echo "Unknown command: $CMD"
-    echo "Commands: launch, open, snapshot, action, screenshot, status"
+    echo ""
+    echo "Lifecycle:"
+    echo "  up <persona> [--headless]    Launch persona instance"
+    echo "  down [persona]               Stop instance (or all)"
+    echo "  reset <persona>              Wipe cookies, keep config"
+    echo "  seed <persona>               Visit seed_urls for history"
+    echo "  status                       List running instances"
+    echo ""
+    echo "Browser:"
+    echo "  open <url>                   Open URL"
+    echo "  snapshot                     Get accessibility tree"
+    echo "  action <type> <ref> [value]  Click, fill, etc."
+    echo "  screenshot [path]            Capture page"
     exit 1
     ;;
 esac
