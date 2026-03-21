@@ -12,6 +12,9 @@
 #   ./scripts/navvi.sh screenshot [output-path]     Capture page screenshot
 #   ./scripts/navvi.sh creds <persona> [service]     Look up credentials via gopass
 #   ./scripts/navvi.sh login <persona> <service>     Auto-login to a service
+#   ./scripts/navvi.sh record start [output]         Start recording VNC display
+#   ./scripts/navvi.sh record stop                   Stop recording
+#   ./scripts/navvi.sh record gif [input] [output]   Convert recording to GIF
 
 set -euo pipefail
 
@@ -310,6 +313,105 @@ case "$CMD" in
     (sleep 30 && rm -f "$CREDS_FILE") &
     ;;
 
+  record)
+    SUBCMD="${1:?Usage: navvi.sh record start|stop|gif}"
+    shift
+    PIDFILE="/tmp/.navvi-ffmpeg.pid"
+    RECORDINGS_DIR="$NAVVI_DIR/.navvi/recordings"
+    mkdir -p "$RECORDINGS_DIR"
+
+    case "$SUBCMD" in
+      start)
+        if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+          echo "Already recording (PID $(cat "$PIDFILE")). Stop first with: navvi.sh record stop"
+          exit 1
+        fi
+
+        TIMESTAMP=$(date +%Y-%m-%d-%H%M%S)
+        OUTPUT="${1:-$RECORDINGS_DIR/$TIMESTAMP.mp4}"
+
+        # Record VNC display :1 at 10fps, decent quality
+        ffmpeg -y -f x11grab -video_size 1280x720 -framerate 10 \
+          -i :1 -c:v libx264 -preset ultrafast -crf 23 \
+          -pix_fmt yuv420p "$OUTPUT" </dev/null >/dev/null 2>&1 &
+        echo $! > "$PIDFILE"
+
+        echo "Recording started"
+        echo "  Output: $OUTPUT"
+        echo "  PID:    $(cat "$PIDFILE")"
+        echo "  Stop:   navvi.sh record stop"
+        ;;
+
+      stop)
+        if [ ! -f "$PIDFILE" ]; then
+          echo "No active recording."
+          exit 0
+        fi
+
+        PID=$(cat "$PIDFILE")
+        if kill -0 "$PID" 2>/dev/null; then
+          # Send SIGINT for clean ffmpeg shutdown
+          kill -INT "$PID" 2>/dev/null
+          # Wait up to 5s for clean exit
+          for i in 1 2 3 4 5; do
+            kill -0 "$PID" 2>/dev/null || break
+            sleep 1
+          done
+          kill -9 "$PID" 2>/dev/null || true
+          echo "Recording stopped (PID $PID)"
+        else
+          echo "Recording process already ended."
+        fi
+        rm -f "$PIDFILE"
+
+        # Show the most recent recording
+        LATEST=$(ls -t "$RECORDINGS_DIR"/*.mp4 2>/dev/null | head -1)
+        if [ -n "$LATEST" ]; then
+          SIZE=$(du -sh "$LATEST" | cut -f1)
+          DURATION=$(ffprobe -v quiet -show_entries format=duration -of csv=p=0 "$LATEST" 2>/dev/null | cut -d. -f1)
+          echo "  File:     $LATEST"
+          echo "  Size:     $SIZE"
+          [ -n "$DURATION" ] && echo "  Duration: ${DURATION}s"
+          echo "  To GIF:   navvi.sh record gif $LATEST"
+        fi
+        ;;
+
+      gif)
+        INPUT="${1:-}"
+        if [ -z "$INPUT" ]; then
+          # Use most recent recording
+          INPUT=$(ls -t "$RECORDINGS_DIR"/*.mp4 2>/dev/null | head -1)
+          if [ -z "$INPUT" ]; then
+            echo "Error: no recordings found. Record first with: navvi.sh record start"
+            exit 1
+          fi
+        fi
+
+        OUTPUT="${2:-${INPUT%.mp4}.gif}"
+
+        echo "Converting to GIF..."
+        echo "  Input:  $INPUT"
+        echo "  Output: $OUTPUT"
+
+        # Two-pass for good quality: generate palette, then use it
+        ffmpeg -y -i "$INPUT" -vf "fps=8,scale=800:-1:flags=lanczos,palettegen" \
+          /tmp/.navvi-palette.png </dev/null 2>/dev/null
+        ffmpeg -y -i "$INPUT" -i /tmp/.navvi-palette.png \
+          -lavfi "fps=8,scale=800:-1:flags=lanczos [x]; [x][1:v] paletteuse" \
+          "$OUTPUT" </dev/null 2>/dev/null
+        rm -f /tmp/.navvi-palette.png
+
+        SIZE=$(du -sh "$OUTPUT" | cut -f1)
+        echo "  Done: $OUTPUT ($SIZE)"
+        ;;
+
+      *)
+        echo "Usage: navvi.sh record start|stop|gif"
+        exit 1
+        ;;
+    esac
+    ;;
+
   *)
     echo "Unknown command: $CMD"
     echo ""
@@ -325,6 +427,11 @@ case "$CMD" in
     echo "  snapshot                     Get accessibility tree"
     echo "  action <type> <ref> [value]  Click, fill, etc."
     echo "  screenshot [path]            Capture page"
+    echo ""
+    echo "Recording:"
+    echo "  record start [output]        Start recording VNC display"
+    echo "  record stop                  Stop recording"
+    echo "  record gif [input] [output]  Convert recording to GIF"
     echo ""
     echo "Credentials:"
     echo "  creds <persona> [service]    Look up gopass credentials"

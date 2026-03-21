@@ -11,6 +11,9 @@ npm install playwright-core
 # Install PinchTab
 curl -fsSL https://pinchtab.com/install.sh | bash
 
+# Install ffmpeg (video recording + GIF conversion)
+sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+
 # Install gopass (credential manager)
 GOPASS_VERSION="1.15.14"
 ARCH=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
