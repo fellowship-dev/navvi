@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "navvi": {
+      "command": "node",
+      "args": ["mcp/server.mjs"],
+      "env": {
+        "PINCHTAB_API": "http://127.0.0.1:9867"
+      }
+    }
+  }
+}
