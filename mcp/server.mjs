@@ -12,11 +12,11 @@
  * Speaks MCP stdio protocol. Zero dependencies (Node built-ins only).
  */
 
-const http = require('http');
-const { execSync, spawn } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
+import http from 'http';
+import { execSync, spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 
 const REPO = process.env.NAVVI_REPO || 'Fellowship-dev/navvi';
 const MACHINE_TYPE = process.env.NAVVI_MACHINE || 'basicLinux32gb';
