@@ -1,6 +1,6 @@
 # Navvi MCP Server
 
-MCP server that wraps PinchTab's HTTP API as Claude Code tools.
+MCP server for Codespace lifecycle management and PinchTab browser control as Claude Code tools.
 
 ## Setup
 
@@ -19,11 +19,23 @@ Copy `mcp.json` to your project's `.mcp.json`, or add the navvi entry to an exis
 
 ## Available Tools
 
+### Codespace Lifecycle
+
+| Tool | Description |
+|------|-------------|
+| `navvi_codespaces_list` | List available Codespaces (running and stopped) |
+| `navvi_codespace_start` | Create new or resume stopped Codespace |
+| `navvi_codespace_stop` | Stop a running Codespace |
+| `navvi_codespace_connect` | Port-forward PinchTab from Codespace to localhost |
+| `navvi_codespace_disconnect` | Stop port forwarding |
+
+### Browser Control
+
 | Tool | Description |
 |------|-------------|
 | `navvi_up` | Launch a browser instance for a persona |
 | `navvi_down` | Stop instance(s) |
-| `navvi_status` | List running instances |
+| `navvi_status` | List running instances and connection status |
 | `navvi_open` | Navigate to a URL |
 | `navvi_snapshot` | Get accessibility tree (~800 tokens) |
 | `navvi_click` | Click element by ref |
@@ -33,21 +45,28 @@ Copy `mcp.json` to your project's `.mcp.json`, or add the navvi entry to an exis
 ## How It Works
 
 ```
-Claude Code → MCP stdio → server.mjs → HTTP → PinchTab → Chrome
+Claude Code → MCP stdio → server.mjs → gh cs → Codespace → PinchTab → Chrome
 ```
 
-Zero dependencies — uses Node built-in `http` module only. PinchTab must be running on port 9867.
+Typical workflow:
+1. `navvi_codespaces_list` — see what's available
+2. `navvi_codespace_start` — spin up or resume a Codespace
+3. `navvi_codespace_connect` — port-forward PinchTab to localhost
+4. `navvi_up` / `navvi_open` / `navvi_snapshot` — browse
+5. `navvi_codespace_stop` — done, stop billing
+
+Zero dependencies — uses Node built-in `http` module and `gh` CLI only.
 
 ## Example
-
-Once configured, Claude Code sees Navvi tools natively:
 
 ```
 User: "Go to dev.to and show me the trending articles"
 
 Claude Code:
-  → navvi_up(persona: "fry-dev")
+  → navvi_codespaces_list()        # check what's available
+  → navvi_codespace_start()        # spin up compute
+  → navvi_codespace_connect()      # tunnel PinchTab to localhost
+  → navvi_up(persona: "fry-dev")   # launch browser
   → navvi_open(url: "https://dev.to")
-  → navvi_snapshot()
-  → [reads accessibility tree, finds article links]
+  → navvi_snapshot()               # read the page
 ```
