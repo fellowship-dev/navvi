@@ -26,6 +26,16 @@ const PIDFILE_LOCAL = path.join(os.tmpdir(), '.navvi-pinchtab-local.pid');
 const STATEFILE = path.join(os.tmpdir(), '.navvi-mode');
 
 let pinchtabApi = process.env.PINCHTAB_API || `http://127.0.0.1:${PINCHTAB_PORT}`;
+let pinchtabToken = process.env.PINCHTAB_TOKEN || '';
+
+// Auto-read token from PinchTab config if not set
+if (!pinchtabToken) {
+  const configPath = path.join(os.homedir(), 'Library', 'Application Support', 'pinchtab', 'config.json');
+  try {
+    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    if (cfg.server && cfg.server.token) pinchtabToken = cfg.server.token;
+  } catch {}
+}
 
 // --- Helpers ---
 
@@ -74,7 +84,10 @@ function apiCall(method, apiPath, body) {
       port: url.port,
       path: url.pathname,
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(pinchtabToken ? { 'Authorization': `Bearer ${pinchtabToken}` } : {}),
+      },
       timeout: 10000,
     };
     const req = http.request(options, (res) => {
@@ -93,7 +106,8 @@ function apiCall(method, apiPath, body) {
 
 function isPinchtabReachable() {
   try {
-    const result = sh(`curl -sf -o /dev/null -w '%{http_code}' ${pinchtabApi}/instances 2>/dev/null`);
+    const tokenHeader = pinchtabToken ? `-H "Authorization: Bearer ${pinchtabToken}"` : '';
+    const result = sh(`curl -sf -o /dev/null -w '%{http_code}' ${tokenHeader} ${pinchtabApi}/instances 2>/dev/null`);
     return result === '200';
   } catch {
     return false;
@@ -123,9 +137,8 @@ function checkLocalDeps() {
     missing.push({
       name: 'PinchTab',
       install: [
-        'brew install anthropics/tap/pinchtab',
-        'npm install -g @anthropic-ai/pinchtab',
-        'curl -fsSL https://github.com/anthropics/pinchtab/releases/latest/download/pinchtab-darwin-arm64 -o /usr/local/bin/pinchtab && chmod +x /usr/local/bin/pinchtab',
+        'curl -fsSL https://pinchtab.com/install.sh | bash',
+        'curl -fsSL https://github.com/pinchtab/pinchtab/releases/latest/download/pinchtab-darwin-$(uname -m | sed s/x86_64/amd64/) -o /usr/local/bin/pinchtab && chmod +x /usr/local/bin/pinchtab',
       ],
     });
   }
@@ -301,15 +314,15 @@ async function handleTool(name, args) {
         }
 
         // Start PinchTab locally
-        const child = spawn('pinchtab', ['--port', String(PINCHTAB_PORT)], {
+        const child = spawn('pinchtab', ['server'], {
           detached: true,
           stdio: 'ignore',
         });
         child.unref();
         fs.writeFileSync(PIDFILE_LOCAL, String(child.pid));
 
-        // Wait for PinchTab to be ready
-        await new Promise((r) => setTimeout(r, 2000));
+        // Wait for PinchTab to launch Chrome and be ready
+        await new Promise((r) => setTimeout(r, 4000));
         const reachable = isPinchtabReachable();
         if (reachable) {
           setMode('local');
@@ -447,8 +460,10 @@ async function handleTool(name, args) {
     case 'navvi_open': {
       const instId = await getFirstInstance();
       if (!instId) return 'Error: no running instance. Use navvi_up first.';
-      const result = await apiCall('POST', `/instances/${instId}/tabs/open`, { url: args.url });
-      return `Opened ${args.url}` + (result.id ? ` (tab: ${result.id})` : '');
+      const tabId = await getFirstTab(instId);
+      if (!tabId) return 'Error: no open tab.';
+      const result = await apiCall('POST', `/tabs/${tabId}/navigate`, { url: args.url });
+      return `Opened ${args.url}` + (result.tabId ? ` (tab: ${result.tabId})` : '');
     }
 
     case 'navvi_snapshot': {
@@ -485,7 +500,8 @@ async function handleTool(name, args) {
       if (!tabId) return 'Error: no open tab.';
       return new Promise((resolve, reject) => {
         const url = new URL(`/tabs/${tabId}/screenshot`, pinchtabApi);
-        http.get(url, (res) => {
+        const opts = { headers: pinchtabToken ? { 'Authorization': `Bearer ${pinchtabToken}` } : {} };
+        http.get(url, opts, (res) => {
           const chunks = [];
           res.on('data', (chunk) => chunks.push(chunk));
           res.on('end', () => {
