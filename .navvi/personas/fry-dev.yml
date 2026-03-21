@@ -1,0 +1,17 @@
+name: fry-dev
+description: Fry's developer persona for blogging and community
+email: ayuda.intro@gmail.com
+credentials: $BW_GOOGLE_AYUDA
+services:
+  - dev.to
+  - github.com
+  - lobste.rs
+seed_urls:
+  - https://dev.to
+  - https://github.com/trending
+  - https://lobste.rs
+browser:
+  stealth: true
+  locale: en-US
+  timezone: America/Santiago
+  mode: headed
