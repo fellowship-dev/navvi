@@ -12,6 +12,9 @@
     }
   },
   "forwardPorts": [6080, 5901, 9222],
+  "mounts": [
+    "source=navvi-profiles,target=${containerWorkspaceFolder}/.navvi/profiles,type=volume"
+  ],
   "postCreateCommand": "bash .devcontainer/setup.sh",
   "remoteEnv": {
     "DISPLAY": ":1"

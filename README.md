@@ -31,9 +31,7 @@ Real websites with isTrusted events
 ├── personas/        # Persona definitions (YAML, committed)
 └── profiles/        # Browser profiles with cookies (gitignored)
 scripts/
-├── launch-chrome.sh   # Launch headed Chrome for a persona
-├── export-profile.sh  # Tar a profile for backup
-└── import-profile.sh  # Restore a profile from tar
+└── launch-chrome.sh   # Launch headed Chrome for a persona
 ```
 
 ## Persona Definition
@@ -55,15 +53,7 @@ browser:
 
 ## Profile Persistence
 
-Profiles live in `.navvi/profiles/` (gitignored). For backup across Codespace rebuilds:
-
-```bash
-# Export
-./scripts/export-profile.sh fry-dev /tmp/fry-dev-profile.tar.gz
-
-# Import
-./scripts/import-profile.sh /tmp/fry-dev-profile.tar.gz
-```
+Profiles live in `.navvi/profiles/`, mounted as a Docker volume. They persist across Codespace rebuilds automatically — no backup/restore needed.
 
 ## Why Headed Chrome?
 
