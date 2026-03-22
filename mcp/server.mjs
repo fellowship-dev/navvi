@@ -418,6 +418,19 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: 'navvi_find',
+    description: 'Find element(s) by CSS selector. Returns screen-ready coordinates that can be passed directly to navvi_click/navvi_fill. Automatically corrects for browser chrome offset (toolbar, notification bars).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'CSS selector (e.g. "#email", "input[type=password]", "button[type=submit]")' },
+        all: { type: 'boolean', description: 'Return all matches (default: false, returns first match only)' },
+        persona: { type: 'string', description: 'Target persona (optional)' },
+      },
+      required: ['selector'],
+    },
+  },
   // Video recording
   {
     name: 'navvi_record_start',
@@ -792,6 +805,38 @@ async function handleTool(name, args) {
       const persona = args.persona || activePersona || 'default';
       const ports = getContainerPorts(persona);
       return `noVNC: http://127.0.0.1:${ports.vnc}/vnc.html?autoconnect=true\n\nOpen this URL in a browser for live view. Use for:\n- Human CAPTCHA solving\n- OAuth login flows\n- Visual debugging`;
+    }
+
+    case 'navvi_find': {
+      const { name: pName, apiBase } = resolvePersona(args.persona);
+      logAction('find', args.selector);
+      try {
+        const params = { selector: args.selector };
+        if (args.all) params.all = true;
+        const result = await apiCall('POST', '/find', params, apiBase);
+        if (!result.found) return `No element found for selector: ${args.selector}`;
+        if (result.elements) {
+          // Multiple results
+          let output = `Found ${result.count} element(s) for "${args.selector}":\n`;
+          for (const el of result.elements) {
+            if (!el.visible) continue;
+            output += `  ${el.tag}${el.id ? '#' + el.id : ''} — (${el.x}, ${el.y}) ${el.width}x${el.height}`;
+            if (el.text) output += ` "${el.text.slice(0, 40)}"`;
+            if (el.placeholder) output += ` placeholder="${el.placeholder}"`;
+            output += '\n';
+          }
+          return output;
+        }
+        // Single result
+        let output = `Found: ${result.tag}${result.id ? '#' + result.id : ''} at (${result.x}, ${result.y}) ${result.width}x${result.height}`;
+        if (result.text) output += `\nText: "${result.text}"`;
+        if (result.placeholder) output += `\nPlaceholder: "${result.placeholder}"`;
+        if (result.value) output += `\nValue: "${result.value}"`;
+        output += `\n\nUse navvi_click x=${result.x} y=${result.y} to click this element.`;
+        return output;
+      } catch (e) {
+        return `Error: ${e.message}`;
+      }
     }
 
     // --- Video recording ---

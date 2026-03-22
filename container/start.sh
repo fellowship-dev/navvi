@@ -12,6 +12,21 @@ TIMEZONE="${TIMEZONE:-UTC}"
 export DISPLAY
 export TZ="$TIMEZONE"
 
+# Initialize gopass if GPG key is provided
+if [ -n "${GPG_PRIVATE_KEY:-}" ]; then
+  echo "[navvi] Importing GPG key for gopass..."
+  echo "$GPG_PRIVATE_KEY" | gpg --batch --import 2>/dev/null
+  GPG_ID=$(gpg --list-secret-keys --keyid-format long 2>/dev/null | grep sec | head -1 | awk '{print $2}' | cut -d/ -f2)
+  if [ -n "$GPG_ID" ]; then
+    echo "${GPG_ID}:6:" | gpg --import-ownertrust 2>/dev/null
+    if [ ! -d "$HOME/.local/share/gopass/stores/root" ]; then
+      gopass init --path "$HOME/.local/share/gopass/stores/root" "$GPG_ID" 2>/dev/null
+    fi
+    echo "[navvi] Gopass ready (key: ${GPG_ID:0:8}...)"
+  fi
+  unset GPG_PRIVATE_KEY
+fi
+
 echo "[navvi] Starting Xvfb on $DISPLAY ($SCREEN_SIZE)..."
 Xvfb "$DISPLAY" -screen 0 "$SCREEN_SIZE" -ac +extension GLX +render -noreset &
 XVFB_PID=$!

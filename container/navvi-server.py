@@ -67,6 +67,10 @@ class ExecuteJSRequest(BaseModel):
     script: str
     args: list = []
 
+class FindRequest(BaseModel):
+    selector: str
+    all: bool = False  # return all matches vs just the first
+
 
 # --- Helpers ---
 
@@ -211,7 +215,7 @@ async def get_title():
 @app.post("/click")
 async def click(req: ClickRequest):
     """Click at (x, y) using xdotool."""
-    run_xdotool(f"mousemove --sync {req.x} {req.y}")
+    run_xdotool(f"mousemove {req.x} {req.y}")
     await asyncio.sleep(0.05)
     run_xdotool("click 1")
     return {"ok": True, "x": req.x, "y": req.y}
@@ -241,7 +245,7 @@ async def press_key(req: KeyRequest):
 @app.post("/mousedown")
 async def mousedown(req: MouseRequest):
     """Move to (x, y) and press mouse button down."""
-    run_xdotool(f"mousemove --sync {req.x} {req.y}")
+    run_xdotool(f"mousemove {req.x} {req.y}")
     await asyncio.sleep(0.05)
     run_xdotool("mousedown 1")
     return {"ok": True, "x": req.x, "y": req.y}
@@ -250,7 +254,7 @@ async def mousedown(req: MouseRequest):
 @app.post("/mouseup")
 async def mouseup(req: MouseRequest):
     """Move to (x, y) and release mouse button."""
-    run_xdotool(f"mousemove --sync {req.x} {req.y}")
+    run_xdotool(f"mousemove {req.x} {req.y}")
     await asyncio.sleep(0.05)
     run_xdotool("mouseup 1")
     return {"ok": True, "x": req.x, "y": req.y}
@@ -259,7 +263,7 @@ async def mouseup(req: MouseRequest):
 @app.post("/mousemove")
 async def mousemove(req: MouseRequest):
     """Move mouse to (x, y)."""
-    run_xdotool(f"mousemove --sync {req.x} {req.y}")
+    run_xdotool(f"mousemove {req.x} {req.y}")
     return {"ok": True, "x": req.x, "y": req.y}
 
 
@@ -270,7 +274,7 @@ async def drag(req: DragRequest):
     step_delay = req.duration / steps
 
     # Move to start and press
-    run_xdotool(f"mousemove --sync {req.x1} {req.y1}")
+    run_xdotool(f"mousemove {req.x1} {req.y1}")
     await asyncio.sleep(0.05)
     run_xdotool("mousedown 1")
     await asyncio.sleep(0.05)
@@ -280,7 +284,7 @@ async def drag(req: DragRequest):
         t = i / steps
         cx = int(req.x1 + (req.x2 - req.x1) * t)
         cy = int(req.y1 + (req.y2 - req.y1) * t)
-        run_xdotool(f"mousemove --sync {cx} {cy}")
+        run_xdotool(f"mousemove {cx} {cy}")
         await asyncio.sleep(step_delay)
 
     # Release
@@ -346,6 +350,127 @@ async def execute_js(req: ExecuteJSRequest):
         m = get_marionette()
         result = m.execute_script(req.script, req.args)
         return {"ok": True, "value": result}
+    except MarionetteError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def get_viewport_offset():
+    """Get the pixel offset from screen origin to Firefox's content viewport.
+
+    JS getBoundingClientRect() returns coords relative to the viewport.
+    xdotool works with absolute screen coords. The difference is the
+    browser chrome (tab bar, address bar, notification banners).
+
+    Firefox exposes this via mozInnerScreenX/Y — the screen position
+    of the top-left corner of the viewport.
+    """
+    try:
+        m = get_marionette()
+        result = m.execute_script(
+            "return { x: window.mozInnerScreenX || 0, y: window.mozInnerScreenY || 0 }"
+        )
+        return (int(result.get("x", 0)), int(result.get("y", 0)))
+    except Exception:
+        return (0, 0)
+
+
+@app.get("/viewport")
+async def viewport():
+    """Get viewport offset — the translation between JS coordinates and screen coordinates.
+
+    Returns the pixel offset from screen origin to the browser content area.
+    Add these values to any getBoundingClientRect() coordinates before
+    passing them to click/mousedown/etc.
+    """
+    offset_x, offset_y = get_viewport_offset()
+    try:
+        m = get_marionette()
+        dims = m.execute_script(
+            "return { innerWidth: window.innerWidth, innerHeight: window.innerHeight }"
+        )
+    except Exception:
+        dims = {}
+    return {
+        "ok": True,
+        "offset_x": offset_x,
+        "offset_y": offset_y,
+        "viewport_width": dims.get("innerWidth", 0),
+        "viewport_height": dims.get("innerHeight", 0),
+    }
+
+
+@app.post("/find")
+async def find_element(req: FindRequest):
+    """Find element(s) by CSS selector and return screen-ready coordinates.
+
+    Unlike raw executeJS + getBoundingClientRect(), this endpoint
+    auto-translates viewport coordinates to screen coordinates by adding
+    the browser chrome offset. The returned x/y can be passed directly
+    to /click, /mousedown, etc.
+    """
+    try:
+        m = get_marionette()
+        offset_x, offset_y = get_viewport_offset()
+
+        if req.all:
+            script = """
+                const els = document.querySelectorAll(arguments[0]);
+                return Array.from(els).slice(0, 50).map(el => {
+                    const r = el.getBoundingClientRect();
+                    return {
+                        tag: el.tagName,
+                        id: el.id || '',
+                        name: el.name || el.getAttribute('name') || '',
+                        type: el.type || '',
+                        role: el.getAttribute('role') || '',
+                        text: (el.textContent || '').trim().slice(0, 80),
+                        value: (el.value || '').slice(0, 80),
+                        placeholder: el.placeholder || '',
+                        ariaLabel: el.getAttribute('aria-label') || '',
+                        visible: r.width > 0 && r.height > 0,
+                        vx: Math.round(r.x + r.width / 2),
+                        vy: Math.round(r.y + r.height / 2),
+                        width: Math.round(r.width),
+                        height: Math.round(r.height),
+                    };
+                });
+            """
+            elements = m.execute_script(script, [req.selector])
+            if not elements:
+                return {"ok": True, "found": False, "elements": []}
+            # Apply screen offset
+            for el in elements:
+                el["x"] = el.pop("vx") + offset_x
+                el["y"] = el.pop("vy") + offset_y
+            return {"ok": True, "found": True, "count": len(elements), "elements": elements}
+        else:
+            script = """
+                const el = document.querySelector(arguments[0]);
+                if (!el) return null;
+                const r = el.getBoundingClientRect();
+                return {
+                    tag: el.tagName,
+                    id: el.id || '',
+                    name: el.name || el.getAttribute('name') || '',
+                    type: el.type || '',
+                    role: el.getAttribute('role') || '',
+                    text: (el.textContent || '').trim().slice(0, 80),
+                    value: (el.value || '').slice(0, 80),
+                    placeholder: el.placeholder || '',
+                    ariaLabel: el.getAttribute('aria-label') || '',
+                    visible: r.width > 0 && r.height > 0,
+                    vx: Math.round(r.x + r.width / 2),
+                    vy: Math.round(r.y + r.height / 2),
+                    width: Math.round(r.width),
+                    height: Math.round(r.height),
+                };
+            """
+            el = m.execute_script(script, [req.selector])
+            if not el:
+                return {"ok": True, "found": False}
+            el["x"] = el.pop("vx") + offset_x
+            el["y"] = el.pop("vy") + offset_y
+            return {"ok": True, "found": True, **el}
     except MarionetteError as e:
         raise HTTPException(status_code=500, detail=str(e))
 

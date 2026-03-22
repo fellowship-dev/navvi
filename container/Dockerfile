@@ -19,7 +19,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     procps \
     ca-certificates \
+    gnupg \
     && rm -rf /var/lib/apt/lists/*
+
+# Install gopass (credential manager) — needs git as dependency
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+ARG GOPASS_VERSION=1.15.14
+RUN ARCH=$(dpkg --print-architecture) \
+    && wget -q "https://github.com/gopasspw/gopass/releases/download/v${GOPASS_VERSION}/gopass_${GOPASS_VERSION}_linux_${ARCH}.deb" -O /tmp/gopass.deb \
+    && dpkg -i /tmp/gopass.deb \
+    && rm /tmp/gopass.deb
 
 # noVNC (web-based VNC client)
 RUN wget -q https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz -O /tmp/novnc.tar.gz \
