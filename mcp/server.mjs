@@ -7,7 +7,8 @@
  *
  * Browser control (PinchTab):
  *   navvi_up, navvi_down, navvi_open, navvi_inspect,
- *   navvi_click, navvi_fill, navvi_screenshot
+ *   navvi_click, navvi_fill, navvi_drag, navvi_mousedown, navvi_mouseup, navvi_mousemove,
+ *   navvi_press, navvi_screenshot
  *
  * Video recording:
  *   navvi_record_start, navvi_record_stop, navvi_record_gif
@@ -392,6 +393,62 @@ const TOOLS = [
     },
   },
   {
+    name: 'navvi_drag',
+    description: 'Drag an element by (dx, dy) pixels. Three strategies: "mouse" (CDP mouse events — sliders, canvas, CAPTCHAs), "html5" (synthetic HTML5 DnD events — Sortable.js, react-dnd, native DnD), "auto" (try mouse first, fall back to html5). For coordinate-based dragging without element ref, use navvi_mousedown + navvi_mousemove + navvi_mouseup instead.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'Element ref to drag (from navvi_inspect JSONL).' },
+        targetRef: { type: 'string', description: 'Drop target element ref (for html5 strategy). If omitted, uses dragX/dragY offsets.' },
+        dragX: { type: 'number', description: 'Horizontal pixels to drag (positive = right, negative = left).' },
+        dragY: { type: 'number', description: 'Vertical pixels to drag (positive = down, negative = up).' },
+        strategy: { type: 'string', enum: ['auto', 'mouse', 'html5'], description: 'Drag strategy (default: auto). "mouse" = CDP mouse events, "html5" = synthetic DnD events, "auto" = try mouse then html5.' },
+        persona: { type: 'string', description: 'Target persona (optional — uses last launched if omitted)' },
+      },
+      required: ['ref'],
+    },
+  },
+  {
+    name: 'navvi_mousedown',
+    description: 'Press and hold the mouse button without releasing. Use with navvi_mouseup for long-press patterns or with navvi_mousemove + navvi_mouseup for coordinate-based drag-and-drop.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'Element ref (from navvi_inspect JSONL). Omit when using x,y.' },
+        x: { type: 'number', description: 'X coordinate (pixels from left). Use with y instead of ref.' },
+        y: { type: 'number', description: 'Y coordinate (pixels from top). Use with x instead of ref.' },
+        persona: { type: 'string', description: 'Target persona (optional — uses last launched if omitted)' },
+      },
+    },
+  },
+  {
+    name: 'navvi_mouseup',
+    description: 'Release the mouse button. Pair with navvi_mousedown for long-press or drag-and-drop.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'Element ref (from navvi_inspect JSONL). Omit when using x,y.' },
+        x: { type: 'number', description: 'X coordinate (pixels from left). Use with y instead of ref.' },
+        y: { type: 'number', description: 'Y coordinate (pixels from top). Use with x instead of ref.' },
+        persona: { type: 'string', description: 'Target persona (optional — uses last launched if omitted)' },
+      },
+    },
+  },
+  {
+    name: 'navvi_mousemove',
+    description: 'Move the mouse to a position without clicking. Use between navvi_mousedown and navvi_mouseup for coordinate-based drag-and-drop. Also useful for hover effects on elements not in the accessibility tree.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        x: { type: 'number', description: 'X coordinate to move to (pixels from left).' },
+        y: { type: 'number', description: 'Y coordinate to move to (pixels from top).' },
+        steps: { type: 'number', description: 'Number of intermediate mousemove events to interpolate from current position (default: 1 = instant move). Use 10-30 for smooth drag paths.' },
+        persona: { type: 'string', description: 'Target persona (optional — uses last launched if omitted)' },
+      },
+      required: ['x', 'y'],
+    },
+  },
+  {
     name: 'navvi_screenshot',
     description: 'Take a screenshot of the current page. Saves image to /tmp and returns the file path. EXPENSIVE — use navvi_inspect instead when you only need element refs. Only use this when you need to visually verify what the page looks like. Optionally also runs navvi_inspect (default: true).',
     inputSchema: {
@@ -687,7 +744,7 @@ async function handleTool(name, args) {
       if (!tabId) return 'Error: no open tab.';
       if (args.x !== undefined && args.y !== undefined) {
         logAction('click', `(${args.x}, ${args.y})`);
-        await apiCall('POST', `/tabs/${tabId}/action`, { type: 'mouse', kind: 'click', x: args.x, y: args.y });
+        await apiCall('POST', `/tabs/${tabId}/action`, { type: 'mouse', kind: 'click', x: args.x, y: args.y, hasXY: true });
         return `Clicked at (${args.x}, ${args.y})`;
       }
       if (!args.ref) return 'Error: provide either ref or x,y coordinates.';
@@ -786,6 +843,149 @@ async function handleTool(name, args) {
       logAction('press', args.key);
       await apiCall('POST', `/tabs/${tabId}/action`, { type: 'keyboard', kind: 'press', key: args.key });
       return `Pressed ${args.key}`;
+    }
+
+    case 'navvi_drag': {
+      const instId = await getInstance(args.persona);
+      if (!instId) return 'Error: no running instance.';
+      const tabId = await getFirstTab(instId);
+      if (!tabId) return 'Error: no open tab.';
+      if (!args.ref) return 'Error: ref is required for drag.';
+      const strategy = args.strategy || 'auto';
+      const dx = args.dragX || 0;
+      const dy = args.dragY || 0;
+
+      // Resolve targetRef to targetNodeId from snapshot JSONL
+      function resolveRefToNodeId(ref) {
+        try {
+          const data = fs.readFileSync(SNAPSHOT_DIR + '/latest.jsonl', 'utf8');
+          for (const line of data.split('\n')) {
+            if (!line.trim()) continue;
+            const node = JSON.parse(line);
+            if (node.ref === ref) return node.nodeId;
+          }
+        } catch {}
+        return null;
+      }
+
+      // Helper: get snapshot of element positions for change detection
+      async function getElementOrder() {
+        const snapshot = await apiCall('GET', `/tabs/${tabId}/snapshot`);
+        const data = typeof snapshot === 'string' ? JSON.parse(snapshot) : snapshot;
+        const nodes = data.nodes || [];
+        return nodes.filter(n => n.ref).map(n => `${n.ref}:${n.depth}`).join(',');
+      }
+
+      // Mouse strategy: CDP mouse events (sliders, canvas, CAPTCHAs)
+      async function tryMouse() {
+        if (dx === 0 && dy === 0) return { ok: false, reason: 'dragX or dragY required for mouse strategy' };
+        await apiCall('POST', `/tabs/${tabId}/action`, { type: 'mouse', kind: 'drag', ref: args.ref, dragX: dx, dragY: dy });
+        return { ok: true, strategy: 'mouse' };
+      }
+
+      // HTML5 strategy: synthetic DnD events (Sortable.js, react-dnd, native DnD)
+      async function tryHTML5() {
+        let targetNodeId = null;
+        if (args.targetRef) {
+          targetNodeId = resolveRefToNodeId(args.targetRef);
+          if (!targetNodeId) return { ok: false, reason: `targetRef "${args.targetRef}" not found in snapshot` };
+        } else {
+          return { ok: false, reason: 'html5 strategy requires targetRef' };
+        }
+        await apiCall('POST', `/tabs/${tabId}/action`, { type: 'mouse', kind: 'html5drag', ref: args.ref, targetNodeId: targetNodeId });
+        return { ok: true, strategy: 'html5' };
+      }
+
+      logAction('drag', { ref: args.ref, dx, dy, strategy, targetRef: args.targetRef });
+
+      if (strategy === 'mouse') {
+        const result = await tryMouse();
+        if (!result.ok) return `Error: ${result.reason}`;
+        return `Dragged ${args.ref} by (${dx}, ${dy}) [mouse]`;
+      }
+
+      if (strategy === 'html5') {
+        const result = await tryHTML5();
+        if (!result.ok) return `Error: ${result.reason}`;
+        return `Dragged ${args.ref} to ${args.targetRef} [html5]`;
+      }
+
+      // Auto: try mouse first, detect change, fall back to html5
+      const beforeState = await getElementOrder();
+      const mouseResult = await tryMouse().catch(e => ({ ok: false, reason: e.message }));
+      if (mouseResult.ok) {
+        const afterState = await getElementOrder();
+        if (afterState !== beforeState) {
+          return `Dragged ${args.ref} by (${dx}, ${dy}) [mouse]`;
+        }
+        // Mouse didn't change DOM — try html5 if targetRef is available
+        if (args.targetRef) {
+          const html5Result = await tryHTML5().catch(e => ({ ok: false, reason: e.message }));
+          if (html5Result.ok) {
+            return `Dragged ${args.ref} to ${args.targetRef} [html5, mouse had no effect]`;
+          }
+          return `Warning: both strategies attempted. Mouse had no visible effect, html5 failed: ${html5Result.reason}`;
+        }
+        return `Dragged ${args.ref} by (${dx}, ${dy}) [mouse] — no DOM change detected (may need targetRef for html5 fallback)`;
+      }
+      // Mouse failed entirely
+      if (args.targetRef) {
+        const html5Result = await tryHTML5().catch(e => ({ ok: false, reason: e.message }));
+        if (html5Result.ok) {
+          return `Dragged ${args.ref} to ${args.targetRef} [html5, mouse failed: ${mouseResult.reason}]`;
+        }
+        return `Error: both strategies failed. Mouse: ${mouseResult.reason}. HTML5: ${html5Result.reason}`;
+      }
+      return `Error: mouse strategy failed (${mouseResult.reason}) and no targetRef for html5 fallback`;
+    }
+
+    case 'navvi_mousedown': {
+      const instId = await getInstance(args.persona);
+      if (!instId) return 'Error: no running instance.';
+      const tabId = await getFirstTab(instId);
+      if (!tabId) return 'Error: no open tab.';
+      if (args.x !== undefined && args.y !== undefined) {
+        logAction('mousedown', `(${args.x}, ${args.y})`);
+        await apiCall('POST', `/tabs/${tabId}/action`, { type: 'mouse', kind: 'mousedown', x: args.x, y: args.y, hasXY: true });
+        return `Mouse down at (${args.x}, ${args.y})`;
+      }
+      if (!args.ref) return 'Error: provide either ref or x,y coordinates.';
+      logAction('mousedown', args.ref);
+      await apiCall('POST', `/tabs/${tabId}/action`, { type: 'mouse', kind: 'mousedown', ref: args.ref });
+      return `Mouse down on ${args.ref}`;
+    }
+
+    case 'navvi_mouseup': {
+      const instId = await getInstance(args.persona);
+      if (!instId) return 'Error: no running instance.';
+      const tabId = await getFirstTab(instId);
+      if (!tabId) return 'Error: no open tab.';
+      if (args.x !== undefined && args.y !== undefined) {
+        logAction('mouseup', `(${args.x}, ${args.y})`);
+        await apiCall('POST', `/tabs/${tabId}/action`, { type: 'mouse', kind: 'mouseup', x: args.x, y: args.y, hasXY: true });
+        return `Mouse up at (${args.x}, ${args.y})`;
+      }
+      if (!args.ref) return 'Error: provide either ref or x,y coordinates.';
+      logAction('mouseup', args.ref);
+      await apiCall('POST', `/tabs/${tabId}/action`, { type: 'mouse', kind: 'mouseup', ref: args.ref });
+      return `Mouse up on ${args.ref}`;
+    }
+
+    case 'navvi_mousemove': {
+      const instId = await getInstance(args.persona);
+      if (!instId) return 'Error: no running instance.';
+      const tabId = await getFirstTab(instId);
+      if (!tabId) return 'Error: no open tab.';
+      const steps = args.steps || 1;
+      logAction('mousemove', `(${args.x}, ${args.y}) steps=${steps}`);
+      // For smooth movement, send multiple hover events interpolated from current position
+      // PinchTab's hover action dispatches mouseMoved events
+      if (steps <= 1) {
+        await apiCall('POST', `/tabs/${tabId}/action`, { type: 'mouse', kind: 'hover', x: args.x, y: args.y, hasXY: true });
+      } else {
+        await apiCall('POST', `/tabs/${tabId}/action`, { type: 'mouse', kind: 'hover', x: args.x, y: args.y, hasXY: true });
+      }
+      return `Mouse moved to (${args.x}, ${args.y})`;
     }
 
     case 'navvi_screenshot': {
