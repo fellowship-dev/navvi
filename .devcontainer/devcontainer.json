@@ -3,6 +3,9 @@
   "build": {
     "dockerfile": "../container/Dockerfile"
   },
+  "features": {
+    "ghcr.io/devcontainers/features/sshd:1": {}
+  },
   "forwardPorts": [8024, 6080],
   "portsAttributes": {
     "8024": { "label": "Navvi API", "onAutoForward": "notify" },
