@@ -238,7 +238,7 @@ function formatMissing(missing) {
 const TOOLS = [
   {
     name: 'navvi_start',
-    description: 'Start a Navvi browser container (Firefox + Xvfb + xdotool). Local=Docker, Remote=Codespace. After starting, the workflow is: navvi_open(url) → navvi_find(selector) to get screen coordinates → navvi_click/navvi_fill at those coords → navvi_screenshot to verify. All input is OS-level (isTrusted:true), undetectable by bot detection.',
+    description: 'Start a Navvi browser container (Firefox + Xvfb + xdotool). Local=Docker, Remote=Codespace. Workflow: navvi_open(url) → navvi_find(selector) → navvi_click/navvi_fill → navvi_screenshot to verify. All input is OS-level (isTrusted:true). If you hit a CAPTCHA you cannot solve (Arkose/FunCaptcha, image puzzles, reCAPTCHA), call navvi_vnc and send the user the noVNC URL so they can solve it manually.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -339,7 +339,7 @@ const TOOLS = [
   },
   {
     name: 'navvi_mousedown',
-    description: 'Press and hold mouse button at (x, y). Pair with navvi_mouseup for press-and-hold CAPTCHAs. Get coordinates from navvi_find. isTrusted: true events bypass Arkose Labs detection.',
+    description: 'Press and hold mouse button at (x, y). Pair with navvi_mouseup for press-and-hold CAPTCHAs. Get coordinates from navvi_find. Events are isTrusted:true but Arkose Labs behavioral analysis may still reject due to virtual display fingerprinting — if the CAPTCHA fails after 2 attempts, call navvi_vnc and ask the user to solve it manually.',
     inputSchema: {
       type: 'object',
       properties: {
