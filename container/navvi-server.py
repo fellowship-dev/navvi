@@ -542,13 +542,21 @@ async def creds_autofill(req: CredsAutofillRequest):
     """
     try:
         # Read credentials from gopass (server-side only, never returned)
-        username = run_gopass(f"show {shlex.quote(req.entry)} username")
+        # Try email first (most login forms want full email), fall back to username
+        username = ""
+        for field in ["email", "username", "login", "user"]:
+            try:
+                username = run_gopass(f"show {shlex.quote(req.entry)} {field}")
+                if username:
+                    break
+            except RuntimeError:
+                continue
         password = run_gopass(f"show -o {shlex.quote(req.entry)}")
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=f"gopass error: {e}")
 
     if not username or not password:
-        raise HTTPException(status_code=404, detail=f"Entry '{req.entry}' missing username or password")
+        raise HTTPException(status_code=404, detail=f"Entry '{req.entry}' missing username/email or password")
 
     # Find form fields
     try:

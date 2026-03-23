@@ -588,26 +588,48 @@ async function handleTool(name, args) {
         const missing = checkRemoteDeps();
         if (missing.length > 0) return formatMissing(missing);
 
+        const csToken = process.env.CODESPACE_TOKEN;
+        const ghEnv = csToken ? { ...process.env, GH_TOKEN: csToken } : process.env;
+
         let csName = args.name;
         if (csName) {
-          ghSh(`gh cs start -c ${csName}`);
+          // SSH auto-starts stopped codespaces (gh cs start doesn't exist)
+          try {
+            execSync(`gh cs ssh -c ${csName} -- echo ready`, { encoding: 'utf8', timeout: 120000, env: ghEnv });
+          } catch {}
         } else {
           const stopped = ghSh(`gh cs list --repo ${REPO} --json name,state -q '.[] | select(.state=="Shutdown") | .name'`);
           if (stopped) {
             csName = stopped.split('\n')[0];
-            ghSh(`gh cs start -c ${csName}`);
+            try {
+              execSync(`gh cs ssh -c ${csName} -- echo ready`, { encoding: 'utf8', timeout: 120000, env: ghEnv });
+            } catch {}
           } else {
             csName = ghSh(`gh cs create --repo ${REPO} --machine ${MACHINE_TYPE} --json name -q '.name'`);
           }
         }
 
-        if (!csName) return 'Failed to start Codespace. Check gh auth status.';
+        if (!csName) return 'Failed to start Codespace. Check gh auth status and CODESPACE_TOKEN env var.';
+
+        // Wait for navvi-server to be ready inside the codespace
+        let apiReady = false;
+        for (let i = 0; i < 15; i++) {
+          try {
+            const check = execSync(
+              `gh cs ssh -c ${csName} -- python3 -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8024/health').read().decode())"`,
+              { encoding: 'utf8', timeout: 10000, env: ghEnv }
+            ).trim();
+            if (check.includes('"ok":true')) { apiReady = true; break; }
+          } catch {}
+          await new Promise(r => setTimeout(r, 3000));
+        }
 
         // Port forward both API and VNC
         killPidfile(PIDFILE_FWD);
         const child = spawn('gh', ['cs', 'ports', 'forward', `${NAVVI_PORT}:${NAVVI_PORT}`, `${VNC_PORT}:${VNC_PORT}`, '-c', csName], {
           detached: true,
           stdio: 'ignore',
+          env: ghEnv,
         });
         child.unref();
         fs.writeFileSync(PIDFILE_FWD, String(child.pid));
@@ -616,7 +638,7 @@ async function handleTool(name, args) {
         const reachable = isApiReachable(NAVVI_PORT);
         setMode('remote:' + csName);
         activePersona = persona;
-        return `Navvi started (remote). Codespace: ${csName}\nAPI: localhost:${NAVVI_PORT} (${reachable ? 'healthy' : 'starting...'})\nVNC: localhost:${VNC_PORT}`;
+        return `Navvi started (remote). Codespace: ${csName}\nAPI: localhost:${NAVVI_PORT} (${reachable ? 'healthy' : apiReady ? 'forwarding...' : 'starting...'})\nVNC: localhost:${VNC_PORT}`;
       }
 
       return 'Invalid mode. Use "local" or "remote".';
