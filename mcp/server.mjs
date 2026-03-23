@@ -339,7 +339,7 @@ const TOOLS = [
   },
   {
     name: 'navvi_mousedown',
-    description: 'Press and hold mouse button at (x, y). Pair with navvi_mouseup for press-and-hold CAPTCHAs. Get coordinates from navvi_find. Events are isTrusted:true but Arkose Labs behavioral analysis may still reject due to virtual display fingerprinting — if the CAPTCHA fails after 2 attempts, call navvi_vnc and ask the user to solve it manually.',
+    description: 'Press and hold mouse button at (x, y). Pair with navvi_mouseup for press-and-hold CAPTCHAs. Get coordinates from navvi_find. WARNING: Arkose Labs/FunCaptcha (Microsoft, Yahoo) cannot be solved inside the container even by a human — the virtual display is fingerprinted. If you detect arkoselabs/funcaptcha in the page, stop and tell the user to use a real browser for that signup.',
     inputSchema: {
       type: 'object',
       properties: {
