@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/navvi-logo.svg" alt="Navvi" width="120" />
+  <img src="docs/navvi-logo.png" alt="Navvi" width="120" />
 </p>
 
 <h1 align="center">Navvi</h1>
