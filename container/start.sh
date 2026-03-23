@@ -12,7 +12,42 @@ TIMEZONE="${TIMEZONE:-UTC}"
 export DISPLAY
 export TZ="$TIMEZONE"
 
-# Initialize gopass if GPG key is provided
+# --- Persistence setup (Codespaces) ---
+# Codespaces only persist /workspaces. Symlink browser profile, GPG, and
+# gopass store to persistent storage so sessions survive restarts.
+PERSIST_DIR="/workspaces/.codespaces/.persistedshare/navvi"
+if [ -d "/workspaces/.codespaces/.persistedshare" ]; then
+  mkdir -p "$PERSIST_DIR"
+
+  # Firefox profile
+  if [ -d "$PERSIST_DIR/mozilla" ] && [ ! -L "$HOME/.mozilla" ]; then
+    rm -rf "$HOME/.mozilla"
+    ln -s "$PERSIST_DIR/mozilla" "$HOME/.mozilla"
+    echo "[navvi] Firefox profile linked to persistent storage"
+  elif [ -d "$HOME/.mozilla" ] && [ ! -L "$HOME/.mozilla" ]; then
+    cp -a "$HOME/.mozilla" "$PERSIST_DIR/mozilla"
+    rm -rf "$HOME/.mozilla"
+    ln -s "$PERSIST_DIR/mozilla" "$HOME/.mozilla"
+    echo "[navvi] Firefox profile moved to persistent storage"
+  fi
+
+  # GPG keyring
+  if [ -d "$PERSIST_DIR/gnupg" ] && [ ! -L "$HOME/.gnupg" ]; then
+    rm -rf "$HOME/.gnupg"
+    ln -s "$PERSIST_DIR/gnupg" "$HOME/.gnupg"
+    echo "[navvi] GPG keyring linked to persistent storage"
+  fi
+
+  # Gopass store
+  if [ -d "$PERSIST_DIR/gopass/stores" ] && [ ! -L "$HOME/.local/share/gopass/stores" ]; then
+    mkdir -p "$HOME/.local/share/gopass"
+    rm -rf "$HOME/.local/share/gopass/stores"
+    ln -s "$PERSIST_DIR/gopass/stores" "$HOME/.local/share/gopass/stores"
+    echo "[navvi] Gopass store linked to persistent storage"
+  fi
+fi
+
+# --- Gopass init (if GPG key provided via env) ---
 if [ -n "${GPG_PRIVATE_KEY:-}" ]; then
   echo "[navvi] Importing GPG key for gopass..."
   echo "$GPG_PRIVATE_KEY" | gpg --batch --import 2>/dev/null
@@ -27,12 +62,33 @@ if [ -n "${GPG_PRIVATE_KEY:-}" ]; then
   unset GPG_PRIVATE_KEY
 fi
 
+# --- Graceful shutdown ---
+# Firefox must shut down cleanly to flush cookies/IndexedDB to disk.
+cleanup() {
+  echo "[navvi] Shutting down gracefully..."
+  if [ -n "$FIREFOX_PID" ] && kill -0 "$FIREFOX_PID" 2>/dev/null; then
+    kill -TERM "$FIREFOX_PID" 2>/dev/null
+    # Wait up to 10s for Firefox to flush profile data
+    for i in $(seq 1 10); do
+      kill -0 "$FIREFOX_PID" 2>/dev/null || break
+      sleep 1
+    done
+    kill -9 "$FIREFOX_PID" 2>/dev/null || true
+    echo "[navvi] Firefox stopped"
+  fi
+  if [ -n "$API_PID" ]; then kill "$API_PID" 2>/dev/null; fi
+  if [ -n "$NOVNC_PID" ]; then kill "$NOVNC_PID" 2>/dev/null; fi
+  if [ -n "$XVFB_PID" ]; then kill "$XVFB_PID" 2>/dev/null; fi
+  exit 0
+}
+trap cleanup SIGTERM SIGINT
+
+# --- Start services ---
 echo "[navvi] Starting Xvfb on $DISPLAY ($SCREEN_SIZE)..."
 Xvfb "$DISPLAY" -screen 0 "$SCREEN_SIZE" -ac +extension GLX +render -noreset &
 XVFB_PID=$!
 sleep 1
 
-# Verify Xvfb is running
 if ! kill -0 "$XVFB_PID" 2>/dev/null; then
   echo "[navvi] ERROR: Xvfb failed to start"
   exit 1
@@ -47,7 +103,6 @@ firefox-esr \
 FIREFOX_PID=$!
 sleep 2
 
-# Verify Firefox is running
 if ! kill -0 "$FIREFOX_PID" 2>/dev/null; then
   echo "[navvi] ERROR: Firefox failed to start"
   exit 1
@@ -62,6 +117,10 @@ NOVNC_PID=$!
 sleep 1
 
 echo "[navvi] Starting navvi-server on port $NAVVI_PORT..."
-exec python3 /opt/navvi/navvi-server.py \
+python3 /opt/navvi/navvi-server.py \
   --port "$NAVVI_PORT" \
-  --display "$DISPLAY"
+  --display "$DISPLAY" &
+API_PID=$!
+
+# Wait for any child to exit (keeps the shell alive to handle SIGTERM)
+wait
