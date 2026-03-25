@@ -5,9 +5,8 @@ ENV DISPLAY=:1
 ENV NAVVI_PORT=8024
 ENV VNC_PORT=6080
 
-# System packages: Firefox ESR, Xvfb, xdotool, scrot, x11vnc, Python
+# System packages: Xvfb, xdotool, scrot, x11vnc, Python + Camoufox deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    firefox-esr \
     xvfb \
     xdotool \
     scrot \
@@ -20,7 +19,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     ca-certificates \
     gnupg \
+    libgtk-3-0 \
+    libasound2 \
+    libx11-xcb1 \
+    libdbus-glib-1-2 \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Camoufox (anti-detect Firefox) — binary fetched to /opt/camoufox
+RUN pip3 install --no-cache-dir --break-system-packages camoufox \
+    && python3 -m camoufox fetch \
+    && CFOX_DIR=$(python3 -c "from camoufox.pkgman import camoufox_path; print(camoufox_path())") \
+    && mkdir -p /opt/camoufox \
+    && cp -a "$CFOX_DIR"/. /opt/camoufox/ \
+    && chmod +x /opt/camoufox/camoufox-bin \
+    && ln -s /opt/camoufox/camoufox-bin /usr/local/bin/camoufox-bin \
+    && pip3 uninstall --break-system-packages -y camoufox playwright browserforge \
+    && rm -rf /root/.cache/camoufox
 
 # Install gopass (credential manager) — needs git as dependency
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
@@ -55,7 +69,7 @@ RUN useradd -m -s /bin/bash user
 USER user
 WORKDIR /home/user
 
-# Firefox profile directory (mount a named volume here for persistence)
+# Browser profile directory (mount a named volume here for persistence)
 RUN mkdir -p /home/user/.mozilla
 
 EXPOSE 8024 6080

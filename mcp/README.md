@@ -36,9 +36,18 @@ Add to your `.mcp.json`:
 | `navvi_down` | Stop instance(s) |
 | `navvi_open` | Navigate to a URL |
 | `navvi_snapshot` | Get accessibility tree (~800 tokens) |
-| `navvi_click` | Click element by ref |
-| `navvi_fill` | Type into element by ref |
+| `navvi_click` | Click element by ref or x,y coordinates |
+| `navvi_fill` | Type into element by ref (multi-strategy with verification) |
+| `navvi_drag` | Drag element by ref or x,y — `mouse`, `html5`, or `auto` strategy |
+| `navvi_mousedown` | Press and hold mouse (for long-press or manual drag) |
+| `navvi_mouseup` | Release mouse button |
+| `navvi_mousemove` | Move mouse to coordinates (hover) |
+| `navvi_press` | Press a keyboard key |
 | `navvi_screenshot` | Capture page as PNG |
+
+### CAPTCHA Handling
+
+See [`docs/captchas.md`](../docs/captchas.md) for strategies by CAPTCHA type (puzzle drag, press-and-hold, HTML5 DnD, iframe isolation).
 
 ## Modes
 

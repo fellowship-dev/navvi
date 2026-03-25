@@ -1,10 +1,10 @@
 """
 Navvi API Server — FastAPI REST endpoints for browser automation.
 
-Runs inside the container. Controls Firefox via:
+Runs inside the container. Controls Camoufox (anti-detect Firefox) via:
   - xdotool (OS-level mouse/keyboard — isTrusted: true events)
   - scrot (screenshots)
-  - marionette.py (navigate, getURL, getTitle, executeJS via Firefox Marionette)
+  - marionette.py (navigate, getURL, getTitle, executeJS via Marionette protocol)
 """
 
 import argparse
@@ -143,7 +143,7 @@ KEY_MAP = {
 
 @app.get("/health")
 async def health():
-    """Check Firefox + Xvfb are alive."""
+    """Check Camoufox + Xvfb are alive."""
     checks = {"xvfb": False, "firefox": False, "marionette": False}
 
     # Check Xvfb
@@ -164,10 +164,10 @@ async def health():
         except Exception:
             pass
 
-    # Check Firefox process
+    # Check Camoufox process
     try:
         result = subprocess.run(
-            ["pgrep", "-f", "firefox"],
+            ["pgrep", "-f", "camoufox"],
             capture_output=True, timeout=3
         )
         checks["firefox"] = result.returncode == 0

@@ -18,8 +18,18 @@ gpg --full-generate-key
 gpg --armor --export-secret-keys YOUR_KEY_ID > /tmp/gpg-key.asc
 ```
 
-### 3. Add as Codespace secret
+### 3. Pass as environment variable
 
+**Local mode (Docker):**
+```bash
+# Pass via docker run
+docker run -e GPG_PRIVATE_KEY="$(cat /tmp/gpg-key.asc)" navvi
+
+# Or via .env file (never commit this)
+echo "GPG_PRIVATE_KEY=$(cat /tmp/gpg-key.asc)" >> .env
+```
+
+**Remote mode (Codespace):**
 Go to GitHub → Settings → Codespaces → Secrets → New secret:
 - Name: `GPG_PRIVATE_KEY`
 - Value: contents of `/tmp/gpg-key.asc`
@@ -27,9 +37,9 @@ Go to GitHub → Settings → Codespaces → Secrets → New secret:
 
 Delete the exported file: `rm /tmp/gpg-key.asc`
 
-### 4. The devcontainer handles the rest
+### 4. Automatic initialization
 
-On Codespace creation, `setup.sh` imports the GPG key and initializes gopass automatically.
+The container's `start.sh` imports the GPG key and initializes gopass on boot. The key is unset from the environment after import — it only lives in the GPG keyring.
 
 ## Adding Credentials
 

@@ -19,16 +19,16 @@ PERSIST_DIR="/workspaces/.codespaces/.persistedshare/navvi"
 if [ -d "/workspaces/.codespaces/.persistedshare" ]; then
   mkdir -p "$PERSIST_DIR"
 
-  # Firefox profile
+  # Browser profile
   if [ -d "$PERSIST_DIR/mozilla" ] && [ ! -L "$HOME/.mozilla" ]; then
     rm -rf "$HOME/.mozilla"
     ln -s "$PERSIST_DIR/mozilla" "$HOME/.mozilla"
-    echo "[navvi] Firefox profile linked to persistent storage"
+    echo "[navvi] Browser profile linked to persistent storage"
   elif [ -d "$HOME/.mozilla" ] && [ ! -L "$HOME/.mozilla" ]; then
     cp -a "$HOME/.mozilla" "$PERSIST_DIR/mozilla"
     rm -rf "$HOME/.mozilla"
     ln -s "$PERSIST_DIR/mozilla" "$HOME/.mozilla"
-    echo "[navvi] Firefox profile moved to persistent storage"
+    echo "[navvi] Browser profile moved to persistent storage"
   fi
 
   # GPG keyring
@@ -74,7 +74,7 @@ cleanup() {
       sleep 1
     done
     kill -9 "$FIREFOX_PID" 2>/dev/null || true
-    echo "[navvi] Firefox stopped"
+    echo "[navvi] Camoufox stopped"
   fi
   if [ -n "$API_PID" ]; then kill "$API_PID" 2>/dev/null; fi
   if [ -n "$NOVNC_PID" ]; then kill "$NOVNC_PID" 2>/dev/null; fi
@@ -94,8 +94,8 @@ if ! kill -0 "$XVFB_PID" 2>/dev/null; then
   exit 1
 fi
 
-echo "[navvi] Starting Firefox ESR (Marionette on :2828)..."
-firefox-esr \
+echo "[navvi] Starting Camoufox (Marionette on :2828)..."
+camoufox-bin \
   --marionette \
   --no-remote \
   -width 1024 -height 768 \
@@ -104,7 +104,7 @@ FIREFOX_PID=$!
 sleep 2
 
 if ! kill -0 "$FIREFOX_PID" 2>/dev/null; then
-  echo "[navvi] ERROR: Firefox failed to start"
+  echo "[navvi] ERROR: Camoufox failed to start"
   exit 1
 fi
 
