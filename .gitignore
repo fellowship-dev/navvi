@@ -3,3 +3,4 @@ node_modules/
 .navvi/recordings/
 package-lock.json
 .npmrc
+__pycache__/
