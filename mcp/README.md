@@ -1,20 +1,39 @@
 # Navvi MCP Server
 
-MCP server for local and remote browser automation via PinchTab.
+FastMCP server for local and remote browser automation via Camoufox.
 
 ## Setup
 
-Add to your `.mcp.json`:
+```bash
+claude mcp add navvi -- uvx navvi
+```
+
+Or add to your `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "navvi": {
-      "command": "node",
-      "args": ["/path/to/navvi/mcp/server.mjs"]
+      "command": "uvx",
+      "args": ["navvi"]
     }
   }
 }
+```
+
+## Development
+
+Run the server locally (from repo root):
+
+```bash
+uv run python -m navvi
+```
+
+Or directly:
+
+```bash
+pip install -e .
+navvi
 ```
 
 ## Available Tools
@@ -23,49 +42,50 @@ Add to your `.mcp.json`:
 
 | Tool | Description |
 |------|-------------|
-| `navvi_start` | Start in `local` or `remote` mode. Checks deps, offers install commands if missing |
-| `navvi_stop` | Stop PinchTab (local) or Codespace + port forward (remote) |
-| `navvi_status` | Show mode, PinchTab reachability, running browser instances |
+| `navvi_start` | Start a browser container (local Docker or remote Codespace) |
+| `navvi_stop` | Stop container(s) — Firefox profile preserved in Docker volume |
+| `navvi_status` | Show mode, running containers, API health |
 | `navvi_list` | List available Codespaces (remote mode) |
 
 ### Browser Control
 
 | Tool | Description |
 |------|-------------|
-| `navvi_up` | Launch a browser instance for a persona |
-| `navvi_down` | Stop instance(s) |
 | `navvi_open` | Navigate to a URL |
-| `navvi_snapshot` | Get accessibility tree (~800 tokens) |
-| `navvi_click` | Click element by ref or x,y coordinates |
-| `navvi_fill` | Type into element by ref (multi-strategy with verification) |
-| `navvi_drag` | Drag element by ref or x,y — `mouse`, `html5`, or `auto` strategy |
-| `navvi_mousedown` | Press and hold mouse (for long-press or manual drag) |
-| `navvi_mouseup` | Release mouse button |
-| `navvi_mousemove` | Move mouse to coordinates (hover) |
+| `navvi_find` | Find element by CSS selector → screen coordinates |
+| `navvi_click` | Click at (x, y) coordinates |
+| `navvi_fill` | Click + type text into a field |
 | `navvi_press` | Press a keyboard key |
-| `navvi_screenshot` | Capture page as PNG |
+| `navvi_drag` | Drag from point A to point B |
+| `navvi_mousedown` | Press and hold mouse button |
+| `navvi_mouseup` | Release mouse button |
+| `navvi_mousemove` | Move mouse without clicking |
+| `navvi_scroll` | Scroll the page |
+| `navvi_screenshot` | Capture the screen |
+| `navvi_url` | Get current page URL |
+| `navvi_vnc` | Get live view URL for human handoff |
 
-### CAPTCHA Handling
+### Credentials
 
-See [`docs/captchas.md`](../docs/captchas.md) for strategies by CAPTCHA type (puzzle drag, press-and-hold, HTML5 DnD, iframe isolation).
+| Tool | Description |
+|------|-------------|
+| `navvi_creds` | List, get, or autofill credentials from gopass |
 
-## Modes
+### Recording
 
-**Local** — runs PinchTab directly on your machine. Needs:
-- PinchTab (`brew install anthropics/tap/pinchtab`)
-- Chrome or Chromium
-
-**Remote** — spins up a GitHub Codespace, port-forwards PinchTab. Needs:
-- GitHub CLI (`brew install gh`)
-
-If dependencies are missing, `navvi_start` tells you exactly what to install.
+| Tool | Description |
+|------|-------------|
+| `navvi_record_start` | Start recording screenshots |
+| `navvi_record_stop` | Stop and assemble MP4 |
+| `navvi_record_gif` | Convert recording to GIF |
 
 ## Workflow
 
 ```
-navvi_start(mode: "local")     # or "remote"
-navvi_up(persona: "dev")   # launch browser
-navvi_open(url: "https://...")  # navigate
-navvi_snapshot()                # read the page
-navvi_stop()                   # done
+navvi_start()                              → spin up browser
+navvi_open(url="https://...")              → navigate
+navvi_find(selector="input[type=email]")   → get coordinates
+navvi_fill(x=512, y=498, value="me@x.com") → type into field
+navvi_screenshot()                          → verify
+navvi_stop()                                → done
 ```

@@ -11,7 +11,6 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/navvi"><img src="https://img.shields.io/npm/v/navvi" alt="npm" /></a>
   <a href="#quick-start">Quick Start</a> &middot;
   <a href="#use-cases">Use Cases</a> &middot;
   <a href="#how-it-works">How It Works</a> &middot;
@@ -33,7 +32,7 @@ Your agent has no identity. Every session is a stranger.
 
 ## The Solution
 
-Navvi gives your agent a persistent browser with its own identity. A real Firefox that remembers where it's been, stays logged in, and manages its own credentials &mdash; without ever exposing passwords to the AI.
+Navvi gives your agent a persistent browser with its own identity. A [Camoufox](https://github.com/daijro/camoufox) (anti-detect Firefox) that remembers where it's been, stays logged in, and manages its own credentials &mdash; without ever exposing passwords to the AI.
 
 - **Persistent sessions** &mdash; cookies, logins, and history survive restarts
 - **Credential vault** &mdash; passwords stored in [gopass](https://github.com/gopasspw/gopass), auto-filled into forms without the AI ever seeing them
@@ -43,41 +42,34 @@ Navvi gives your agent a persistent browser with its own identity. A real Firefo
 
 ## Quick Start
 
-### 1. Install
+### 1. Build the Docker image
 
 ```bash
-npx navvi build
+git clone https://github.com/Fellowship-dev/navvi.git
+cd navvi
+docker build -t navvi:camoufox -f container/Dockerfile container/
 ```
-
-This pulls the npm package and builds the Docker image. One-time setup.
 
 ### 2. Add to Claude Code
 
-Add this to your project's `.mcp.json`:
+```bash
+claude mcp add navvi -- uvx navvi
+```
+
+Or add to your project's `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "navvi": {
-      "command": "npx",
-      "args": ["-y", "navvi"]
+      "command": "uvx",
+      "args": ["navvi"]
     }
   }
 }
 ```
 
-That's it. Restart Claude Code and your agent has 21 browser tools.
-
-<details>
-<summary>Alternative: global install</summary>
-
-```bash
-npm install -g navvi
-navvi build
-```
-
-Then use `"command": "navvi"` instead of the npx version.
-</details>
+Restart Claude Code and your agent has 21 browser tools.
 
 ### 3. Use
 
@@ -116,7 +108,7 @@ Your AI agent (Claude Code, etc.)
     |
     | MCP protocol (stdio)
     v
-  navvi (npm package, Node.js)
+  navvi (FastMCP, Python)
     |
     | HTTP → localhost:8024
     v
@@ -210,7 +202,7 @@ Personas are backed by Docker named volumes (`navvi-profile-<name>`). Create as 
 ## Requirements
 
 - **Docker** &mdash; the browser runs in a container
-- **Node.js 18+** &mdash; the MCP server is a Node.js process
+- **uv** &mdash; `curl -LsSf https://astral.sh/uv/install.sh | sh` (or `brew install uv`)
 - **ffmpeg** (optional) &mdash; only needed for video recording
 
 ## License
