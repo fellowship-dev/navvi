@@ -82,7 +82,7 @@ active_persona: Optional[str] = None
 
 mcp = FastMCP(
     "navvi",
-    version="3.1.0",
+    version="3.2.0",
 )
 
 # Ensure default persona exists on startup
@@ -114,6 +114,80 @@ def persona_accounts_resource(name: str) -> str:
 def personas_list_resource() -> str:
     """All personas with account counts and last-used dates."""
     return personas_list_summary()
+
+
+@mcp.resource("audit://{name}/log")
+def audit_log_resource(name: str) -> str:
+    """Recent action log for a persona (last 20 events)."""
+    from navvi.store import get_recent_actions, _format_ts
+    actions = get_recent_actions(name, limit=20)
+    if not actions:
+        return f"No actions recorded for persona '{name}'."
+    lines = []
+    for a in actions:
+        lines.append(f"{_format_ts(a['ts'])} — {a['action']}: {a['detail']}")
+    return "\n".join(lines)
+
+
+# --- MCP Prompts ---
+
+
+@mcp.prompt()
+def signup_flow(service: str, persona: str = "default") -> str:
+    """Create a new account on a service using a Navvi persona.
+
+    Structured workflow: check existing accounts, navigate to signup page,
+    fill forms, store credentials in gopass, log the new account."""
+    return (
+        f"Create a new account on {service} using the '{persona}' persona.\n\n"
+        f"Steps:\n"
+        f"1. Read persona://{persona}/state to check if an account already exists on {service}\n"
+        f"2. If account exists, skip — report it and stop\n"
+        f"3. Navigate to {service} signup page\n"
+        f"4. Fill the signup form using navvi_find + navvi_fill\n"
+        f"5. Take a screenshot to verify each step\n"
+        f"6. If you hit a CAPTCHA you can't solve, call navvi_vnc and ask the user to solve it\n"
+        f"7. On success, use navvi_account to log the new account (service, email, gopass ref)\n"
+        f"8. Store credentials in gopass via navvi_creds\n"
+    )
+
+
+@mcp.prompt()
+def login_flow(service: str, persona: str = "default") -> str:
+    """Log into a service using stored credentials for a Navvi persona.
+
+    Reads credentials from persona state and gopass, navigates to login page,
+    fills form, verifies successful login."""
+    return (
+        f"Log into {service} using the '{persona}' persona.\n\n"
+        f"Steps:\n"
+        f"1. Read persona://{persona}/accounts to find credentials for {service}\n"
+        f"2. Navigate to {service} login page\n"
+        f"3. Use navvi_creds action=autofill to fill the login form (password stays in gopass, never exposed)\n"
+        f"4. Press Enter or click the submit button\n"
+        f"5. Take a screenshot to verify login success\n"
+        f"6. If 2FA is required, call navvi_vnc and ask the user to complete it\n"
+    )
+
+
+@mcp.prompt()
+def qa_walk(url: str, persona: str = "default") -> str:
+    """Walk a web page or flow for QA — screenshot each step, report findings.
+
+    Navigate to URL, explore the page, take screenshots, and produce a
+    friction report with improvement suggestions."""
+    return (
+        f"QA walk of {url} using the '{persona}' persona.\n\n"
+        f"Steps:\n"
+        f"1. Start navvi if not running: navvi_start(persona='{persona}')\n"
+        f"2. Navigate to {url}\n"
+        f"3. Take a screenshot of the initial page state\n"
+        f"4. Identify all interactive elements using navvi_find\n"
+        f"5. Walk through the main user flow — click buttons, fill forms, navigate links\n"
+        f"6. Screenshot each step\n"
+        f"7. Note any issues: broken elements, confusing UX, missing labels, slow loads\n"
+        f"8. Produce a friction report with screenshots and suggestions\n"
+    )
 
 
 # --- Helpers ---
@@ -347,7 +421,7 @@ def resolve_persona(persona: Optional[str] = None) -> tuple:
 # --- Persona & Account Tools ---
 
 
-@mcp.tool()
+@mcp.tool(tags={"management"})
 async def navvi_persona(
     action: str,
     name: str = "",
@@ -434,7 +508,7 @@ async def navvi_persona(
         return f"Error: {e}"
 
 
-@mcp.tool()
+@mcp.tool(tags={"management"})
 async def navvi_account(
     action: str,
     persona: str = "default",
@@ -1033,7 +1107,7 @@ async def navvi_creds(
     return 'Error: action must be "list", "get", or "autofill".'
 
 
-@mcp.tool()
+@mcp.tool(tags={"recording"})
 async def navvi_record_start(duration: int = 30, persona: str = "") -> str:
     """Start recording the browser via screenshot polling. Captures frames in background, assembles to MP4 on stop."""
     _, api_base = resolve_persona(persona or None)
@@ -1161,7 +1235,7 @@ except Exception:
     return f"Recording started ({fps}fps, max {duration}s).\nFrames dir: {frames_dir}\nUse navvi_record_stop to finish."
 
 
-@mcp.tool()
+@mcp.tool(tags={"recording"})
 async def navvi_record_stop(trim: bool = True) -> str:
     """Stop recording and assemble frames into MP4. Optionally trims dead time between actions."""
     if not os.path.exists(RECORDING_STATE_FILE):
@@ -1311,7 +1385,7 @@ async def navvi_record_stop(trim: bool = True) -> str:
     return result_msg
 
 
-@mcp.tool()
+@mcp.tool(tags={"recording"})
 async def navvi_record_gif(input: str = "") -> str:
     """Convert a recorded video to an optimized GIF (1600px wide, 8fps, palette-optimized)."""
     if not which("ffmpeg"):
