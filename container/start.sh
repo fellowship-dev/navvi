@@ -68,7 +68,15 @@ elif [ -n "$(gpg --list-secret-keys 2>/dev/null)" ]; then
   fi
   echo "[navvi] Gopass ready (existing key: ${GPG_ID:0:8}...)"
 else
-  echo "[navvi] Gopass disabled — no GPG key. Set GPG_PRIVATE_KEY env var to enable credential management."
+  echo ""
+  echo "[navvi] WARNING: No GPG key found. Gopass credential vault is DISABLED."
+  echo "[navvi] To enable secure credential management:"
+  echo "[navvi]   1. Generate a GPG key:  gpg --batch --passphrase '' --quick-generate-key 'Navvi <navvi@local>' rsa2048 default never"
+  echo "[navvi]   2. Export it:           gpg --export-secret-keys --armor navvi@local > navvi-gpg.key"
+  echo "[navvi]   3. Pass to container:   docker run -e GPG_PRIVATE_KEY=\"\$(cat navvi-gpg.key)\" ..."
+  echo "[navvi]   Or add to .mcp.json env: \"GPG_PRIVATE_KEY\": \"<your-key>\""
+  echo "[navvi] Without this, navvi_creds generate/autofill/import will not work."
+  echo ""
 fi
 
 # --- Graceful shutdown ---
