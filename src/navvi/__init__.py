@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastmcp import FastMCP
+from fastmcp import FastMCP, Context
 
 from navvi.store import (
     create_persona,
@@ -1629,7 +1629,7 @@ async def _execute_action(action: dict, api_base: str, dom_elements: list):
 
 
 @mcp.tool()
-async def navvi_atomic(enable: bool = True) -> str:
+async def navvi_atomic(enable: bool = True, ctx: Context = None) -> str:
     """Enable or disable atomic browser tools (navvi_click, navvi_find, navvi_fill, etc.).
 
     Atomic tools are hidden by default — use navvi_browse for most tasks.
@@ -1637,12 +1637,22 @@ async def navvi_atomic(enable: bool = True) -> str:
 
     Example: navvi_atomic(enable=true) → reveals 12 low-level tools
     """
-    if enable:
-        mcp.enable(tags={"atomic"})
-        return "Atomic tools enabled: navvi_open, navvi_find, navvi_click, navvi_fill, navvi_press, navvi_scroll, navvi_drag, navvi_mousedown, navvi_mouseup, navvi_mousemove, navvi_url, navvi_creds."
+    if ctx:
+        # Session-level: sends notifications/tools/list_changed → CC re-fetches tool list
+        if enable:
+            await ctx.enable_components(tags={"atomic"})
+        else:
+            await ctx.disable_components(tags={"atomic"})
     else:
-        mcp.disable(tags={"atomic"})
-        return "Atomic tools hidden. Use navvi_browse for browser interactions."
+        # Fallback to global (no notification)
+        if enable:
+            mcp.enable(tags={"atomic"})
+        else:
+            mcp.disable(tags={"atomic"})
+    if enable:
+        return "Atomic tools enabled: navvi_open, navvi_find, navvi_click, navvi_fill, navvi_press, navvi_scroll, navvi_drag, navvi_mousedown, navvi_mouseup, navvi_mousemove, navvi_url, navvi_creds. Tool list refreshed."
+    else:
+        return "Atomic tools hidden. Use navvi_browse for browser interactions. Tool list refreshed."
 
 
 # --- Journey Tools ---

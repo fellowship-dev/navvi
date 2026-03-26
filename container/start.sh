@@ -72,14 +72,23 @@ elif [ -n "$(gpg --list-secret-keys 2>/dev/null)" ]; then
 elif [ -n "${NAVVI_GPG_PASSPHRASE:-}" ]; then
   # Generate a new GPG key protected by the user's passphrase
   echo "[navvi] Generating GPG key for gopass (first boot)..."
-  gpg --batch --passphrase "$NAVVI_GPG_PASSPHRASE" --pinentry-mode loopback --quick-generate-key "Navvi <navvi@local>" rsa2048 default never 2>/dev/null
-  GPG_ID=$(gpg --list-secret-keys --keyid-format long 2>/dev/null | grep sec | head -1 | awk '{print $2}' | cut -d/ -f2)
-  if [ -n "$GPG_ID" ]; then
-    echo "${GPG_ID}:6:" | gpg --import-ownertrust 2>/dev/null
-    gopass init --path "$HOME/.local/share/gopass/stores/root" "$GPG_ID" 2>/dev/null
-    echo "[navvi] Gopass ready (new key: ${GPG_ID:0:8}..., protected by NAVVI_GPG_PASSPHRASE)"
-    echo "[navvi] IMPORTANT: Keep your NAVVI_GPG_PASSPHRASE safe — you need it to recover credentials."
-  fi
+  # Generate key in background — don't block container startup
+  # Uses Ed25519 (no entropy needed, instant) instead of RSA
+  echo "[navvi] Generating GPG key in background..."
+  (
+    gpg --batch --passphrase "" --quick-generate-key "Navvi <navvi@local>" ed25519 cert never 2>/dev/null
+    GPG_FPR=$(gpg --list-secret-keys --with-colons 2>/dev/null | grep fpr | head -1 | cut -d: -f10)
+    if [ -n "$GPG_FPR" ]; then
+      gpg --batch --passphrase "" --quick-add-key "$GPG_FPR" cv25519 encr never 2>/dev/null
+      echo "${GPG_FPR}:6:" | gpg --import-ownertrust 2>/dev/null
+      echo "allow-loopback-pinentry" >> "$HOME/.gnupg/gpg-agent.conf" 2>/dev/null
+      echo "pinentry-mode loopback" >> "$HOME/.gnupg/gpg.conf" 2>/dev/null
+      gpgconf --kill gpg-agent 2>/dev/null
+      GPG_ID=$(echo "$GPG_FPR" | tail -c 17)
+      gopass init --path "$HOME/.local/share/gopass/stores/root" "$GPG_ID" 2>/dev/null
+      echo "[navvi] Gopass ready (new key: ${GPG_ID:0:8}...)"
+    fi
+  ) &
 else
   echo "[navvi] Gopass disabled — set NAVVI_GPG_PASSPHRASE in your .mcp.json env to enable credential management."
   echo "[navvi]   Example: \"NAVVI_GPG_PASSPHRASE\": \"any-random-string-here\""
