@@ -43,6 +43,10 @@ You have access to Navvi MCP tools. **Always prefer journey tools over atomic to
 - Use `navvi_login(service="...")` instead of manually finding forms and filling credentials
 - If login fails, escalate via `navvi_vnc`
 
+### Credentials
+- Credential features (generate, autofill, import) require `NAVVI_GPG_PASSPHRASE` set in `.mcp.json` env
+- If gopass is disabled, tell the user to add `"NAVVI_GPG_PASSPHRASE": "any-random-string"` to their MCP config
+
 ## Response Format
 
 When done, return:

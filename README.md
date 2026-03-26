@@ -54,22 +54,25 @@ docker build -t navvi:camoufox -f container/Dockerfile container/
 
 ### 2. Add to Claude Code
 
-```bash
-claude mcp add navvi -- uvx navvi@latest
-```
-
-Or add to your project's `.mcp.json`:
+Add to your project's `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "navvi": {
       "command": "uvx",
-      "args": ["navvi@latest"]
+      "args": ["navvi@latest"],
+      "env": {
+        "NAVVI_GPG_PASSPHRASE": "pick-any-random-string-here"
+      }
     }
   }
 }
 ```
+
+`NAVVI_GPG_PASSPHRASE` enables the credential vault (gopass). On first boot, Navvi generates a GPG key protected by this passphrase. The key persists in a Docker volume across restarts.
+
+> **Keep your passphrase safe.** If you lose it and the Docker volume is deleted, all stored passwords are unrecoverable.
 
 ### 3. Use
 
@@ -263,6 +266,7 @@ Persona config and state live in `~/.navvi/navvi.db`. Browser profiles persist i
 
 - **Docker** &mdash; the browser runs in a container
 - **uv** &mdash; `curl -LsSf https://astral.sh/uv/install.sh | sh` (or `brew install uv`)
+- **NAVVI_GPG_PASSPHRASE** &mdash; any random string, enables the gopass credential vault. Set in `.mcp.json` env.
 - **ffmpeg** (optional) &mdash; only needed for video recording
 - **ANTHROPIC_API_KEY** (optional) &mdash; enables Haiku vision for `navvi_browse` ($0.002/step). Without it, falls back to heuristics.
 
