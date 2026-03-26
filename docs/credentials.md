@@ -52,9 +52,9 @@ Use the multiline format (first line = password, then key-value pairs):
 
 ```
 hunter2
-username: fry-lobster
+username: myuser
 url: https://dev.to/enter
-totp: otpauth://totp/dev.to:fry?secret=JBSWY3DPEHPK3PXP
+totp: otpauth://totp/dev.to:myuser?secret=JBSWY3DPEHPK3PXP
 ```
 
 ## Using Credentials

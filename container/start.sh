@@ -61,7 +61,7 @@ if [ -n "${GPG_PRIVATE_KEY:-}" ]; then
   fi
   unset GPG_PRIVATE_KEY
 elif [ -n "$(gpg --list-secret-keys 2>/dev/null)" ]; then
-  # Existing key from persistent volume (Codespaces)
+  # Existing key from persistent volume (Docker volumes or Codespaces)
   GPG_ID=$(gpg --list-secret-keys --keyid-format long 2>/dev/null | grep sec | head -1 | awk '{print $2}' | cut -d/ -f2)
   if [ -n "$GPG_ID" ] && [ ! -d "$HOME/.local/share/gopass/stores/root" ]; then
     gopass init --path "$HOME/.local/share/gopass/stores/root" "$GPG_ID" 2>/dev/null

@@ -507,7 +507,7 @@ async def navvi_persona(
             if name == "default":
                 return "Error: cannot delete the default persona."
             if delete_persona(name):
-                return f"Persona '{name}' deleted. Docker volume navvi-profile-{name} is preserved (remove manually with: docker volume rm navvi-profile-{name})."
+                return f"Persona '{name}' deleted. Docker volumes preserved (remove manually with: docker volume rm navvi-profile-{name} navvi-gpg-{name} navvi-gopass-{name})."
             return f"Persona '{name}' not found."
 
         else:
@@ -626,8 +626,10 @@ async def navvi_start(
             locale = config.get("locale", "en-US")
             timezone = config.get("timezone", "UTC")
 
-        # Docker volume for persistent Firefox profile
+        # Docker volumes for persistent state
         volume_name = f"navvi-profile-{persona}"
+        gpg_volume = f"navvi-gpg-{persona}"
+        gopass_volume = f"navvi-gopass-{persona}"
 
         # Find ports
         api_port = NAVVI_PORT
@@ -646,6 +648,8 @@ async def navvi_start(
             "-p", f"{api_port}:8024",
             "-p", f"{vnc_port}:6080",
             "-v", f"{volume_name}:/home/user/.mozilla",
+            "-v", f"{gpg_volume}:/home/user/.gnupg",
+            "-v", f"{gopass_volume}:/home/user/.local/share/gopass",
             "-e", f"LOCALE={locale}",
             "-e", f"TIMEZONE={timezone}",
             DOCKER_IMAGE,

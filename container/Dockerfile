@@ -69,8 +69,10 @@ RUN useradd -m -s /bin/bash user
 USER user
 WORKDIR /home/user
 
-# Browser profile directory (mount a named volume here for persistence)
-RUN mkdir -p /home/user/.mozilla
+# Persistent directories (mount named volumes here for persistence)
+# Pre-creating with correct ownership ensures Docker copies perms to fresh volumes
+RUN mkdir -p /home/user/.mozilla /home/user/.local/share/gopass \
+    && mkdir -m 700 -p /home/user/.gnupg
 
 EXPOSE 8024 6080
 
