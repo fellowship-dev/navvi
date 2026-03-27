@@ -7,7 +7,9 @@
 <p align="center">
   <strong>Give your AI agent a real browser identity.</strong>
   <br />
-  Persistent browser personas that remember logins, manage credentials, and don't get blocked.
+  MCP server with persistent personas, anti-detection browser, and credential vault.
+  <br />
+  Works with Claude Code, Cursor, and other MCP clients.
 </p>
 
 <p align="center">

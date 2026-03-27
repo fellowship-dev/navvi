@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "navvi"
 version = "3.11.0"
-description = "Give your AI agent a real browser identity — persistent personas, anti-detect browser, credential vault"
+description = "Give your AI agent a real browser identity — MCP server with persistent personas, anti-detection browser, and credential vault."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -14,8 +14,12 @@ authors = [
 ]
 keywords = [
     "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "browser-automation",
     "browser",
     "automation",
+    "ai-agent",
     "ai",
     "agent",
     "persona",
@@ -23,6 +27,8 @@ keywords = [
     "camoufox",
     "claude",
     "anthropic",
+    "web-automation",
+    "credential-management",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
