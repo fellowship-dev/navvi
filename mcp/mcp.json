@@ -5,7 +5,7 @@
       "args": ["mcp/server.mjs"],
       "env": {
         "NAVVI_IMAGE": "navvi",
-        "NAVVI_REPO": "Fellowship-dev/navvi"
+        "NAVVI_REPO": "fellowship-dev/navvi"
       }
     }
   }

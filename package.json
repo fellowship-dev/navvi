@@ -31,9 +31,9 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/Fellowship-dev/navvi"
+    "url": "https://github.com/fellowship-dev/navvi"
   },
-  "homepage": "https://github.com/Fellowship-dev/navvi#readme",
+  "homepage": "https://github.com/fellowship-dev/navvi#readme",
   "license": "MIT",
   "scripts": {
     "build": "docker build -t navvi container/"

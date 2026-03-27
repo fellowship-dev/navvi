@@ -769,7 +769,7 @@ async def navvi_start(
 
     if mode == "remote":
         if not REPO:
-            return 'Error: remote mode requires NAVVI_REPO env var (e.g. "Fellowship-dev/navvi"). Set it in your MCP config.'
+            return 'Error: remote mode requires NAVVI_REPO env var (e.g. "fellowship-dev/navvi"). Set it in your MCP config.'
         missing = check_remote_deps()
         if missing:
             return format_missing(missing)

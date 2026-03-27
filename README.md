@@ -14,8 +14,8 @@
 
 <p align="center">
   <a href="https://pypi.org/project/navvi/"><img src="https://img.shields.io/pypi/v/navvi" alt="PyPI" /></a>
-  <a href="https://github.com/Fellowship-dev/navvi"><img src="https://img.shields.io/github/stars/Fellowship-dev/navvi" alt="GitHub stars" /></a>
-  <a href="https://github.com/Fellowship-dev/navvi/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Fellowship-dev/navvi" alt="License" /></a>
+  <a href="https://github.com/fellowship-dev/navvi"><img src="https://img.shields.io/github/stars/fellowship-dev/navvi" alt="GitHub stars" /></a>
+  <a href="https://github.com/fellowship-dev/navvi/blob/main/LICENSE"><img src="https://img.shields.io/github/license/fellowship-dev/navvi" alt="License" /></a>
 </p>
 
 <p align="center">
@@ -105,13 +105,13 @@ navvi_screenshot                                   -> see what happened
 Skills give your AI agent dedicated browsing capabilities &mdash; isolates browser work from your main conversation. Works with Claude Code, Cursor, and [40+ other agents](https://skills.sh).
 
 ```bash
-npx skills add Fellowship-dev/navvi
+npx skills add fellowship-dev/navvi
 ```
 
 Or install manually:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Fellowship-dev/navvi/main/install-companions.sh | bash
+curl -fsSL https://raw.githubusercontent.com/fellowship-dev/navvi/main/install-companions.sh | bash
 ```
 
 **Included skills:**
@@ -267,7 +267,7 @@ Persona config and state live in `~/.navvi/navvi.db`. Browser profiles and crede
 ## Contributing
 
 ```bash
-git clone https://github.com/Fellowship-dev/navvi.git
+git clone https://github.com/fellowship-dev/navvi.git
 cd navvi
 
 # Build the container image locally

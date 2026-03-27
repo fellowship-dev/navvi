@@ -33,7 +33,7 @@ echo "GPG_PRIVATE_KEY=$(cat /tmp/gpg-key.asc)" >> .env
 Go to GitHub → Settings → Codespaces → Secrets → New secret:
 - Name: `GPG_PRIVATE_KEY`
 - Value: contents of `/tmp/gpg-key.asc`
-- Repository access: `Fellowship-dev/navvi`
+- Repository access: `fellowship-dev/navvi`
 
 Delete the exported file: `rm /tmp/gpg-key.asc`
 

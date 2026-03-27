@@ -589,7 +589,7 @@ async function handleTool(name, args) {
       }
 
       if (mode === 'remote') {
-        if (!REPO) return 'Error: remote mode requires NAVVI_REPO env var (e.g. "Fellowship-dev/navvi"). Set it in your MCP config.';
+        if (!REPO) return 'Error: remote mode requires NAVVI_REPO env var (e.g. "fellowship-dev/navvi"). Set it in your MCP config.';
         const missing = checkRemoteDeps();
         if (missing.length > 0) return formatMissing(missing);
 

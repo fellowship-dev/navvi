@@ -1,8 +1,8 @@
 #!/bin/bash
 # Navvi skills installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/Fellowship-dev/navvi/main/install-companions.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/fellowship-dev/navvi/main/install-companions.sh | bash
 #
-# Preferred method: npx skills add Fellowship-dev/navvi
+# Preferred method: npx skills add fellowship-dev/navvi
 
 set -e
 
@@ -41,7 +41,7 @@ echo "Installing to ${SKILLS_DIR}/"
 # Create skills directories
 for skill in navvi-browse navvi-login navvi-signup; do
   mkdir -p "${SKILLS_DIR}/${skill}"
-  curl -fsSL "https://raw.githubusercontent.com/Fellowship-dev/navvi/main/skills/${skill}/SKILL.md" \
+  curl -fsSL "https://raw.githubusercontent.com/fellowship-dev/navvi/main/skills/${skill}/SKILL.md" \
     -o "${SKILLS_DIR}/${skill}/SKILL.md"
   echo -e "${GREEN}+${NC} ${SKILLS_DIR}/${skill}/SKILL.md"
 done
@@ -75,5 +75,5 @@ echo "  navvi-login   — login with stored credentials"
 echo "  navvi-signup  — create new accounts"
 echo ""
 echo "Or install via the skills registry:"
-echo "  npx skills add Fellowship-dev/navvi"
+echo "  npx skills add fellowship-dev/navvi"
 echo ""
