@@ -597,9 +597,11 @@ async def navvi_account(
         if action == "add":
             if not service:
                 return "Error: service is required for add."
-            a = add_account(persona, service, email, creds_ref, status, notes)
-            log_persona_action(persona, "account_created", f"{service}: {email}")
-            return f"Account added (id={a['id']}): {service} — {email}"
+            # Auto-prefix creds_ref with environment if it's a bare gopass path
+            prefixed = prefix_creds_ref(creds_ref) if creds_ref else ""
+            a = add_account(persona, service, email, prefixed, status, notes)
+            log_persona_action(persona, "account_created", "{}: {}".format(service, email))
+            return "Account added (id={}): {} — {} (creds: {})".format(a['id'], service, email, prefixed or "none")
 
         elif action == "list":
             accounts = list_accounts(persona)
