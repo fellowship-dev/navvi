@@ -749,7 +749,7 @@ wheels = [
 
 [[package]]
 name = "navvi"
-version = "3.9.0"
+version = "3.10.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
