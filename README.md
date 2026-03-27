@@ -7,11 +7,16 @@
 <p align="center">
   <strong>Give your AI agent a real browser identity.</strong>
   <br />
-  Persistent browser personas that remember logins, manage credentials, and never get detected.
+  Persistent browser personas that remember logins, manage credentials, and don't get blocked.
 </p>
 
 <p align="center">
   <a href="https://pypi.org/project/navvi/"><img src="https://img.shields.io/pypi/v/navvi" alt="PyPI" /></a>
+  <a href="https://github.com/Fellowship-dev/navvi"><img src="https://img.shields.io/github/stars/Fellowship-dev/navvi" alt="GitHub stars" /></a>
+  <a href="https://github.com/Fellowship-dev/navvi/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Fellowship-dev/navvi" alt="License" /></a>
+</p>
+
+<p align="center">
   <a href="#quick-start">Quick Start</a> &middot;
   <a href="#use-cases">Use Cases</a> &middot;
   <a href="#how-it-works">How It Works</a> &middot;
@@ -36,15 +41,11 @@ Your agent has no identity. Every session is a stranger.
 Navvi gives your agent a persistent browser with its own identity. A [Camoufox](https://github.com/daijro/camoufox) (anti-detect Firefox) that remembers where it's been, stays logged in, and manages its own credentials &mdash; without ever exposing passwords to the AI.
 
 - **Persistent sessions** &mdash; cookies, logins, and history survive restarts
-- **Credential vault** &mdash; passwords stored in [gopass](https://github.com/gopasspw/gopass), auto-filled into forms without the AI ever seeing them
-- **Undetectable input** &mdash; OS-level mouse and keyboard events (`isTrusted: true`), `navigator.webdriver = false`
-- **CAPTCHA handling** &mdash; Arkose Labs press-and-hold solved via xdotool, reCAPTCHA checkbox auto-click, VNC handoff for the rest
-- **Multi-persona** &mdash; multiple Firefox instances on one container, each with its own cookies, credentials, and action history
-- **MCP-native** &mdash; Resources, Prompts, progressive disclosure, and companion agents built into the protocol
-
-### Proven: full Microsoft Outlook signup in 15 minutes
-
-Navvi autonomously completed a Microsoft account signup &mdash; email, password generation, personal details, and Arkose Labs CAPTCHA &mdash; with zero human intervention. Password was generated inside the container and never appeared in AI context.
+- **Credential vault** &mdash; passwords generated and stored inside the container, auto-filled into forms without the AI ever seeing them
+- **Doesn't get blocked** &mdash; anti-detect browser with OS-level input that passes bot detection where Selenium and Playwright fail
+- **CAPTCHA handling** &mdash; auto-clicks through common bot checks, with VNC handoff to a human when it can't
+- **Multi-persona** &mdash; multiple browser identities on one container, each with its own cookies, credentials, and history
+- **Keeps your context clean** &mdash; 11 high-level tools by default, 12 more unlock on demand so your agent isn't overwhelmed by options
 
 ## Quick Start
 
@@ -83,9 +84,9 @@ Add to your project's `.mcp.json`:
 Just tell your agent what to do:
 
 ```
-"Sign up for a new Outlook account"
-"Search DuckDuckGo for 'navvi browser' and list the top results"
 "Log into Tutanota with stored credentials"
+"Search DuckDuckGo for 'navvi browser' and list the top results"
+"Sign up for a new Outlook account"
 ```
 
 Navvi's journey tools (`navvi_browse`, `navvi_login`) handle navigation, element finding, clicking, typing, and screenshots internally. No manual step-by-step needed.
@@ -117,60 +118,29 @@ This installs `navvi-browse` and `navvi-login` agents into `.claude/agents/`. Th
 
 ## Use Cases
 
-**Autonomous account signup.** Your agent creates accounts on any service &mdash; generates passwords inside the container (never exposed to AI), fills forms, handles CAPTCHAs, and persists the credentials for future logins.
-
 **Persistent logins.** Log into a service once &mdash; your agent stays logged in across sessions. No more re-entering credentials, no more expired sessions.
 
-**Secure credential management.** Passwords live in gopass inside the container. `generate` creates them, `autofill` types them into forms &mdash; the AI never sees the raw password at any point.
+**Secure credential management.** Passwords are generated and stored inside the container. `autofill` types them into forms &mdash; the AI never sees the raw password at any point.
+
+**Account signup.** Your agent creates accounts on services &mdash; generates passwords inside the container, fills forms, and persists the credentials for future logins.
 
 **Multi-persona workflows.** Run multiple browser identities simultaneously &mdash; each persona has its own Firefox instance, cookies, and credentials, all sharing one Docker container.
 
-**Visual evidence for PRs.** Screenshot your staging app before and after a code change. Record a user flow as a GIF. Attach it to the pull request.
-
 **Form automation on protected sites.** Fill complex forms with dropdowns, date pickers, and multi-step wizards. OS-level input passes bot detection that blocks Selenium and Playwright.
+
+**Visual evidence for PRs.** Screenshot your staging app before and after a code change. Record a user flow as a GIF. Attach it to the pull request.
 
 ## How It Works
 
-```
-Your AI agent (Claude Code, etc.)
-    |
-    | MCP protocol (stdio)
-    v
-  navvi (FastMCP, Python -- via uvx)
-    |
-    | HTTP -> localhost:8024
-    v
-+------------------------------------------+
-|  Docker container (single, shared)       |
-|                                          |
-|  Firefox 1 (default)    Marionette :2828 |
-|  Firefox 2 (persona-2)  Marionette :2829 |
-|  Firefox N (persona-N)  Marionette :282N |
-|     |                                    |
-|  Xvfb :1     <-  xdotool (click, type)  |
-|     |                                    |
-|  x11vnc   ->  noVNC (live view)          |
-|                                          |
-|  gopass (shared credential vault)        |
-|  navvi-server (REST API, routes to       |
-|    active persona's Firefox instance)    |
-+------------------------------------------+
-    |
-    v
-  Docker volumes (shared):
-    navvi-profile (Firefox profiles per persona)
-    navvi-gpg (GPG keyring)
-    navvi-gopass (credential vault)
-  ~/.navvi/navvi.db (persona state)
-```
+One Docker container runs multiple Firefox instances (one per persona), each with its own cookies and profile. Your agent talks MCP, Navvi translates to browser actions.
 
-**Anti-detection** uses [Camoufox](https://github.com/daijro/camoufox) &mdash; a patched Firefox with fingerprint masking at the C++ level. `navigator.webdriver` returns `false`. Passes Arkose Labs, reCAPTCHA, and standard bot detection.
+**Anti-detection** uses [Camoufox](https://github.com/daijro/camoufox) &mdash; a patched Firefox with fingerprint masking at the C++ level. Sites that detect and block Selenium, Playwright, and headless Chrome don't detect Navvi.
 
-**All input** uses xdotool &mdash; OS-level events (`isTrusted: true`) that websites cannot distinguish from a real person. Supports press-and-hold for Arkose CAPTCHAs.
+**All input** uses xdotool &mdash; OS-level mouse and keyboard events that websites cannot distinguish from a real person.
 
 **Credentials** are stored in gopass inside the container:
 - `generate` &mdash; creates a random password, stores in gopass. The password **never** leaves the container or appears in AI context.
-- `autofill` &mdash; reads gopass and types directly into the browser via xdotool. The password never travels through the AI.
+- `autofill` &mdash; reads gopass and types directly into the browser. The password never travels through the AI.
 - `import` &mdash; bulk-import existing credentials from a JSON file.
 
 **Multi-persona** &mdash; each persona gets its own Firefox instance with a separate profile (cookies, history, logins) on the same shared Xvfb display. Gopass credentials are namespaced per persona (`navvi/{persona}/{service}`).
@@ -184,7 +154,7 @@ By default, Navvi shows 11 high-level tools. Atomic tools unlock on demand via `
 | Tool | What it does |
 |------|-------------|
 | `navvi_browse` | **Primary tool** &mdash; give it an instruction + URL, it handles everything |
-| `navvi_login` | Log into a service using stored gopass credentials |
+| `navvi_login` | Log into a service using stored credentials |
 
 ### Lifecycle
 
@@ -206,7 +176,7 @@ By default, Navvi shows 11 high-level tools. Atomic tools unlock on demand via `
 | Tool | What it does |
 |------|-------------|
 | `navvi_persona` | Create, update, list, delete browser personas |
-| `navvi_account` | Track accounts per persona (service, email, gopass ref) |
+| `navvi_account` | Track accounts per persona (service, email, credential ref) |
 
 ### Progressive disclosure
 
@@ -228,7 +198,7 @@ By default, Navvi shows 11 high-level tools. Atomic tools unlock on demand via `
 | `navvi_drag` | Drag between two points |
 | `navvi_mousedown/up/move` | Low-level mouse control |
 | `navvi_url` | Get current page URL |
-| `navvi_creds` | Manage gopass credentials: list, get, generate, import, autofill |
+| `navvi_creds` | Manage credentials: list, get, generate, import, autofill |
 | `navvi_list` | List available Codespaces (remote mode) |
 
 </details>
@@ -244,7 +214,10 @@ By default, Navvi shows 11 high-level tools. Atomic tools unlock on demand via `
 
 </details>
 
-## MCP Resources
+<details>
+<summary>MCP Resources and Prompts (for developers)</summary>
+
+### Resources
 
 Read persona state without tool calls:
 
@@ -255,7 +228,7 @@ Read persona state without tool calls:
 | `persona://{name}/accounts` | Account details |
 | `audit://{name}/log` | Last 20 actions |
 
-## MCP Prompts
+### Prompts
 
 Structured workflows available as prompt templates:
 
@@ -264,6 +237,8 @@ Structured workflows available as prompt templates:
 | `signup_flow` | Step-by-step account creation on a service |
 | `login_flow` | Log in using stored credentials |
 | `qa_walk` | Walk a page for QA &mdash; screenshot, find issues, report |
+
+</details>
 
 ## Personas
 
@@ -284,7 +259,7 @@ Persona config and state live in `~/.navvi/navvi.db`. Browser profiles and crede
 - **uv** &mdash; `curl -LsSf https://astral.sh/uv/install.sh | sh` (or `brew install uv`)
 - **NAVVI_GPG_PASSPHRASE** &mdash; any random string, enables the gopass credential vault. Set in `.mcp.json` env.
 - **ffmpeg** (optional) &mdash; only needed for video recording
-- **ANTHROPIC_API_KEY** (optional) &mdash; enables Haiku vision for `navvi_browse` ($0.002/step). Without it, falls back to `claude -p` CLI or heuristics.
+- **ANTHROPIC_API_KEY** (optional) &mdash; enables Haiku vision for `navvi_browse` ($0.002/step). Without it, falls back to `claude -p` CLI or heuristics. For best results, install the [companion agents](#4-optional-install-companion-agents) instead &mdash; they use Claude Code's native vision at no extra cost.
 
 ## License
 
