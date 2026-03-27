@@ -85,7 +85,7 @@ active_persona: Optional[str] = None
 
 mcp = FastMCP(
     "navvi",
-    version="3.9.0",
+    version="3.10.0",
 )
 
 # Ensure default persona exists on startup
@@ -1090,15 +1090,73 @@ async def navvi_url(persona: str = "") -> str:
 @mcp.tool()
 async def navvi_vnc(persona: str = "") -> str:
     """Get the noVNC URL for live browser view. Share with the user when human intervention is needed: visual CAPTCHAs that require image recognition, OAuth consent screens, or 2FA code entry. The user opens this URL in their real browser to interact directly."""
-    p = persona or active_persona or "default"
-    ports = get_container_ports(p)
+    # Start a local TCP proxy to bypass Docker Desktop WebSocket issues on macOS
+    proxy_port = VNC_PORT + 10000  # 6080 -> 16080
+    proxy_url = "http://127.0.0.1:{}/vnc.html?autoconnect=true".format(proxy_port)
+
+    # Check if proxy is already running
+    try:
+        import socket as _sock
+        test = _sock.socket()
+        test.settimeout(1)
+        test.connect(("127.0.0.1", proxy_port))
+        test.close()
+    except Exception:
+        # Start proxy in background
+        _start_vnc_proxy(VNC_PORT, proxy_port)
+
     return (
-        f"noVNC: http://127.0.0.1:{ports['vnc']}/vnc.html?autoconnect=true\n\n"
-        f"Open this URL in a browser for live view. Use for:\n"
-        f"- Human CAPTCHA solving\n"
-        f"- OAuth login flows\n"
-        f"- Visual debugging"
-    )
+        "noVNC: {}\n\n"
+        "Open this URL in a browser for live view. Use for:\n"
+        "- Human CAPTCHA solving\n"
+        "- OAuth login flows\n"
+        "- Visual debugging"
+    ).format(proxy_url)
+
+
+def _start_vnc_proxy(docker_port: int, proxy_port: int):
+    """Start a TCP proxy that forwards browser connections to Docker's VNC port.
+
+    Docker Desktop on macOS doesn't forward WebSocket upgrades correctly.
+    This proxy forwards raw TCP bytes, which works for both HTTP and WebSocket.
+    """
+    import threading
+
+    def _fwd(src, dst):
+        try:
+            while True:
+                data = src.recv(65536)
+                if not data:
+                    break
+                dst.sendall(data)
+        except Exception:
+            pass
+        finally:
+            src.close()
+            dst.close()
+
+    def _serve():
+        import socket as _sock
+        server = _sock.socket()
+        server.setsockopt(_sock.SOL_SOCKET, _sock.SO_REUSEADDR, 1)
+        try:
+            server.bind(("127.0.0.1", proxy_port))
+        except OSError:
+            return  # already running
+        server.listen(5)
+        while True:
+            client, _ = server.accept()
+            remote = _sock.socket()
+            try:
+                remote.connect(("127.0.0.1", docker_port))
+                threading.Thread(target=_fwd, args=(client, remote), daemon=True).start()
+                threading.Thread(target=_fwd, args=(remote, client), daemon=True).start()
+            except Exception:
+                client.close()
+                remote.close()
+
+    t = threading.Thread(target=_serve, daemon=True)
+    t.start()
 
 
 @mcp.tool(tags={"atomic"})
