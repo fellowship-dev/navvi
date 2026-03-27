@@ -1092,7 +1092,7 @@ async def navvi_vnc(persona: str = "") -> str:
     """Get the noVNC URL for live browser view. Share with the user when human intervention is needed: visual CAPTCHAs that require image recognition, OAuth consent screens, or 2FA code entry. The user opens this URL in their real browser to interact directly."""
     # Start a local TCP proxy to bypass Docker Desktop WebSocket issues on macOS
     proxy_port = VNC_PORT + 10000  # 6080 -> 16080
-    proxy_url = "http://127.0.0.1:{}/vnc.html?autoconnect=true".format(proxy_port)
+    proxy_url = "http://127.0.0.1:{}/vnc.html?autoconnect=true&resize=scale".format(proxy_port)
 
     # Check if proxy is already running
     try:
