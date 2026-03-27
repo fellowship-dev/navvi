@@ -98,15 +98,24 @@ navvi_screenshot                                   -> see what happened
 
 </details>
 
-### 4. Optional: Install companion agents
+### 4. Optional: Install skills
 
-Companion agents give Claude Code dedicated browsing subagents &mdash; isolates browser work from your main conversation.
+Skills give your AI agent dedicated browsing capabilities &mdash; isolates browser work from your main conversation. Works with Claude Code, Cursor, and [40+ other agents](https://skills.sh).
+
+```bash
+npx skills add Fellowship-dev/navvi
+```
+
+Or install manually:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Fellowship-dev/navvi/main/install-companions.sh | bash
 ```
 
-This installs `navvi-browse` and `navvi-login` agents into `.claude/agents/`. The browse agent unlocks atomic tools automatically and uses Claude Code's native vision for complex multi-step flows.
+**Included skills:**
+- **navvi-browse** &mdash; autonomous web browsing with vision-driven navigation
+- **navvi-login** &mdash; login with stored credentials, handles reCAPTCHA and 2FA
+- **navvi-signup** &mdash; create new accounts with auto-generated credentials
 
 ## Use Cases
 
@@ -251,7 +260,7 @@ Persona config and state live in `~/.navvi/navvi.db`. Browser profiles and crede
 - **uv** &mdash; `curl -LsSf https://astral.sh/uv/install.sh | sh` (or `brew install uv`)
 - **NAVVI_GPG_PASSPHRASE** &mdash; any random string, enables the gopass credential vault. Set in `.mcp.json` env.
 - **ffmpeg** (optional) &mdash; only needed for video recording
-- **ANTHROPIC_API_KEY** (optional) &mdash; enables Haiku vision for `navvi_browse` ($0.002/step). Without it, falls back to `claude -p` CLI or heuristics. For best results, install the [companion agents](#4-optional-install-companion-agents) instead &mdash; they use Claude Code's native vision at no extra cost.
+- **ANTHROPIC_API_KEY** (optional) &mdash; enables Haiku vision for `navvi_browse` ($0.002/step). Without it, falls back to `claude -p` CLI or heuristics. For best results, install the [skills](#4-optional-install-skills) instead &mdash; they use Claude Code's native vision at no extra cost.
 
 ## Contributing
 

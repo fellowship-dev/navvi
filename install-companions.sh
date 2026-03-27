@@ -1,6 +1,8 @@
 #!/bin/bash
-# Navvi companion agents installer
+# Navvi skills installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/Fellowship-dev/navvi/main/install-companions.sh | bash
+#
+# Preferred method: npx skills add Fellowship-dev/navvi
 
 set -e
 
@@ -10,7 +12,7 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 echo ""
-echo -e "${BOLD}Navvi Companions${NC} — browser agents for Claude Code"
+echo -e "${BOLD}Navvi Skills${NC} — browser automation skills for AI agents"
 echo ""
 
 # Check we're in a project directory
@@ -24,24 +26,35 @@ if [ ! -d ".git" ] && [ ! -f "package.json" ] && [ ! -f "pyproject.toml" ]; then
   fi
 fi
 
-# Create .claude/agents/ if it doesn't exist
-mkdir -p .claude/agents
+# Detect agent type
+SKILLS_DIR=""
+if [ -d ".claude" ] || [ -f "CLAUDE.md" ]; then
+  SKILLS_DIR=".claude/skills"
+elif [ -d ".cursor" ]; then
+  SKILLS_DIR=".cursor/skills"
+else
+  SKILLS_DIR=".claude/skills"
+fi
 
-# Download agent files
-echo "Installing companion agents..."
-for agent in browse login; do
-  curl -fsSL "https://raw.githubusercontent.com/Fellowship-dev/navvi/main/companions/${agent}.md" \
-    -o ".claude/agents/navvi-${agent}.md"
-  echo -e "${GREEN}+${NC} .claude/agents/navvi-${agent}.md"
+echo "Installing to ${SKILLS_DIR}/"
+
+# Create skills directories
+for skill in navvi-browse navvi-login navvi-signup; do
+  mkdir -p "${SKILLS_DIR}/${skill}"
+  curl -fsSL "https://raw.githubusercontent.com/Fellowship-dev/navvi/main/skills/${skill}/SKILL.md" \
+    -o "${SKILLS_DIR}/${skill}/SKILL.md"
+  echo -e "${GREEN}+${NC} ${SKILLS_DIR}/${skill}/SKILL.md"
 done
 
 # Add to .gitignore if not already there
 if [ -f ".gitignore" ]; then
-  if ! grep -q "navvi-.*\.md" .gitignore 2>/dev/null; then
+  if ! grep -q "navvi-" .gitignore 2>/dev/null; then
     echo "" >> .gitignore
-    echo "# Navvi companion agents" >> .gitignore
-    echo ".claude/agents/navvi-*.md" >> .gitignore
-    echo -e "${GREEN}+${NC} Added navvi agents to .gitignore"
+    echo "# Navvi skills" >> .gitignore
+    for skill in navvi-browse navvi-login navvi-signup; do
+      echo "${SKILLS_DIR}/${skill}/" >> .gitignore
+    done
+    echo -e "${GREEN}+${NC} Added navvi skills to .gitignore"
   fi
 fi
 
@@ -54,9 +67,13 @@ else
 fi
 
 echo ""
-echo -e "${GREEN}${BOLD}Navvi companions installed!${NC}"
+echo -e "${GREEN}${BOLD}Navvi skills installed!${NC}"
 echo ""
-echo "Usage:"
-echo "  Ask Claude: \"browse tutanota.com and check the login page\""
-echo "  Or directly: \"use the navvi-browse agent to search DuckDuckGo for navvi\""
+echo "Installed skills:"
+echo "  navvi-browse  — autonomous web browsing"
+echo "  navvi-login   — login with stored credentials"
+echo "  navvi-signup  — create new accounts"
+echo ""
+echo "Or install via the skills registry:"
+echo "  npx skills add Fellowship-dev/navvi"
 echo ""
