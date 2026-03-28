@@ -93,6 +93,13 @@ Screenshot and confirm success. Look for welcome messages, dashboard, confirmati
 mcp__navvi__navvi_account(action="add", persona="{persona}", service="{service}", creds_ref="gopass://navvi/{persona}/{service}")
 ```
 
+### Step 10: Record milestone
+After successful signup, always add a milestone with full details:
+```
+mcp__navvi__navvi_milestone(action="add", persona="{persona}", event="Signed up for {Service}", detail="Username: {username}\nEmail: {email}\n\nSubscriptions/choices made during signup.", url="https://{service}/profile/{username}", tags="first,{service},signup", screenshot=true)
+```
+Include ALL details: username, email, any profile choices, subreddits joined, etc. This builds the persona's life story.
+
 ## Rules
 
 - NEVER type or display passwords — always use gopass via autofill

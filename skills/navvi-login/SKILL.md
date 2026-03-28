@@ -33,6 +33,12 @@ If `navvi_login` fails or reports issues:
 - **Other CAPTCHAs** (Arkose/FunCaptcha, hCaptcha): call `navvi_vnc()` — do NOT attempt to solve
 - **Non-standard form**: unlock atomic tools with `navvi_atomic(enable=true)`, then use `navvi_find` + `navvi_fill` for username only. For passwords, use VNC.
 
+### Step 4: Record milestone (first login only)
+If this is the persona's first login to this service, record it:
+```
+mcp__navvi__navvi_milestone(action="add", persona="{persona}", event="First login to {Service}", detail="Logged in as {username}. Landing page: {description of what's visible}.", url="{current_url}", tags="first,{service},login", screenshot=true)
+```
+
 ## Rules
 
 - ALWAYS try `navvi_login` first — only fall back to atomic tools if it fails
