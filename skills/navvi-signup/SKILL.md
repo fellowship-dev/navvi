@@ -49,6 +49,19 @@ If autofill fails (non-standard form, multiple forms with same field names):
 3. For password: use `navvi_creds(action="autofill")` with explicit selectors, or tab to the password field and use autofill
 4. NEVER type passwords manually
 
+### Custom Dropdowns (Fluent UI, React Select, etc.)
+
+Do NOT use `navvi_browse` for custom dropdowns — it gets stuck in scroll loops.
+Use atomic tools directly:
+
+1. Find the dropdown trigger: `navvi_find("[role=combobox]")` or `navvi_find("select")`
+2. Click to open it: `navvi_click(x, y)`
+3. Find all options: `navvi_find("[role=option]", all=true)`
+4. Find and click the desired option by text match
+5. If the option list is long, use `navvi_find("[role=option]:text('Chile')")` or scroll within the dropdown
+
+For **native `<select>` elements**: type the first letter(s) of the option after clicking to jump to it.
+
 ### Step 5: Screenshot and verify form is filled
 ```
 mcp__navvi__navvi_screenshot()
@@ -69,7 +82,8 @@ mcp__navvi__navvi_click(x=..., y=...)
   mcp__navvi__navvi_click(x=..., y=...)
   ```
   If an image challenge appears or 3 clicks fail → `navvi_vnc()` for human help
-- **Other CAPTCHAs** (Arkose/FunCaptcha, hCaptcha): `navvi_vnc()` immediately
+- **Arkose Labs / Human Security (press-and-hold)**: use `navvi_hold(x, y, duration_ms=5000)` on the verify button. These CAPTCHAs typically appear AFTER filling all form fields, not on intermediate Next buttons.
+- **Other CAPTCHAs** (hCaptcha, image puzzles): `navvi_vnc()` immediately
 
 ### Step 8: Verify account creation
 Screenshot and confirm success. Look for welcome messages, dashboard, confirmation page.

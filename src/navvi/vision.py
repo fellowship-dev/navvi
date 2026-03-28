@@ -20,16 +20,22 @@ VISION_PROMPT = (
     '  "suggested_action": {\n'
     '    "type": "click|fill|press|dismiss|scroll|navigate|abort|done",\n'
     '    "target": "description of what to interact with",\n'
-    '    "value": "text to type, if applicable",\n'
+    '    "text": "text to type (fill actions only)",\n'
+    '    "key": "key to press (press actions only, e.g. Enter, Tab, Escape)",\n'
+    '    "url": "URL to navigate to (navigate actions only)",\n'
     '    "selector_hint": "CSS selector hint, if obvious"\n'
     "  },\n"
     '  "confidence": 0.0 to 1.0\n'
     "}\n"
+    "IMPORTANT: For press actions, always set key to a valid key name (Enter, Tab, Escape, etc.) — never null.\n"
     "Respond with ONLY the JSON object, no explanation."
 )
 
 
-def _build_user_message(instruction: str, url: str, title: str) -> str:
+def _build_user_message(
+    instruction: str, url: str, title: str, steps_history: list = None,
+    viewport_info: dict = None,
+) -> str:
     parts = []
     if instruction:
         parts.append("Goal: " + instruction)
@@ -37,6 +43,26 @@ def _build_user_message(instruction: str, url: str, title: str) -> str:
         parts.append("URL: " + url)
     if title:
         parts.append("Title: " + title)
+    if steps_history:
+        history_lines = []
+        for s in steps_history[-3:]:
+            history_lines.append(
+                "  Step {}: {} -> {} (conf: {})".format(
+                    s.get("step", "?"),
+                    s.get("description", "?"),
+                    s.get("action_taken", "?"),
+                    s.get("confidence", "?"),
+                )
+            )
+        parts.append("Previous steps (do NOT repeat failed/identical actions):\n" + "\n".join(history_lines))
+    if viewport_info:
+        vw = viewport_info.get("viewport_width", 0)
+        vh = viewport_info.get("viewport_height", 0)
+        if vw and vh:
+            parts.append(
+                "Viewport: {}x{}px. Elements with Y > {} are off-screen and need scrolling. "
+                "Only suggest scroll if the target element is NOT visible in the screenshot.".format(vw, vh, vh)
+            )
     parts.append("Analyze this page and suggest the next action to achieve the goal.")
     return "\n".join(parts)
 
@@ -75,6 +101,8 @@ async def analyze(
     instruction: str,
     url: str = "",
     title: str = "",
+    steps_history: list = None,
+    viewport_info: dict = None,
 ) -> dict:
     """Analyze a browser screenshot and return structured classification.
 
@@ -95,7 +123,7 @@ async def analyze(
     # Tier 1: Anthropic API
     if os.environ.get("ANTHROPIC_API_KEY") and screenshot_b64:
         try:
-            result = await _analyze_api(screenshot_b64, instruction, url, title)
+            result = await _analyze_api(screenshot_b64, instruction, url, title, steps_history, viewport_info)
             if result and result.get("page_type"):
                 result["tier_used"] = "api"
                 return result
@@ -105,7 +133,7 @@ async def analyze(
     # Tier 2: claude CLI
     if shutil.which("claude") and screenshot_b64:
         try:
-            result = await _analyze_cli(screenshot_b64, instruction, url, title)
+            result = await _analyze_cli(screenshot_b64, instruction, url, title, steps_history, viewport_info)
             if result and result.get("page_type"):
                 result["tier_used"] = "cli"
                 return result
@@ -117,7 +145,8 @@ async def analyze(
 
 
 async def _analyze_api(
-    screenshot_b64: str, instruction: str, url: str, title: str
+    screenshot_b64: str, instruction: str, url: str, title: str,
+    steps_history: list = None, viewport_info: dict = None,
 ) -> dict:
     """Tier 1: Direct Anthropic API call with Haiku."""
     try:
@@ -126,7 +155,7 @@ async def _analyze_api(
         return {}
 
     client = anthropic.Anthropic()
-    user_text = _build_user_message(instruction, url, title)
+    user_text = _build_user_message(instruction, url, title, steps_history, viewport_info)
 
     message = client.messages.create(
         model="claude-haiku-4-5-20251001",
@@ -156,7 +185,8 @@ async def _analyze_api(
 
 
 async def _analyze_cli(
-    screenshot_b64: str, instruction: str, url: str, title: str
+    screenshot_b64: str, instruction: str, url: str, title: str,
+    steps_history: list = None, viewport_info: dict = None,
 ) -> dict:
     """Tier 2: Shell out to claude -p with the screenshot file."""
     # Save screenshot to temp file
@@ -165,7 +195,7 @@ async def _analyze_cli(
         with open(tmp_path, "wb") as f:
             f.write(base64.b64decode(screenshot_b64))
 
-        user_text = _build_user_message(instruction, url, title)
+        user_text = _build_user_message(instruction, url, title, steps_history, viewport_info)
         prompt = (
             VISION_PROMPT + "\n\n"
             + user_text + "\n\n"
