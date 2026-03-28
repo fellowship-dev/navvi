@@ -31,202 +31,28 @@ app = FastAPI(title="Navvi Server", version="3.0.0")
 # --- Globals ---
 
 display: str = ":1"
-PROFILES_DIR = os.path.expanduser("~/.mozilla/profiles")
 BASE_MARIONETTE_PORT = 2828
-MAX_PERSONAS = int(os.environ.get("NAVVI_MAX_PERSONAS", "5"))
+
+# Single Marionette instance — one Firefox per container (since v3.15).
+# Multi-persona is handled by running separate containers, not separate
+# Firefox processes inside one container.
+_marionette: Optional[Marionette] = None
+_firefox_pid: int = 0
 
 
-# --- Marionette Pool ---
-
-class MarionettePool:
-    """Manages multiple Firefox/Camoufox instances, one per persona."""
-
-    def __init__(self):
-        self.instances = {}  # {persona_name: {"port": int, "pid": int, "marionette": Marionette}}
-        self.active = "default"
-
-    def register_default(self, pid: int):
-        """Register the default Firefox started by start.sh (port 2828)."""
-        m = Marionette(port=BASE_MARIONETTE_PORT)
-        m.connect()
-        m.new_session()
-        self.instances["default"] = {
-            "port": BASE_MARIONETTE_PORT,
-            "pid": pid,
-            "marionette": m,
-            "profile": os.path.expanduser("~/.mozilla"),
-        }
-
-    def _next_port(self) -> int:
-        """Find the next available Marionette port."""
-        used = {info["port"] for info in self.instances.values()}
-        port = BASE_MARIONETTE_PORT + 1
-        while port in used:
-            port += 1
-        return port
-
-    def start_persona(self, name: str) -> dict:
-        """Launch a new Firefox instance for a persona."""
-        if name in self.instances:
-            return {"status": "already_running", "port": self.instances[name]["port"]}
-
-        if name == "default":
-            return {"status": "error", "message": "default persona is managed by start.sh"}
-
-        if len(self.instances) >= MAX_PERSONAS:
-            return {"status": "error", "message": "max personas reached ({})".format(MAX_PERSONAS)}
-
-        port = self._next_port()
-        profile_dir = os.path.join(PROFILES_DIR, name)
-        os.makedirs(profile_dir, exist_ok=True)
-
-        # Write user.js with custom Marionette port
-        user_js = os.path.join(profile_dir, "user.js")
-        with open(user_js, "w") as f:
-            f.write('user_pref("marionette.port", {});\n'.format(port))
-
-        # Launch Firefox
-        env = os.environ.copy()
-        env["DISPLAY"] = display
-        proc = subprocess.Popen(
-            [
-                "camoufox-bin",
-                "--marionette",
-                "--no-remote",
-                "--profile", profile_dir,
-                "-width", "1024", "-height", "768",
-                "about:blank",
-            ],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-
-        # Wait for Marionette to be ready
-        m = Marionette(port=port)
-        for attempt in range(15):
-            try:
-                m.connect(retries=1, delay=0.5)
-                m.new_session()
-                break
-            except Exception:
-                if attempt < 14:
-                    time.sleep(1)
-                else:
-                    proc.kill()
-                    return {"status": "error", "message": "Firefox failed to start for persona {}".format(name)}
-
-        self.instances[name] = {
-            "port": port,
-            "pid": proc.pid,
-            "marionette": m,
-            "profile": profile_dir,
-        }
-
-        # Raise the new window to front
-        self._raise_window(name)
-
-        return {"status": "started", "port": port, "pid": proc.pid}
-
-    def stop_persona(self, name: str) -> dict:
-        """Stop a persona's Firefox instance."""
-        if name not in self.instances:
-            return {"status": "not_running"}
-        if name == "default":
-            return {"status": "error", "message": "cannot stop default persona (managed by start.sh)"}
-
-        info = self.instances[name]
-        pid = info["pid"]
-
-        # Close Marionette
+def _get_or_reconnect() -> Marionette:
+    """Return the single Marionette client, reconnecting if needed."""
+    global _marionette
+    if _marionette:
         try:
-            info["marionette"].close()
+            _marionette.get_url()
+            return _marionette
         except Exception:
             pass
-
-        # Graceful shutdown — let Firefox flush profile
-        try:
-            os.kill(pid, signal.SIGTERM)
-            for _ in range(10):
-                try:
-                    os.kill(pid, 0)  # check if still alive
-                    time.sleep(1)
-                except OSError:
-                    break
-            else:
-                os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
-
-        del self.instances[name]
-
-        # If we stopped the active persona, switch back to default
-        if self.active == name:
-            self.active = "default"
-            self._raise_window("default")
-
-        return {"status": "stopped"}
-
-    def get(self, persona: Optional[str] = None) -> Marionette:
-        """Get the Marionette client for a persona (default: active persona)."""
-        name = persona or self.active
-        if name not in self.instances:
-            raise RuntimeError("Persona '{}' is not running. Start it with /persona/start".format(name))
-        m = self.instances[name]["marionette"]
-        # Test connection, reconnect if needed
-        try:
-            m.get_url()
-        except Exception:
-            port = self.instances[name]["port"]
-            m = Marionette(port=port)
-            m.connect()
-            m.new_session()
-            self.instances[name]["marionette"] = m
-        return m
-
-    def switch(self, name: str) -> dict:
-        """Switch the active persona."""
-        if name not in self.instances:
-            return {"status": "error", "message": "persona '{}' not running".format(name)}
-        self.active = name
-        self._raise_window(name)
-        return {"status": "switched", "active": name}
-
-    def list_active(self) -> list:
-        """List all running persona instances."""
-        result = []
-        for name, info in self.instances.items():
-            result.append({
-                "name": name,
-                "port": info["port"],
-                "pid": info["pid"],
-                "active": name == self.active,
-            })
-        return result
-
-    def _raise_window(self, name: str):
-        """Raise a persona's Firefox window to the front."""
-        try:
-            env = os.environ.copy()
-            env["DISPLAY"] = display
-            # Find window by pid
-            pid = self.instances[name]["pid"]
-            result = subprocess.run(
-                "xdotool search --pid {} --name ''".format(pid),
-                shell=True, capture_output=True, text=True, timeout=3, env=env,
-            )
-            windows = result.stdout.strip().split("\n")
-            if windows and windows[0]:
-                subprocess.run(
-                    "xdotool windowactivate --sync {}".format(windows[0]),
-                    shell=True, capture_output=True, timeout=3, env=env,
-                )
-        except Exception:
-            pass
-
-
-pool = MarionettePool()
+    _marionette = Marionette(port=BASE_MARIONETTE_PORT)
+    _marionette.connect()
+    _marionette.new_session()
+    return _marionette
 
 
 # --- Pydantic models ---
@@ -312,8 +138,8 @@ def run_xdotool(args: str, timeout: float = 5.0) -> str:
 
 
 def get_marionette(persona: Optional[str] = None) -> Marionette:
-    """Get the Marionette client for a persona. Defaults to active persona."""
-    return pool.get(persona)
+    """Get the single Marionette client. persona param is ignored (kept for API compat)."""
+    return _get_or_reconnect()
 
 
 # xdotool key name mapping (browser key names → xdotool names)
@@ -380,47 +206,7 @@ async def health():
         pass
 
     ok = all(checks.values())
-    return {"ok": ok, **checks, "personas": pool.list_active()}
-
-
-# --- Persona management ---
-
-class PersonaStartRequest(BaseModel):
-    name: str
-
-class PersonaStopRequest(BaseModel):
-    name: str
-
-class PersonaSwitchRequest(BaseModel):
-    name: str
-
-@app.post("/persona/start")
-async def persona_start(req: PersonaStartRequest):
-    """Start a new Firefox instance for a persona."""
-    result = pool.start_persona(req.name)
-    if result["status"] == "error":
-        raise HTTPException(status_code=400, detail=result["message"])
-    pool.switch(req.name)
-    return result
-
-@app.post("/persona/stop")
-async def persona_stop(req: PersonaStopRequest):
-    """Stop a persona's Firefox instance."""
-    result = pool.stop_persona(req.name)
-    return result
-
-@app.post("/persona/switch")
-async def persona_switch(req: PersonaSwitchRequest):
-    """Switch the active persona (raise its window)."""
-    result = pool.switch(req.name)
-    if result["status"] == "error":
-        raise HTTPException(status_code=400, detail=result["message"])
-    return result
-
-@app.get("/persona/list")
-async def persona_list():
-    """List all running persona instances."""
-    return {"personas": pool.list_active(), "active": pool.active}
+    return {"ok": ok, **checks}
 
 
 @app.post("/navigate")
@@ -973,21 +759,20 @@ def main():
     global display
     display = args.display
 
-    # Create profiles directory
-    os.makedirs(PROFILES_DIR, exist_ok=True)
-
-    # Register the default Firefox (started by start.sh on port 2828)
+    # Connect to the single Firefox instance (started by start.sh on port 2828)
+    global _marionette, _firefox_pid
     try:
-        # Find the default Firefox PID
         result = subprocess.run(
             ["pgrep", "-f", "camoufox-bin.*--marionette"],
             capture_output=True, text=True, timeout=3,
         )
-        default_pid = int(result.stdout.strip().split("\n")[0]) if result.stdout.strip() else 0
-        pool.register_default(default_pid)
-        print("[navvi-server] Default persona registered (Marionette :{}, PID {})".format(BASE_MARIONETTE_PORT, default_pid))
+        _firefox_pid = int(result.stdout.strip().split("\n")[0]) if result.stdout.strip() else 0
+        _marionette = Marionette(port=BASE_MARIONETTE_PORT)
+        _marionette.connect()
+        _marionette.new_session()
+        print("[navvi-server] Connected to Firefox (Marionette :{}, PID {})".format(BASE_MARIONETTE_PORT, _firefox_pid))
     except Exception as e:
-        print("[navvi-server] WARNING: Could not register default persona: {}".format(e))
+        print("[navvi-server] WARNING: Could not connect to Firefox: {}".format(e))
         print("[navvi-server] Will retry on first request")
 
     uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="warning")

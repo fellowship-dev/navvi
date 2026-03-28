@@ -30,6 +30,10 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+BASE_API_PORT = 8024
+BASE_VNC_PORT = 6080
+
+
 def init_db():
     """Create tables if they don't exist."""
     conn = _connect()
@@ -43,7 +47,9 @@ def init_db():
             timezone TEXT DEFAULT 'UTC',
             viewport TEXT DEFAULT '1024x768',
             created_at REAL NOT NULL,
-            last_used_at REAL
+            last_used_at REAL,
+            api_port INTEGER,
+            vnc_port INTEGER
         );
 
         CREATE TABLE IF NOT EXISTS accounts (
@@ -78,7 +84,57 @@ def init_db():
         );
     """)
     conn.commit()
+    # Migrate: add port columns if missing (existing DBs)
+    try:
+        conn.execute("SELECT api_port FROM personas LIMIT 1")
+    except sqlite3.OperationalError:
+        conn.execute("ALTER TABLE personas ADD COLUMN api_port INTEGER")
+        conn.execute("ALTER TABLE personas ADD COLUMN vnc_port INTEGER")
+        conn.commit()
     conn.close()
+
+
+# --- Port allocation ---
+
+def allocate_ports(persona: str) -> dict:
+    """Allocate unique API + VNC ports for a persona. Returns {api: int, vnc: int}."""
+    conn = _connect()
+    # Check if already allocated
+    row = conn.execute("SELECT api_port, vnc_port FROM personas WHERE name = ?", (persona,)).fetchone()
+    if row and row["api_port"]:
+        ports = {"api": row["api_port"], "vnc": row["vnc_port"]}
+        conn.close()
+        return ports
+    # Find next free port pair
+    used = conn.execute("SELECT api_port FROM personas WHERE api_port IS NOT NULL").fetchall()
+    used_ports = {r["api_port"] for r in used}
+    offset = 0
+    while (BASE_API_PORT + offset) in used_ports:
+        offset += 1
+    api_port = BASE_API_PORT + offset
+    vnc_port = BASE_VNC_PORT + offset
+    conn.execute("UPDATE personas SET api_port = ?, vnc_port = ? WHERE name = ?", (api_port, vnc_port, persona))
+    conn.commit()
+    conn.close()
+    return {"api": api_port, "vnc": vnc_port}
+
+
+def release_ports(persona: str):
+    """Release allocated ports for a persona."""
+    conn = _connect()
+    conn.execute("UPDATE personas SET api_port = NULL, vnc_port = NULL WHERE name = ?", (persona,))
+    conn.commit()
+    conn.close()
+
+
+def get_persona_ports(persona: str) -> Optional[dict]:
+    """Get allocated ports for a persona, or None if not allocated."""
+    conn = _connect()
+    row = conn.execute("SELECT api_port, vnc_port FROM personas WHERE name = ?", (persona,)).fetchone()
+    conn.close()
+    if row and row["api_port"]:
+        return {"api": row["api_port"], "vnc": row["vnc_port"]}
+    return None
 
 
 # --- Persona CRUD ---

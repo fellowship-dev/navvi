@@ -63,6 +63,9 @@ from navvi.store import (
     export_timeline,
     generate_brief,
     _timeline_dir,
+    allocate_ports,
+    release_ports,
+    get_persona_ports,
 )
 
 # --- Constants ---
@@ -91,7 +94,7 @@ active_persona: Optional[str] = None
 
 mcp = FastMCP(
     "navvi",
-    version="3.14.1",
+    version="3.15.0",
 )
 
 # Ensure default persona exists on startup
@@ -430,8 +433,14 @@ def detect_environment() -> str:
     cs_name = os.environ.get("CODESPACE_NAME")
     if cs_name:
         return "codespace:{}".format(cs_name)
+    # Check any running navvi container for image ID
     try:
-        image_id = sh("docker inspect navvi-default --format '{{.Image}}' 2>/dev/null")
+        containers = list_containers()
+        cname = container_name(containers[0]["name"]) if containers else "navvi-default"
+    except Exception:
+        cname = "navvi-default"
+    try:
+        image_id = sh("docker inspect {} --format '{{{{.Image}}}}' 2>/dev/null".format(cname))
         if image_id and image_id.startswith("sha256:"):
             return "docker:{}".format(image_id[7:19])
         elif image_id:
@@ -485,8 +494,15 @@ def format_missing(missing: list) -> str:
 
 
 def resolve_persona(persona: Optional[str] = None) -> tuple:
-    """Resolve which persona to target and return (name, api_base_url)."""
+    """Resolve which persona to target and return (name, api_base_url).
+
+    Looks up the persona's allocated API port from the store. Falls back to
+    the global navvi_api if no port is allocated (e.g. remote mode).
+    """
     name = persona or active_persona or "default"
+    ports = get_persona_ports(name)
+    if ports:
+        return name, "http://127.0.0.1:{}".format(ports["api"])
     return name, navvi_api or "http://127.0.0.1:{}".format(NAVVI_PORT)
 
 
@@ -805,44 +821,28 @@ async def navvi_start(
         if missing:
             return format_missing(missing)
 
-        # Single container for all personas — always named navvi-default
-        cname = "navvi-default"
+        # One container per persona — named navvi-{persona}
+        cname = container_name(persona)
+        ports = allocate_ports(persona)
+        api_port = ports["api"]
+        vnc_port = ports["vnc"]
 
-        # Check if already running
-        existing = sh('docker ps -q --filter "name=navvi-default" 2>/dev/null')
+        # Check if this persona's container is already running
+        existing = sh('docker ps -q --filter "name=^{}$" 2>/dev/null'.format(cname))
         if existing:
-            reachable = is_api_reachable(NAVVI_PORT)
+            reachable = is_api_reachable(api_port)
             active_persona = persona
-            navvi_api = "http://127.0.0.1:{}".format(NAVVI_PORT)
-
-            # Start persona's Firefox instance if not default
-            if persona != "default" and reachable:
-                try:
-                    result = await api_call("POST", "/persona/start", {"name": persona})
-                    touch_persona(persona)
-                    return (
-                        "Navvi running. Started persona '{}' (port {}).\nAPI: http://127.0.0.1:{}\nVNC: http://127.0.0.1:{}\n\n"
-                        "Available prompts: signup_flow(service), login_flow(service), qa_walk(url)\n"
-                        "Companion agents: navvi-browse, navvi-login, navvi-signup"
-                    ).format(persona, result.get("port", "?"), NAVVI_PORT, VNC_PORT)
-                except Exception:
-                    pass  # Already running or error — fall through to switch
-                try:
-                    await api_call("POST", "/persona/switch", {"name": persona})
-                except Exception:
-                    pass
-
+            navvi_api = "http://127.0.0.1:{}".format(api_port)
             touch_persona(persona)
             health = "healthy" if reachable else "starting..."
             return (
                 "Navvi running. Active persona: '{}'.\nAPI: http://127.0.0.1:{} ({})\nVNC: http://127.0.0.1:{}\n\n"
                 "Available prompts: signup_flow(service), login_flow(service), qa_walk(url)\n"
                 "Companion agents: navvi-browse, navvi-login, navvi-signup"
-            ).format(persona, NAVVI_PORT, health, VNC_PORT,
-            )
+            ).format(persona, api_port, health, vnc_port)
 
         # Remove stopped container with same name
-        sh("docker rm navvi-default 2>/dev/null")
+        sh("docker rm {} 2>/dev/null".format(cname))
 
         # Read persona config from store (fallback to YAML for backwards compat)
         p = get_persona(persona)
@@ -854,15 +854,13 @@ async def navvi_start(
             locale = config.get("locale", "en-US")
             timezone = config.get("timezone", "UTC")
 
-        # Shared volumes — one set for all personas
-        # Firefox profile, GPG key, and gopass vault are shared
-        # Credentials are namespaced by persona: navvi/{persona}/{service}
+        # Per-persona Firefox profile volume, shared gopass + GPG
         docker_args = [
             "run", "-d",
             "--name", cname,
-            "-p", "{}:8024".format(NAVVI_PORT),
-            "-p", "{}:6080".format(VNC_PORT),
-            "-v", "navvi-profile:/home/user/.mozilla",
+            "-p", "{}:8024".format(api_port),
+            "-p", "{}:6080".format(vnc_port),
+            "-v", "navvi-profile-{}:/home/user/.mozilla".format(persona),
             "-v", "navvi-gpg:/home/user/.gnupg",
             "-v", "navvi-gopass:/home/user/.local/share/gopass",
             "-e", "LOCALE={}".format(locale),
@@ -883,33 +881,34 @@ async def navvi_start(
 
         result = sh("docker {}".format(" ".join(docker_args)))
         if "Error" in result or "error" in result:
+            release_ports(persona)
             return "Failed to start container:\n{}\n\nMake sure the image is built: docker build -t navvi container/".format(result)
 
         # Wait for API
         active_persona = persona
-        navvi_api = "http://127.0.0.1:{}".format(NAVVI_PORT)
+        navvi_api = "http://127.0.0.1:{}".format(api_port)
 
         ready = False
         for _ in range(15):
             await asyncio.sleep(1)
-            if is_api_reachable(NAVVI_PORT):
+            if is_api_reachable(api_port):
                 ready = True
                 break
 
         set_mode("local")
         touch_persona(persona)
-        log_persona_action(persona, "started", "mode=local, persona={}".format(persona))
+        log_persona_action(persona, "started", "mode=local, container={}, api_port={}, vnc_port={}".format(cname, api_port, vnc_port))
         health = "healthy" if ready else "starting..."
         return (
             "Navvi started (persona: {}).\n"
             "Container: {}\n"
             "API: http://127.0.0.1:{} ({})\n"
             "VNC: http://127.0.0.1:{}\n"
-            "Volumes: navvi-profile, navvi-gpg, navvi-gopass (shared, persistent)\n\n"
+            "Volumes: navvi-profile-{}, navvi-gpg, navvi-gopass (shared, persistent)\n\n"
             "Use navvi_browse for browsing, navvi_screenshot to verify.\n\n"
             "Available prompts: signup_flow(service), login_flow(service), qa_walk(url)\n"
             "Companion agents: navvi-browse (autonomous browsing), navvi-login (login flows), navvi-signup (account creation)"
-        ).format(persona, cname, NAVVI_PORT, health, VNC_PORT)
+        ).format(persona, cname, api_port, health, vnc_port, persona)
 
     if mode == "remote":
         missing = check_remote_deps()
@@ -1007,6 +1006,7 @@ async def navvi_stop(persona: str = "") -> str:
         cname = container_name(persona)
         sh(f"docker stop {cname} 2>/dev/null")
         sh(f"docker rm {cname} 2>/dev/null")
+        release_ports(persona)
         if active_persona == persona:
             active_persona = None
         return f"Stopped {cname}. Firefox profile preserved in volume navvi-profile-{persona}."
@@ -1029,6 +1029,7 @@ async def navvi_stop(persona: str = "") -> str:
         cname = container_name(c["name"])
         sh(f"docker stop {cname} 2>/dev/null")
         sh(f"docker rm {cname} 2>/dev/null")
+        release_ports(c["name"])
 
     active_persona = None
     clear_mode()
