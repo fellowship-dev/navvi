@@ -62,7 +62,7 @@ from navvi.store import (
 # --- Constants ---
 
 PACKAGE_DIR = os.environ.get("NAVVI_PACKAGE_DIR") or str(Path(__file__).resolve().parent.parent)
-REPO = os.environ.get("NAVVI_REPO") or None
+REPO = os.environ.get("NAVVI_REPO") or "fellowship-dev/navvi"
 MACHINE_TYPE = os.environ.get("NAVVI_MACHINE") or "basicLinux32gb"
 NAVVI_PORT = int(os.environ.get("NAVVI_PORT") or 8024)
 VNC_PORT = int(os.environ.get("NAVVI_VNC_PORT") or 6080)
@@ -85,16 +85,16 @@ active_persona: Optional[str] = None
 
 mcp = FastMCP(
     "navvi",
-    version="3.11.0",
+    version="3.12.0",
 )
 
 # Ensure default persona exists on startup
 ensure_default()
 
-# Progressive disclosure: hide atomic tools by default.
-# Journey tools (navvi_browse, navvi_login) handle most interactions.
-# Atomic tools (navvi_click, navvi_find, etc.) are available on demand.
-mcp.disable(tags={"atomic", "recording"})
+# Recording tools hidden by default (rarely needed).
+# Atomic tools are always visible — Claude Code doesn't support dynamic
+# tool registration mid-session, so hide/reveal via navvi_atomic is broken.
+mcp.disable(tags={"recording"})
 
 
 # --- MCP Resources ---
@@ -768,8 +768,6 @@ async def navvi_start(
         ).format(persona, cname, NAVVI_PORT, health, VNC_PORT)
 
     if mode == "remote":
-        if not REPO:
-            return 'Error: remote mode requires NAVVI_REPO env var (e.g. "fellowship-dev/navvi"). Set it in your MCP config.'
         missing = check_remote_deps()
         if missing:
             return format_missing(missing)
@@ -1745,7 +1743,7 @@ async def _execute_action(action: dict, api_base: str, dom_elements: list):
 
     elif atype == "fill":
         selector = action.get("selector_hint", "")
-        value = action.get("value", "")
+        value = action.get("text", "") or action.get("value", "")
         if selector and value:
             try:
                 resp = await api_call("POST", "/find", {"selector": selector}, api_base)
@@ -1759,14 +1757,16 @@ async def _execute_action(action: dict, api_base: str, dom_elements: list):
                 pass
 
     elif atype == "press":
-        key = action.get("value", "Return")
+        key = action.get("key") or action.get("value") or "Return"
+        if not isinstance(key, str) or not key:
+            key = "Return"
         await api_call("POST", "/key", {"key": key}, api_base)
 
     elif atype == "scroll":
         await api_call("POST", "/scroll", {"direction": "down", "amount": 3}, api_base)
 
     elif atype == "navigate":
-        nav_url = action.get("value", "")
+        nav_url = action.get("url") or action.get("value", "")
         if nav_url:
             await api_call("POST", "/navigate", {"url": nav_url}, api_base)
 
@@ -1786,27 +1786,13 @@ async def _execute_action(action: dict, api_base: str, dom_elements: list):
 
 @mcp.tool()
 async def navvi_atomic(enable: bool = True, ctx: Context = None) -> str:
-    """Enable or disable atomic browser tools (navvi_click, navvi_find, navvi_fill, etc.).
+    """Quick reference for atomic browser tools (navvi_click, navvi_find, navvi_fill, etc.).
 
-    Atomic tools are hidden by default — use navvi_browse for most tasks.
-    Enable atomic tools only when navvi_browse asks for guidance or you need fine-grained control.
+    Atomic tools are always available. Call this for a summary of tools and workflow.
 
-    Example: navvi_atomic(enable=true) → reveals 12 low-level tools
+    Example: navvi_atomic() → lists all atomic tools with parameters
     """
-    if ctx:
-        # Session-level: sends notifications/tools/list_changed → CC re-fetches tool list
-        if enable:
-            await ctx.enable_components(tags={"atomic"})
-        else:
-            await ctx.disable_components(tags={"atomic"})
-    else:
-        # Fallback to global (no notification)
-        if enable:
-            mcp.enable(tags={"atomic"})
-        else:
-            mcp.disable(tags={"atomic"})
-    if enable:
-        return """Atomic tools enabled. You can now call these directly:
+    return """Atomic tools available — call these directly:
 
 navvi_open(url, persona?) — Navigate to a URL
 navvi_find(selector, all?, persona?) — Find element by CSS selector → screen-ready (x, y). THE way to get coordinates.
@@ -1823,8 +1809,6 @@ navvi_url(persona?) — Get current page URL
 navvi_creds(action, entry?, field?, persona?) — Gopass credentials: list, get, generate, import, autofill
 
 Workflow: navvi_find(selector) → get (x, y) → navvi_click/navvi_fill at those coords → navvi_screenshot to verify."""
-    else:
-        return "Atomic tools hidden. Use navvi_browse for browser interactions."
 
 
 # --- Journey Tools ---
@@ -1863,6 +1847,13 @@ async def navvi_browse(
 
     steps_log = []
 
+    # Fetch viewport info once (doesn't change between steps)
+    viewport_info = None
+    try:
+        viewport_info = await api_call("GET", "/viewport", api_base=api_base)
+    except Exception:
+        pass
+
     for step in range(max_steps):
         # 1. Get current state
         try:
@@ -1891,8 +1882,8 @@ async def navvi_browse(
         except Exception:
             dom_elements = []
 
-        # 4. Analyze
-        analysis = await analyze(screenshot_b64, dom_elements, instruction, current_url, current_title)
+        # 4. Analyze (pass recent steps so Haiku doesn't repeat failed actions)
+        analysis = await analyze(screenshot_b64, dom_elements, instruction, current_url, current_title, steps_log, viewport_info)
 
         tier = analysis.get("tier_used", "unknown")
         confidence = analysis.get("confidence", 0)
@@ -1914,6 +1905,22 @@ async def navvi_browse(
             shot_path = _save_screenshot(screenshot_b64) if screenshot_b64 else "(no screenshot)"
             summary = _format_steps_log(steps_log)
             return "Completed in {} steps.\n\n{}\n\nFinal screenshot: {}".format(step + 1, summary, shot_path)
+
+        # 5b. Check if stuck (3 identical consecutive actions)
+        if len(steps_log) >= 3:
+            last3 = steps_log[-3:]
+            if (
+                all(s["action_taken"] == last3[0]["action_taken"] for s in last3)
+                and all(s["page_type"] == last3[0]["page_type"] for s in last3)
+            ):
+                shot_path = _save_screenshot(screenshot_b64) if screenshot_b64 else "(no screenshot)"
+                summary = _format_steps_log(steps_log)
+                return (
+                    "Stuck: repeated '{}' action 3 times on '{}' page with no progress.\n\n"
+                    "Steps so far:\n{}\n\n"
+                    "Screenshot: {}\n\n"
+                    "Use atomic tools (navvi_find, navvi_click) to interact directly."
+                ).format(last3[0]["action_taken"], last3[0]["page_type"], summary, shot_path)
 
         # 6. Check if stuck (low confidence + heuristics tier = ask for guidance)
         if confidence < 0.5 and tier == "heuristics":

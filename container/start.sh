@@ -143,6 +143,18 @@ if ! kill -0 "$FIREFOX_PID" 2>/dev/null; then
   exit 1
 fi
 
+# Maximize browser window to fill the virtual display
+echo "[navvi] Maximizing browser window..."
+for i in 1 2 3; do
+  WID=$(xdotool search --onlyvisible --class "firefox\|Navigator\|camoufox" 2>/dev/null | head -1)
+  if [ -n "$WID" ]; then
+    xdotool windowactivate "$WID" windowsize "$WID" 1920 1080 windowmove "$WID" 0 0 2>/dev/null
+    echo "[navvi] Window $WID maximized"
+    break
+  fi
+  sleep 1
+done
+
 echo "[navvi] Starting x11vnc..."
 x11vnc -display "$DISPLAY" -forever -shared -nopw -rfbport 5900 -bg -q 2>/dev/null
 
