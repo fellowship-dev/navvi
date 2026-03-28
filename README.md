@@ -46,7 +46,7 @@ Navvi gives your agent a persistent browser with its own identity. A [Camoufox](
 - **Credential vault** &mdash; passwords generated and stored inside the container, auto-filled into forms without the AI ever seeing them
 - **Doesn't get blocked** &mdash; anti-detect browser with OS-level input that passes bot detection where Selenium and Playwright fail
 - **CAPTCHA handling** &mdash; auto-clicks through common bot checks, with VNC handoff to a human when it can't
-- **Multi-persona** &mdash; multiple browser identities on one container, each with its own cookies, credentials, and history
+- **Multi-persona** &mdash; each persona runs in its own isolated container with dedicated cookies, credentials, and history
 - **Keeps your context clean** &mdash; 11 high-level tools by default, 12 more unlock on demand so your agent isn't overwhelmed by options
 
 ## Quick Start
@@ -127,7 +127,7 @@ curl -fsSL https://raw.githubusercontent.com/fellowship-dev/navvi/main/install-c
 
 **Account signup.** Your agent creates accounts on services &mdash; generates passwords inside the container, fills forms, and persists the credentials for future logins.
 
-**Multi-persona workflows.** Run multiple browser identities simultaneously &mdash; each persona has its own Firefox instance, cookies, and credentials, all sharing one Docker container.
+**Multi-persona workflows.** Run multiple browser identities simultaneously &mdash; each persona gets its own container with isolated cookies and credentials.
 
 **Form automation on protected sites.** Fill complex forms with dropdowns, date pickers, and multi-step wizards. OS-level input passes bot detection that blocks Selenium and Playwright.
 
@@ -135,7 +135,7 @@ curl -fsSL https://raw.githubusercontent.com/fellowship-dev/navvi/main/install-c
 
 ## How It Works
 
-One Docker container runs multiple Firefox instances (one per persona), each with its own cookies and profile. Your agent talks MCP, Navvi translates to browser actions.
+Each persona runs in its own Docker container with a dedicated Firefox instance, cookies, and profile. Your agent talks MCP, Navvi translates to browser actions.
 
 **Anti-detection** uses [Camoufox](https://github.com/daijro/camoufox) &mdash; a patched Firefox with fingerprint masking at the C++ level. Sites that detect and block Selenium, Playwright, and headless Chrome don't detect Navvi.
 
@@ -146,7 +146,7 @@ One Docker container runs multiple Firefox instances (one per persona), each wit
 - `autofill` &mdash; reads gopass and types directly into the browser. The password never travels through the AI.
 - `import` &mdash; bulk-import existing credentials from a JSON file.
 
-**Multi-persona** &mdash; each persona gets its own Firefox instance with a separate profile (cookies, history, logins) on the same shared Xvfb display. Gopass credentials are namespaced per persona (`navvi/{persona}/{service}`).
+**Multi-persona** &mdash; each persona runs in its own container (`navvi-{name}`) with an isolated Firefox profile, cookies, and history. Gopass credentials are namespaced per persona (`navvi/{persona}/{service}`) in a shared vault.
 
 ## MCP Tools
 
@@ -245,16 +245,16 @@ Structured workflows available as prompt templates:
 
 ## Personas
 
-Each persona is a separate browser identity with its own Firefox instance, cookies, credentials, and history. Multiple personas share one Docker container.
+Each persona is a separate browser identity with its own container, Firefox instance, cookies, credentials, and history.
 
 ```
 navvi_persona(action="create", name="mybot", description="GitHub admin", stealth="high")
-navvi_start(persona="mybot")           -> launches a new Firefox instance
+navvi_start(persona="mybot")           -> launches container navvi-mybot
 navvi_persona(action="list")
 navvi_account(action="add", persona="mybot", service="github.com", email="bot@x.com")
 ```
 
-Persona config and state live in `~/.navvi/navvi.db`. Browser profiles and credentials persist in shared Docker volumes.
+Persona config and state live in `~/.navvi/navvi.db`. Each persona's browser profile persists in its own Docker volume (`navvi-profile-{name}`). Credentials share a common gopass vault.
 
 ## Requirements
 
