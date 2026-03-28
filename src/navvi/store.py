@@ -5,6 +5,7 @@ Schema:
   personas: config + runtime state (name, description, purpose, stealth, locale, timezone, etc.)
   accounts: credential references per persona (service, email, gopass ref, status)
   actions:  append-only action log per persona (timestamped events)
+  milestones: curated lifetime timeline per persona (events with evidence)
 """
 
 import json
@@ -61,6 +62,18 @@ def init_db():
             persona TEXT NOT NULL REFERENCES personas(name) ON DELETE CASCADE,
             action TEXT NOT NULL,
             detail TEXT DEFAULT '',
+            ts REAL NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS milestones (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            persona TEXT NOT NULL REFERENCES personas(name) ON DELETE CASCADE,
+            event TEXT NOT NULL,
+            detail TEXT DEFAULT '',
+            url TEXT DEFAULT '',
+            tags TEXT DEFAULT '[]',
+            screenshot_path TEXT DEFAULT '',
+            source TEXT DEFAULT 'manual',
             ts REAL NOT NULL
         );
     """)
@@ -226,6 +239,111 @@ def get_recent_actions(persona: str, limit: int = 20) -> list:
     return [dict(r) for r in reversed(rows)]
 
 
+# --- Milestones (lifetime timeline) ---
+
+def _timeline_dir(persona: str) -> Path:
+    """Persistent screenshot dir for milestones: ~/.navvi/{persona}/timeline/"""
+    d = Path.home() / ".navvi" / persona / "timeline"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def add_milestone(
+    persona: str,
+    event: str,
+    detail: str = "",
+    url: str = "",
+    tags: list = None,
+    screenshot_path: str = "",
+    source: str = "manual",
+    ts: float = None,
+) -> dict:
+    conn = _connect()
+    now = ts or time.time()
+    tags_json = json.dumps(tags or [])
+    cursor = conn.execute(
+        "INSERT INTO milestones (persona, event, detail, url, tags, screenshot_path, source, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (persona, event, detail, url, tags_json, screenshot_path, source, now),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM milestones WHERE id = ?", (cursor.lastrowid,)).fetchone()
+    conn.close()
+    return _milestone_to_dict(row)
+
+
+def list_milestones(persona: str, tag: str = None, limit: int = 0) -> list:
+    conn = _connect()
+    if tag:
+        rows = conn.execute(
+            "SELECT * FROM milestones WHERE persona = ? AND tags LIKE ? ORDER BY ts",
+            (persona, f'%"{tag}"%'),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM milestones WHERE persona = ? ORDER BY ts",
+            (persona,),
+        ).fetchall()
+    conn.close()
+    results = [_milestone_to_dict(r) for r in rows]
+    if limit > 0:
+        results = results[-limit:]
+    return results
+
+
+def delete_milestone(milestone_id: int) -> bool:
+    conn = _connect()
+    cursor = conn.execute("DELETE FROM milestones WHERE id = ?", (milestone_id,))
+    conn.commit()
+    conn.close()
+    return cursor.rowcount > 0
+
+
+def export_timeline(persona: str, tag: str = None) -> str:
+    """Generate a readable markdown timeline for a persona."""
+    import datetime
+    p = get_persona(persona)
+    if not p:
+        return f"Persona '{persona}' not found."
+
+    milestones = list_milestones(persona, tag=tag)
+    if not milestones:
+        return f"No milestones recorded for '{persona}'."
+
+    desc = f" — {p['description']}" if p['description'] else ""
+    lines = [f"# {persona}{desc} — Timeline", ""]
+
+    current_date = None
+    for m in milestones:
+        dt = datetime.datetime.fromtimestamp(m["ts"])
+        date_str = dt.strftime("%Y-%m-%d")
+        time_str = dt.strftime("%H:%M")
+
+        if date_str != current_date:
+            current_date = date_str
+            lines.append(f"## {date_str}")
+            lines.append("")
+
+        tag_str = " ".join(f"`{t}`" for t in m["tags"]) if m["tags"] else ""
+        lines.append(f"### {time_str} — {m['event']}")
+        if tag_str:
+            lines.append(f"Tags: {tag_str}")
+        if m["url"]:
+            lines.append(f"URL: {m['url']}")
+        if m["detail"]:
+            lines.append(f"\n{m['detail']}")
+        if m["screenshot_path"]:
+            lines.append(f"\n![{m['event']}]({m['screenshot_path']})")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _milestone_to_dict(row) -> dict:
+    d = dict(row)
+    d["tags"] = json.loads(d.get("tags", "[]"))
+    return d
+
+
 # --- State resource (compact YAML-like summary) ---
 
 def persona_state_summary(name: str) -> str:
@@ -255,6 +373,14 @@ def persona_state_summary(name: str) -> str:
             status_suffix = f" ({a['status']})" if a['status'] != 'active' else ""
             creds = f" creds={a['creds_ref']}" if a['creds_ref'] else ""
             lines.append(f"  - {a['service']}: {a['email']}{creds}{status_suffix}")
+
+    milestones = list_milestones(name)
+    if milestones:
+        lines.append("")
+        lines.append(f"milestones: {len(milestones)} recorded")
+        for m in milestones[-5:]:
+            tag_str = f" [{', '.join(m['tags'])}]" if m['tags'] else ""
+            lines.append(f"  - {_format_ts(m['ts'])} — {m['event']}{tag_str}")
 
     actions = get_recent_actions(name, limit=10)
     if actions:

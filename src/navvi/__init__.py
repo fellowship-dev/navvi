@@ -57,6 +57,11 @@ from navvi.store import (
     persona_state_summary,
     personas_list_summary,
     ensure_default,
+    add_milestone,
+    list_milestones,
+    delete_milestone,
+    export_timeline,
+    _timeline_dir,
 )
 
 # --- Constants ---
@@ -85,7 +90,7 @@ active_persona: Optional[str] = None
 
 mcp = FastMCP(
     "navvi",
-    version="3.12.0",
+    version="3.13.0",
 )
 
 # Ensure default persona exists on startup
@@ -640,6 +645,137 @@ async def navvi_account(
 
         else:
             return f"Unknown action '{action}'. Valid: add, list, update, delete."
+    except Exception as e:
+        return f"Error: {e}"
+
+
+@mcp.tool(tags={"management"})
+async def navvi_milestone(
+    action: str,
+    persona: str = "default",
+    event: str = "",
+    detail: str = "",
+    url: str = "",
+    tags: str = "",
+    screenshot: bool = False,
+    source: str = "manual",
+    ts: str = "",
+    screenshot_file: str = "",
+    tag: str = "",
+    milestone_id: int = 0,
+    limit: int = 0,
+) -> str:
+    """Curated lifetime timeline for a persona — milestones with evidence. Actions: add, list, export, delete.
+
+    Add: navvi_milestone(action="add", persona="chet", event="Signed up for Reddit", detail="Username: chestertownwilliams. Subscribed to r/selfhosted.", url="https://reddit.com/user/chestertownwilliams", tags="first,reddit,signup", screenshot=true)
+    Import (retroactive): navvi_milestone(action="add", persona="chet", event="Created Outlook account", detail="Email: chester.town.williams@outlook.com", ts="2026-03-27T11:00:00", screenshot_file="/path/to/old-screenshot.png", source="import")
+    List: navvi_milestone(action="list", persona="chet") or navvi_milestone(action="list", persona="chet", tag="reddit", limit=10)
+    Export: navvi_milestone(action="export", persona="chet") — generates full markdown timeline
+    Delete: navvi_milestone(action="delete", milestone_id=3)
+
+    Tags: comma-separated string. Use 'first' tag for firsts (first post, first signup, etc.).
+    Screenshot: if true, captures current browser screen and attaches it. For retroactive imports, use screenshot_file to attach an existing image.
+    Detail: include FULL content — exact post text, comment body, form values. This builds the persona's voice and style for consistency."""
+    import shutil
+    try:
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+
+        if action == "add":
+            if not event:
+                return "Error: event is required for add."
+
+            # Parse optional timestamp for retroactive imports
+            timestamp = None
+            if ts:
+                import datetime
+                for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d"):
+                    try:
+                        timestamp = datetime.datetime.strptime(ts, fmt).timestamp()
+                        break
+                    except ValueError:
+                        continue
+                if not timestamp:
+                    return f"Error: could not parse ts '{ts}'. Use ISO format: 2026-03-27T11:00:00"
+
+            # Handle screenshot
+            saved_screenshot = ""
+            if screenshot and navvi_api:
+                # Capture current browser screenshot and save persistently
+                try:
+                    import datetime
+                    result = await api_call("GET", "/screenshot")
+                    b64_data = result.get("image", "")
+                    if b64_data:
+                        import base64
+                        dt = datetime.datetime.now()
+                        slug = event.lower().replace(" ", "-")[:40]
+                        slug = "".join(c for c in slug if c.isalnum() or c == "-")
+                        fname = f"{dt.strftime('%Y-%m-%d-%H%M')}-{slug}.png"
+                        dest = _timeline_dir(persona) / fname
+                        dest.write_bytes(base64.b64decode(b64_data))
+                        saved_screenshot = str(dest)
+                except Exception:
+                    pass  # Screenshot is best-effort
+
+            if screenshot_file and os.path.isfile(screenshot_file):
+                # Copy existing screenshot to timeline dir
+                import datetime
+                dt = datetime.datetime.fromtimestamp(timestamp or time.time())
+                slug = event.lower().replace(" ", "-")[:40]
+                slug = "".join(c for c in slug if c.isalnum() or c == "-")
+                ext = os.path.splitext(screenshot_file)[1] or ".png"
+                fname = f"{dt.strftime('%Y-%m-%d-%H%M')}-{slug}{ext}"
+                dest = _timeline_dir(persona) / fname
+                shutil.copy2(screenshot_file, str(dest))
+                saved_screenshot = str(dest)
+
+            m = add_milestone(
+                persona=persona,
+                event=event,
+                detail=detail,
+                url=url,
+                tags=tag_list,
+                screenshot_path=saved_screenshot,
+                source=source,
+                ts=timestamp,
+            )
+            shot_info = f" (screenshot: {saved_screenshot})" if saved_screenshot else ""
+            return f"Milestone #{m['id']} added: {event}{shot_info}"
+
+        elif action == "list":
+            milestones = list_milestones(persona, tag=tag, limit=limit)
+            if not milestones:
+                filter_info = f" with tag '{tag}'" if tag else ""
+                return f"No milestones for '{persona}'{filter_info}."
+            lines = []
+            for m in milestones:
+                from navvi.store import _format_ts
+                tag_str = f" [{', '.join(m['tags'])}]" if m['tags'] else ""
+                shot = " 📸" if m['screenshot_path'] else ""
+                lines.append(f"[{m['id']}] {_format_ts(m['ts'])} — {m['event']}{tag_str}{shot}")
+                if m['detail']:
+                    # Show first 100 chars of detail
+                    preview = m['detail'][:100] + ("..." if len(m['detail']) > 100 else "")
+                    lines.append(f"    {preview}")
+            return "\n".join(lines)
+
+        elif action == "export":
+            md = export_timeline(persona, tag=tag)
+            # Also save to file
+            timeline_path = Path.home() / ".navvi" / persona / "timeline.md"
+            timeline_path.parent.mkdir(parents=True, exist_ok=True)
+            timeline_path.write_text(md)
+            return f"Timeline exported to {timeline_path}\n\n{md}"
+
+        elif action == "delete":
+            if not milestone_id:
+                return "Error: milestone_id is required for delete."
+            if delete_milestone(milestone_id):
+                return f"Milestone {milestone_id} deleted."
+            return f"Milestone {milestone_id} not found."
+
+        else:
+            return f"Unknown action '{action}'. Valid: add, list, export, delete."
     except Exception as e:
         return f"Error: {e}"
 

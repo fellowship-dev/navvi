@@ -76,6 +76,20 @@ For every step:
 - **navvi-login** — dedicated login flow with 2FA handling
 - **navvi-signup** — account creation with credential generation
 
+## Milestones
+
+Record milestones for significant moments during browsing — not every click, but meaningful achievements:
+
+- **First visit to a new service**: `navvi_milestone(action="add", event="First visit to {domain}", screenshot=true, tags="first,{service}")`
+- **Posted content** (comment, reply, post): include the FULL text in detail:
+  ```
+  navvi_milestone(action="add", event="Posted on {service}", detail="Subreddit: r/selfhosted\n\nFull text:\n\"Had the same issue with SPF records...\"", url="https://...", tags="{service},comment", screenshot=true)
+  ```
+- **Received interaction** (like, reply, notification): `navvi_milestone(action="add", event="First reply received on {service}", screenshot=true, tags="first,{service},interaction")`
+- **Profile changes**: bio updates, avatar, settings
+
+Always include full content text — this maintains persona voice consistency across sessions.
+
 ## Response Format
 
 When done, return:
