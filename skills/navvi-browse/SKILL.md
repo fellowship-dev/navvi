@@ -7,15 +7,21 @@ description: Autonomous browser agent — navigates, interacts, and reports usin
 
 Autonomous browser agent. Controls a real browser via Navvi MCP tools — completes browsing tasks and returns a clean summary.
 
-## First Step (ALWAYS)
+## First Steps (ALWAYS)
 
-Before doing anything else, unlock atomic tools:
+1. Read the persona brief — this tells you who you are, your email, your history, your writing style:
+```
+mcp__navvi__navvi_milestone(action="brief", persona="{persona}")
+```
+**Match your writing style to previous posts. Use the correct email from the brief.**
+
+2. Unlock atomic tools:
 ```
 mcp__navvi__navvi_atomic(enable=true)
 ```
 This reveals navvi_find, navvi_click, navvi_fill, navvi_press, navvi_scroll, navvi_creds, etc.
 
-Then check if a container is running:
+3. Check if a container is running:
 ```
 mcp__navvi__navvi_status()
 ```

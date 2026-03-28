@@ -338,6 +338,93 @@ def export_timeline(persona: str, tag: str = None) -> str:
     return "\n".join(lines)
 
 
+def generate_brief(persona: str) -> str:
+    """Generate a persona brief — a concise 'who am I' document for Claude sessions.
+
+    Built from persona config, accounts, and milestones. Gives any fresh session
+    enough context to act correctly as this persona (right email, right username,
+    right voice, right history).
+    """
+    import datetime
+    p = get_persona(persona)
+    if not p:
+        return f"Persona '{persona}' not found."
+
+    lines = [f"# {persona} — Persona Brief", ""]
+
+    # Identity
+    if p['description']:
+        lines.append(f"**Who I am:** {p['description']}")
+    if p['purpose']:
+        lines.append(f"**Purpose:** {p['purpose']}")
+    lines.append(f"**Location:** {p['locale']} / {p['timezone']}")
+    lines.append(f"**Stealth:** {p['stealth']}")
+    lines.append("")
+
+    # Accounts — this is the critical part that prevents wrong-email bugs
+    accounts = list_accounts(persona)
+    if accounts:
+        lines.append("## My Accounts")
+        lines.append("")
+        for a in accounts:
+            status = f" ⚠️ {a['status']}" if a['status'] != 'active' else ""
+            notes = f" — {a['notes']}" if a['notes'] else ""
+            lines.append(f"- **{a['service']}**: {a['email']}{status}{notes}")
+        lines.append("")
+        # Extract primary email
+        email_accounts = [a for a in accounts if a['service'] in ('outlook.com', 'gmail', 'tutanota', 'protonmail') and a['status'] == 'active']
+        if email_accounts:
+            primary = email_accounts[0]
+            lines.append(f"**⚡ My primary email: `{primary['email']}`** — use this when signing up for new services.")
+            lines.append("")
+
+    # Milestones summary — what I've done
+    milestones = list_milestones(persona)
+    if milestones:
+        lines.append("## What I've Done")
+        lines.append("")
+        for m in milestones:
+            dt = datetime.datetime.fromtimestamp(m["ts"])
+            date_str = dt.strftime("%Y-%m-%d")
+            tag_str = f" [{', '.join(m['tags'])}]" if m['tags'] else ""
+            lines.append(f"- **{date_str}** — {m['event']}{tag_str}")
+            # Include first 200 chars of detail for context
+            if m['detail']:
+                preview = m['detail'].split('\n')[0][:200]
+                lines.append(f"  {preview}")
+        lines.append("")
+
+    # Writing style hints from milestone content
+    posts = [m for m in milestones if any(t in (m.get('tags') or []) for t in ['comment', 'post', 'reply'])]
+    if posts:
+        lines.append("## My Writing Style")
+        lines.append("")
+        lines.append("Here are things I've written before — match this tone and style:")
+        lines.append("")
+        for m in posts[-3:]:  # last 3 posts
+            if m['detail']:
+                lines.append(f"**{m['event']}:**")
+                lines.append(f"> {m['detail'][:500]}")
+                lines.append("")
+
+    # Rules
+    lines.append("## Rules")
+    lines.append("")
+    lines.append("- Always use my primary email when signing up for new services")
+    lines.append("- Match my writing style from previous posts")
+    lines.append("- Record milestones for significant actions (`navvi_milestone`)")
+    lines.append("- Check my account list before creating duplicate accounts")
+
+    brief = "\n".join(lines)
+
+    # Save to file
+    brief_path = Path.home() / ".navvi" / persona / "brief.md"
+    brief_path.parent.mkdir(parents=True, exist_ok=True)
+    brief_path.write_text(brief)
+
+    return brief
+
+
 def _milestone_to_dict(row) -> dict:
     d = dict(row)
     d["tags"] = json.loads(d.get("tags", "[]"))

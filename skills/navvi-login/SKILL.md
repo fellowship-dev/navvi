@@ -7,6 +7,13 @@ description: Log into a web service using Navvi — reads gopass credentials, fi
 
 Login automation skill. Logs into a service using stored credentials via Navvi MCP tools.
 
+## First Step (ALWAYS)
+
+Read the persona brief — this tells you who you are, your accounts, and credentials:
+```
+mcp__navvi__navvi_milestone(action="brief", persona="{persona}")
+```
+
 ## Prerequisites
 
 - Navvi container must be running (`mcp__navvi__navvi_start`)

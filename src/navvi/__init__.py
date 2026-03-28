@@ -61,6 +61,7 @@ from navvi.store import (
     list_milestones,
     delete_milestone,
     export_timeline,
+    generate_brief,
     _timeline_dir,
 )
 
@@ -90,7 +91,7 @@ active_persona: Optional[str] = None
 
 mcp = FastMCP(
     "navvi",
-    version="3.13.0",
+    version="3.14.0",
 )
 
 # Ensure default persona exists on startup
@@ -671,6 +672,7 @@ async def navvi_milestone(
     Import (retroactive): navvi_milestone(action="add", persona="chet", event="Created Outlook account", detail="Email: chester.town.williams@outlook.com", ts="2026-03-27T11:00:00", screenshot_file="/path/to/old-screenshot.png", source="import")
     List: navvi_milestone(action="list", persona="chet") or navvi_milestone(action="list", persona="chet", tag="reddit", limit=10)
     Export: navvi_milestone(action="export", persona="chet") — generates full markdown timeline
+    Brief: navvi_milestone(action="brief", persona="chet") — generates persona brief (who am I, my accounts, my email, my history, my writing style). READ THIS BEFORE ACTING AS A PERSONA.
     Delete: navvi_milestone(action="delete", milestone_id=3)
 
     Tags: comma-separated string. Use 'first' tag for firsts (first post, first signup, etc.).
@@ -740,6 +742,8 @@ async def navvi_milestone(
                 ts=timestamp,
             )
             shot_info = f" (screenshot: {saved_screenshot})" if saved_screenshot else ""
+            # Auto-regenerate brief after every milestone add
+            generate_brief(persona)
             return f"Milestone #{m['id']} added: {event}{shot_info}"
 
         elif action == "list":
@@ -774,8 +778,12 @@ async def navvi_milestone(
                 return f"Milestone {milestone_id} deleted."
             return f"Milestone {milestone_id} not found."
 
+        elif action == "brief":
+            brief = generate_brief(persona)
+            return brief
+
         else:
-            return f"Unknown action '{action}'. Valid: add, list, export, delete."
+            return f"Unknown action '{action}'. Valid: add, list, export, brief, delete."
     except Exception as e:
         return f"Error: {e}"
 

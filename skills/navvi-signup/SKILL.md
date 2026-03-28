@@ -7,9 +7,15 @@ description: Create a new account on a web service using Navvi — generates cre
 
 Account creation skill. Creates a new account on a service using Navvi MCP tools and gopass credentials.
 
-## First Step (ALWAYS)
+## First Steps (ALWAYS)
 
-Unlock atomic tools — you'll need them for form filling:
+1. Read the persona brief — this tells you who you are, your email, your accounts, your history:
+```
+mcp__navvi__navvi_milestone(action="brief", persona="{persona}")
+```
+**Use the primary email from the brief when signing up. Never guess from the persona name.**
+
+2. Unlock atomic tools — you'll need them for form filling:
 ```
 mcp__navvi__navvi_atomic(enable=true)
 ```
