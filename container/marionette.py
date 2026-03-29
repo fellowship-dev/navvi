@@ -45,6 +45,31 @@ class Marionette:
             f"after {retries} attempts"
         )
 
+    def probe(self):
+        """Probe Marionette with a lightweight command.
+
+        Returns True if healthy, False if zombie (accepts TCP but
+        returns empty bytes or times out on handshake).
+        """
+        probe_sock = None
+        try:
+            probe_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            probe_sock.settimeout(3)
+            probe_sock.connect((self.host, self.port))
+            # Read the hello handshake — zombie returns b''
+            ch = probe_sock.recv(1)
+            if not ch:
+                return False
+            return True
+        except (ConnectionRefusedError, OSError, socket.timeout):
+            return False
+        finally:
+            if probe_sock:
+                try:
+                    probe_sock.close()
+                except OSError:
+                    pass
+
     def close(self):
         if self.sock:
             try:

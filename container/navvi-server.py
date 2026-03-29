@@ -23,10 +23,12 @@ from typing import Optional
 
 from marionette import Marionette, MarionetteError
 
+import logging
 import signal
 import time
 
 app = FastAPI(title="Navvi Server", version="3.0.0")
+log = logging.getLogger("navvi-server")
 
 # --- Globals ---
 
@@ -38,21 +40,133 @@ BASE_MARIONETTE_PORT = 2828
 # Firefox processes inside one container.
 _marionette: Optional[Marionette] = None
 _firefox_pid: int = 0
+_recovering: bool = False  # prevents re-entrant recovery
+
+
+def _is_zombie() -> bool:
+    """Check if Marionette is in zombie state (accepts TCP, returns empty bytes).
+
+    This happens when a previous client disconnected uncleanly — Marionette
+    locks up but Firefox is still alive.
+    """
+    probe = Marionette(port=BASE_MARIONETTE_PORT)
+    return not probe.probe()
+
+
+def _restart_firefox():
+    """Kill Firefox and restart it. Profile persists on disk.
+
+    Marionette is single-client — when it goes zombie, the only fix is
+    restarting the Firefox process. We use SIGTERM first for a graceful
+    shutdown (flushes cookies/IndexedDB), then SIGKILL as fallback.
+    """
+    global _marionette, _firefox_pid, _recovering
+
+    if _recovering:
+        log.warning("[recovery] Already in progress, skipping")
+        return
+    _recovering = True
+
+    try:
+        log.warning("[recovery] Restarting Firefox (zombie Marionette detected)")
+
+        # Close our stale Marionette socket
+        if _marionette:
+            _marionette.close()
+            _marionette = None
+
+        # Kill Firefox gracefully, then force
+        subprocess.run(["pkill", "-TERM", "camoufox-bin"], timeout=3, capture_output=True)
+        for _ in range(10):
+            result = subprocess.run(
+                ["pgrep", "-f", "camoufox-bin"],
+                capture_output=True, timeout=3,
+            )
+            if result.returncode != 0:
+                break
+            time.sleep(1)
+        else:
+            subprocess.run(["pkill", "-9", "camoufox-bin"], timeout=3, capture_output=True)
+            time.sleep(1)
+
+        # Restart Firefox with same flags as start.sh
+        env = os.environ.copy()
+        env["DISPLAY"] = display
+        proc = subprocess.Popen(
+            ["camoufox-bin", "--marionette", "--no-remote", "about:blank"],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        _firefox_pid = proc.pid
+        log.warning("[recovery] Firefox restarted (PID %d), waiting for Marionette...", _firefox_pid)
+
+        # Wait for Marionette to become available
+        time.sleep(3)
+
+        # Re-maximize the window
+        try:
+            subprocess.run(
+                ["bash", "-c",
+                 'WID=$(xdotool search --onlyvisible --class "firefox|Navigator|camoufox" 2>/dev/null | head -1); '
+                 '[ -n "$WID" ] && xdotool windowactivate "$WID" windowsize "$WID" 1920 1080 windowmove "$WID" 0 0'],
+                env=env, capture_output=True, timeout=5,
+            )
+        except Exception:
+            pass
+
+        # Reconnect Marionette
+        _marionette = Marionette(port=BASE_MARIONETTE_PORT)
+        _marionette.connect(retries=15, delay=1.0)
+        _marionette.new_session()
+        log.warning("[recovery] Marionette reconnected successfully")
+    except Exception as e:
+        log.error("[recovery] Failed to restart Firefox: %s", e)
+        _marionette = None
+        raise
+    finally:
+        _recovering = False
 
 
 def _get_or_reconnect() -> Marionette:
-    """Return the single Marionette client, reconnecting if needed."""
+    """Return the single Marionette client, reconnecting if needed.
+
+    If the connection is dead AND Marionette is in zombie state, triggers
+    a full Firefox restart before reconnecting.
+    """
     global _marionette
     if _marionette:
         try:
             _marionette.get_url()
             return _marionette
         except Exception:
-            pass
+            _marionette.close()
+            _marionette = None
+
+    # Before attempting a fresh connect, check for zombie state
+    if _is_zombie():
+        _restart_firefox()
+        return _marionette
+
     _marionette = Marionette(port=BASE_MARIONETTE_PORT)
     _marionette.connect()
     _marionette.new_session()
     return _marionette
+
+
+def _with_marionette_retry(fn):
+    """Call fn() with the Marionette client. On failure, recover and retry once."""
+    try:
+        m = get_marionette()
+        return fn(m)
+    except (MarionetteError, Exception) as first_err:
+        log.warning("[retry] Marionette call failed (%s), attempting recovery...", first_err)
+        try:
+            _restart_firefox()
+            m = get_marionette()
+            return fn(m)
+        except Exception as retry_err:
+            raise MarionetteError(f"Failed after recovery: {retry_err}") from first_err
 
 
 # --- Pydantic models ---
@@ -166,8 +280,8 @@ KEY_MAP = {
 
 @app.get("/health")
 async def health():
-    """Check Camoufox + Xvfb are alive."""
-    checks = {"xvfb": False, "firefox": False, "marionette": False}
+    """Check Camoufox + Xvfb are alive. Auto-recovers from Marionette zombie state."""
+    checks = {"xvfb": False, "firefox": False, "marionette": False, "zombie_recovered": False}
 
     # Check Xvfb
     try:
@@ -203,9 +317,20 @@ async def health():
         m.get_url()
         checks["marionette"] = True
     except Exception:
+        # Firefox alive but Marionette dead = likely zombie. Try recovery.
+        if checks["firefox"] and _is_zombie():
+            try:
+                _restart_firefox()
+                checks["marionette"] = True
+                checks["zombie_recovered"] = True
+                checks["firefox"] = True  # new process
+                log.warning("[health] Zombie state recovered")
+            except Exception as e:
+                log.error("[health] Recovery failed: %s", e)
+        # If Firefox is dead entirely, Marionette can't work either
         pass
 
-    ok = all(checks.values())
+    ok = checks["xvfb"] and checks["firefox"] and checks["marionette"]
     return {"ok": ok, **checks}
 
 
@@ -213,13 +338,14 @@ async def health():
 async def navigate(req: NavigateRequest):
     """Navigate to a URL via Marionette."""
     try:
-        m = get_marionette()
-        m.navigate(req.url)
+        def _nav_and_read(m):
+            m.navigate(req.url)
+            return m
+        _with_marionette_retry(_nav_and_read)
         # Give the page a moment to start loading
         await asyncio.sleep(0.5)
-        url = m.get_url()
-        title = m.get_title()
-        return {"ok": True, "url": url, "title": title}
+        result = _with_marionette_retry(lambda m: {"url": m.get_url(), "title": m.get_title()})
+        return {"ok": True, **result}
     except MarionetteError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -228,8 +354,8 @@ async def navigate(req: NavigateRequest):
 async def get_url():
     """Get current page URL."""
     try:
-        m = get_marionette()
-        return {"url": m.get_url()}
+        url = _with_marionette_retry(lambda m: m.get_url())
+        return {"url": url}
     except MarionetteError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -238,8 +364,8 @@ async def get_url():
 async def get_title():
     """Get current page title."""
     try:
-        m = get_marionette()
-        return {"title": m.get_title()}
+        title = _with_marionette_retry(lambda m: m.get_title())
+        return {"title": title}
     except MarionetteError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -395,8 +521,7 @@ async def cursor():
 async def execute_js(req: ExecuteJSRequest):
     """Execute JavaScript in Firefox via Marionette."""
     try:
-        m = get_marionette()
-        result = m.execute_script(req.script, req.args)
+        result = _with_marionette_retry(lambda m: m.execute_script(req.script, req.args))
         return {"ok": True, "value": result}
     except MarionetteError as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -413,10 +538,9 @@ def get_viewport_offset():
     of the top-left corner of the viewport.
     """
     try:
-        m = get_marionette()
-        result = m.execute_script(
+        result = _with_marionette_retry(lambda m: m.execute_script(
             "return { x: window.mozInnerScreenX || 0, y: window.mozInnerScreenY || 0 }"
-        )
+        ))
         return (int(result.get("x", 0)), int(result.get("y", 0)))
     except Exception:
         return (0, 0)
@@ -432,10 +556,9 @@ async def viewport():
     """
     offset_x, offset_y = get_viewport_offset()
     try:
-        m = get_marionette()
-        dims = m.execute_script(
+        dims = _with_marionette_retry(lambda m: m.execute_script(
             "return { innerWidth: window.innerWidth, innerHeight: window.innerHeight }"
-        )
+        ))
     except Exception:
         dims = {}
     return {
@@ -457,7 +580,6 @@ async def find_element(req: FindRequest):
     to /click, /mousedown, etc.
     """
     try:
-        m = get_marionette()
         offset_x, offset_y = get_viewport_offset()
 
         if req.all:
@@ -483,7 +605,7 @@ async def find_element(req: FindRequest):
                     };
                 });
             """
-            elements = m.execute_script(script, [req.selector])
+            elements = _with_marionette_retry(lambda m: m.execute_script(script, [req.selector]))
             if not elements:
                 return {"ok": True, "found": False, "elements": []}
             # Apply screen offset
@@ -513,7 +635,7 @@ async def find_element(req: FindRequest):
                     height: Math.round(r.height),
                 };
             """
-            el = m.execute_script(script, [req.selector])
+            el = _with_marionette_retry(lambda m: m.execute_script(script, [req.selector]))
             if not el:
                 return {"ok": True, "found": False}
             el["x"] = el.pop("vx") + offset_x
@@ -599,7 +721,6 @@ async def creds_autofill(req: CredsAutofillRequest):
 
     # Find form fields
     try:
-        m = get_marionette()
         offset_x, offset_y = get_viewport_offset()
 
         find_script = """
@@ -616,12 +737,12 @@ async def creds_autofill(req: CredsAutofillRequest):
         # Find username field (optional — may not exist on password-only pages)
         username_el = None
         if username:
-            username_el = m.execute_script(find_script, [req.username_selector])
+            username_el = _with_marionette_retry(lambda m: m.execute_script(find_script, [req.username_selector]))
             if username_el and not username_el.get("visible"):
                 username_el = None
 
         # Find password field
-        password_el = m.execute_script(find_script, [req.password_selector])
+        password_el = _with_marionette_retry(lambda m: m.execute_script(find_script, [req.password_selector]))
         if not password_el or not password_el.get("visible"):
             raise HTTPException(status_code=404, detail=f"Password field not found: {req.password_selector}")
 
