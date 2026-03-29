@@ -240,6 +240,17 @@ class CredsImportRequest(BaseModel):
 
 def run_xdotool(args: str, timeout: float = 5.0) -> str:
     """Run an xdotool command and return stdout."""
+    # Clamp negative coordinates — xdotool interprets them as flags
+    if "mousemove" in args:
+        parts = args.split()
+        clamped = []
+        for p in parts:
+            try:
+                n = int(p)
+                clamped.append(str(max(0, n)))
+            except ValueError:
+                clamped.append(p)
+        args = " ".join(clamped)
     env = os.environ.copy()
     env["DISPLAY"] = display
     result = subprocess.run(
