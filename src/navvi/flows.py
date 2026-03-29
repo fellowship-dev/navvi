@@ -40,12 +40,33 @@ def extract_domain(url: str) -> str:
         return ""
 
 
+def _base_domain(domain: str) -> str:
+    """Extract the base (registrable) domain — e.g., old.reddit.com → reddit.com."""
+    parts = domain.split(".")
+    if len(parts) > 2:
+        return ".".join(parts[-2:])
+    return domain
+
+
 def match_flows(url: str) -> list:
-    """Find all stored flows matching a URL's domain."""
+    """Find all stored flows matching a URL's domain or sibling subdomains.
+
+    Matches exact domain first, then falls back to any flow whose base domain
+    matches (e.g., reddit.com, old.reddit.com, www.reddit.com all match each other).
+    """
     domain = extract_domain(url)
     if not domain:
         return []
-    return get_flows_for_domain(domain)
+
+    # Exact match first
+    exact = get_flows_for_domain(domain)
+    if exact:
+        return exact
+
+    # Fall back to base domain match — scan all flows
+    base = _base_domain(domain)
+    all_flows = list_all_flows()
+    return [f for f in all_flows if _base_domain(f["domain"]) == base]
 
 
 def build_recipe_context(flows: list) -> str:
