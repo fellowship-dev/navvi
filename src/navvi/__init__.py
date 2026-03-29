@@ -69,6 +69,24 @@ from navvi.store import (
     allocate_ports,
     release_ports,
     get_persona_ports,
+    get_recent_actions,
+    save_flow as store_save_flow_fn,
+    get_flow as store_get_flow_fn,
+    get_flows_for_domain as store_get_domain_fn,
+    list_all_flows as store_list_all_fn,
+    delete_flow as store_delete_flow_fn,
+    bump_flow_confidence,
+    reset_flow_confidence,
+)
+
+from navvi.flows import (
+    extract_domain,
+    match_flows,
+    build_recipe_context,
+    execute_fast_path,
+    judge_flow,
+    build_browse_footer,
+    get_action_log_slice,
 )
 
 # --- Constants ---
@@ -146,6 +164,90 @@ def audit_log_resource(name: str) -> str:
     lines = []
     for a in actions:
         lines.append(f"{_format_ts(a['ts'])} — {a['action']}: {a['detail']}")
+    return "\n".join(lines)
+
+
+@mcp.resource("flows://list")
+def flows_list_resource() -> str:
+    """All stored flow recipes grouped by domain."""
+    from navvi.store import list_all_flows
+    flows = list_all_flows()
+    if not flows:
+        return "No flow recipes stored yet."
+    by_domain = {}
+    for f in flows:
+        by_domain.setdefault(f["domain"], []).append(f)
+    lines = []
+    for domain, domain_flows in sorted(by_domain.items()):
+        lines.append(f"## {domain}")
+        for f in domain_flows:
+            conf = f["confidence"]
+            mode = "turbo" if conf >= 6 else ("fast" if conf >= 3 else "guided")
+            lines.append(f"  - {f['action']} (confidence: {conf}, mode: {mode}) — {f['description']}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+@mcp.resource("flows://{domain}")
+def flows_domain_resource(domain: str) -> str:
+    """All flow recipes for a specific domain."""
+    from navvi.store import get_flows_for_domain
+    flows = get_flows_for_domain(domain)
+    if not flows:
+        return f"No flow recipes for '{domain}'."
+    lines = [f"## {domain} flows", ""]
+    for f in flows:
+        conf = f["confidence"]
+        mode = "turbo" if conf >= 6 else ("fast" if conf >= 3 else "guided")
+        lines.append(f"### {f['action']} (confidence: {conf}, mode: {mode})")
+        lines.append(f"  {f['description']}")
+        if f["steps"]:
+            lines.append(f"  Steps: {len(f['steps'])}")
+        if f["caveats"]:
+            lines.append(f"  Caveats: {', '.join(f['caveats'])}")
+        if f["refs"]:
+            lines.append(f"  Refs: {', '.join(f['refs'])}")
+        lines.append(f"  Last verified: {f['last_verified'] or 'never'}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+@mcp.resource("flows://{domain}/{action}")
+def flows_detail_resource(domain: str, action: str) -> str:
+    """Full detail for a single flow recipe."""
+    from navvi.store import get_flow
+    f = get_flow(domain, action)
+    if not f:
+        return f"No flow recipe for '{domain}/{action}'."
+    import json
+    conf = f["confidence"]
+    mode = "turbo" if conf >= 6 else ("fast" if conf >= 3 else "guided")
+    lines = [
+        f"# {domain}/{action}",
+        f"Mode: {mode} (confidence: {conf})",
+        f"Description: {f['description']}",
+        f"Created: {f['created']}",
+        f"Last verified: {f['last_verified'] or 'never'}",
+        f"Last failed: {f['last_failed'] or 'never'}",
+    ]
+    if f["caveats"]:
+        lines.append("Caveats:")
+        for c in f["caveats"]:
+            lines.append(f"  - {c}")
+    if f["refs"]:
+        lines.append(f"Refs: {', '.join(f['refs'])}")
+    if f["steps"]:
+        lines.append("")
+        lines.append("Steps:")
+        for i, step in enumerate(f["steps"], 1):
+            parts = [f"  {i}. {step.get('action', '?')}"]
+            if step.get("selector"):
+                parts.append(f"selector={step['selector']}")
+            if step.get("expected_url"):
+                parts.append(f"expect={step['expected_url']}")
+            if step.get("detail"):
+                parts.append(f"({step['detail']})")
+            lines.append(" ".join(parts))
     return "\n".join(lines)
 
 
@@ -2028,6 +2130,186 @@ navvi_creds(action, entry?, field?, persona?) — Gopass credentials: list, get,
 Workflow: navvi_find(selector) → get (x, y) → navvi_click/navvi_fill at those coords → navvi_screenshot to verify."""
 
 
+# --- Flow Recipes ---
+
+
+@mcp.tool(tags={"management"})
+async def navvi_flow(
+    action: str,
+    flow: str = "",
+    domain: str = "",
+    description: str = "",
+    steps: str = "",
+    caveats: str = "",
+    refs: str = "",
+) -> str:
+    """Manage flow recipes — reusable browser workflows that improve over time.
+
+    Actions:
+      list   — list all flows, or filter by domain
+               navvi_flow(action="list")
+               navvi_flow(action="list", domain="outlook.live.com")
+
+      show   — show full detail for a specific flow
+               navvi_flow(action="show", flow="outlook.live.com/read-email")
+
+      save   — store a verified flow recipe (call after navvi_browse prompts you)
+               navvi_flow(action="save", flow="outlook.live.com/read-email",
+                          description="Read emails from inbox",
+                          steps='[{"action":"navigate","url":"https://outlook.live.com"}, ...]',
+                          caveats='["Login required first"]',
+                          refs='["outlook.live.com/login"]')
+
+      delete — remove a flow recipe
+               navvi_flow(action="delete", flow="outlook.live.com/read-email")
+
+    The `flow` parameter uses the format "domain/action-name".
+    Steps, caveats, and refs are JSON strings (arrays).
+
+    Flows are automatically loaded by navvi_browse when it visits a matching domain.
+    High-confidence flows execute via fast path (no screenshots); low-confidence flows
+    serve as guidance while still using visual analysis.
+    """
+    from navvi.store import (
+        save_flow as _save_flow,
+        get_flow as _get_flow,
+        get_flows_for_domain as _get_domain,
+        list_all_flows as _list_all,
+        delete_flow as _delete_flow,
+    )
+
+    if action == "list":
+        if domain:
+            flows = _get_domain(domain)
+            if not flows:
+                return f"No flows for domain '{domain}'."
+            lines = [f"Flows for {domain}:", ""]
+            for f in flows:
+                conf = f["confidence"]
+                mode = "turbo" if conf >= 6 else ("fast" if conf >= 3 else "guided")
+                lines.append(f"  {f['action']} — {f['description']} (confidence: {conf}, {mode})")
+            return "\n".join(lines)
+        else:
+            flows = _list_all()
+            if not flows:
+                return "No flow recipes stored yet."
+            by_domain = {}
+            for f in flows:
+                by_domain.setdefault(f["domain"], []).append(f)
+            lines = []
+            for d, dflows in sorted(by_domain.items()):
+                lines.append(f"{d}:")
+                for f in dflows:
+                    conf = f["confidence"]
+                    mode = "turbo" if conf >= 6 else ("fast" if conf >= 3 else "guided")
+                    lines.append(f"  {f['action']} — {f['description']} (confidence: {conf}, {mode})")
+                lines.append("")
+            return "\n".join(lines)
+
+    elif action == "show":
+        if not flow:
+            return "Provide flow='domain/action' to show."
+        parts = flow.split("/", 1)
+        if len(parts) != 2:
+            return "Flow must be in format 'domain/action', e.g. 'outlook.live.com/login'."
+        f = _get_flow(parts[0], parts[1])
+        if not f:
+            return f"No flow recipe for '{flow}'."
+        import json as _json
+        conf = f["confidence"]
+        mode = "turbo" if conf >= 6 else ("fast" if conf >= 3 else "guided")
+        lines = [
+            f"{f['domain']}/{f['action']} (confidence: {conf}, {mode})",
+            f"Description: {f['description']}",
+            f"Created: {f['created']}",
+            f"Last verified: {f['last_verified'] or 'never'}",
+            f"Last failed: {f['last_failed'] or 'never'}",
+        ]
+        if f["steps"]:
+            lines.append(f"Steps ({len(f['steps'])}):")
+            for i, s in enumerate(f["steps"], 1):
+                detail_parts = [s.get("action", "?")]
+                if s.get("selector"):
+                    detail_parts.append(f"sel={s['selector']}")
+                if s.get("expected_url"):
+                    detail_parts.append(f"expect={s['expected_url']}")
+                if s.get("detail"):
+                    detail_parts.append(s["detail"])
+                lines.append(f"  {i}. {' | '.join(detail_parts)}")
+        if f["caveats"]:
+            lines.append("Caveats:")
+            for c in f["caveats"]:
+                lines.append(f"  - {c}")
+        if f["refs"]:
+            lines.append(f"Refs: {', '.join(f['refs'])}")
+        return "\n".join(lines)
+
+    elif action == "save":
+        if not flow:
+            return "Provide flow='domain/action' to save."
+        parts = flow.split("/", 1)
+        if len(parts) != 2:
+            return "Flow must be in format 'domain/action', e.g. 'outlook.live.com/login'."
+        flow_domain, flow_action = parts[0], parts[1]
+
+        # Parse JSON params
+        try:
+            parsed_steps = json.loads(steps) if steps else []
+        except json.JSONDecodeError:
+            return "Invalid JSON in steps parameter."
+        try:
+            parsed_caveats = json.loads(caveats) if caveats else []
+        except json.JSONDecodeError:
+            return "Invalid JSON in caveats parameter."
+        try:
+            parsed_refs = json.loads(refs) if refs else []
+        except json.JSONDecodeError:
+            return "Invalid JSON in refs parameter."
+
+        # Run Pass 2 judge if we have steps
+        if parsed_steps:
+            judged = judge_flow(
+                playbook=f"Flow: {flow}\nDescription: {description}\nSteps: {json.dumps(parsed_steps)}\nCaveats: {json.dumps(parsed_caveats)}",
+                action_log=parsed_steps,  # In save context, steps ARE the ground truth from the agent
+            )
+            if not judged.get("save", True):
+                return "Judge determined this flow is not worth saving (one-off or failed). Pass save=true to override."
+            # Use judged output if richer
+            if judged.get("steps"):
+                parsed_steps = judged["steps"]
+            if judged.get("caveats"):
+                parsed_caveats = judged["caveats"]
+            if judged.get("refs"):
+                parsed_refs = judged["refs"]
+            if judged.get("description") and not description:
+                description = judged["description"]
+
+        result = _save_flow(
+            domain=flow_domain,
+            action=flow_action,
+            description=description,
+            steps=parsed_steps,
+            caveats=parsed_caveats,
+            refs=parsed_refs,
+            confidence=1,
+        )
+        return f"✅ Flow saved: {flow_domain}/{flow_action} (confidence: 1, guided mode)\n{description}"
+
+    elif action == "delete":
+        if not flow:
+            return "Provide flow='domain/action' to delete."
+        parts = flow.split("/", 1)
+        if len(parts) != 2:
+            return "Flow must be in format 'domain/action'."
+        deleted = _delete_flow(parts[0], parts[1])
+        if deleted:
+            return f"Deleted flow: {flow}"
+        return f"No flow found: {flow}"
+
+    else:
+        return f"Unknown action '{action}'. Use: list, show, save, delete."
+
+
 # --- Journey Tools ---
 
 
@@ -2048,14 +2330,69 @@ async def navvi_browse(
 
     Handles cookie banners, login detection, CAPTCHAs (escalates to VNC), and multi-step flows automatically. Returns screenshots and a step-by-step log.
 
+    If a stored flow recipe exists for the target domain, it will be used to guide or fast-track execution
+    depending on confidence level. After completion, you'll be prompted to save new flows for reuse.
+
     Only fall back to atomic tools (navvi_open, navvi_find, navvi_click) if this tool explicitly asks for guidance.
     """
     from navvi.vision import analyze
 
     pname, api_base = resolve_persona(persona or None)
+    browse_start_ts = time.time()
 
-    # Navigate to URL if provided
-    if url:
+    # --- Flow recipe lookup ---
+    target_domain = extract_domain(url) if url else ""
+    matched_flows = match_flows(url) if url else []
+    recipe_context = build_recipe_context(matched_flows) if matched_flows else ""
+    best_flow = matched_flows[0] if matched_flows else None
+    flow_confidence = best_flow["confidence"] if best_flow else 0
+
+    # --- Fast path: confidence >= 3, try selector replay ---
+    if best_flow and flow_confidence >= 3:
+        log_persona_action(pname, "browse_fast_path", "{}/{} (confidence {})".format(
+            best_flow["domain"], best_flow["action"], flow_confidence))
+
+        # Navigate first if URL provided
+        if url:
+            try:
+                await api_call("POST", "/navigate", {"url": url}, api_base)
+                log_action("browse_navigate", url)
+            except Exception as e:
+                return "Failed to navigate to {}: {}".format(url, e)
+
+        fast_result = await execute_fast_path(best_flow, api_call, api_base)
+
+        if fast_result["success"]:
+            # Fast path succeeded — bump confidence
+            bump_flow_confidence(best_flow["domain"], best_flow["action"])
+            new_conf = min(flow_confidence + 1, 10)
+            log_persona_action(pname, "browse_complete", "{} ({} steps, fast path)".format(instruction, fast_result["steps_completed"]))
+
+            # Take a final screenshot for turbo mode (confidence >= 6 skips mid-step screenshots)
+            shot_path = "(no screenshot)"
+            try:
+                shot_resp = await api_call("GET", "/screenshot", api_base=api_base)
+                shot_path = _save_screenshot(shot_resp.get("base64", ""))
+            except Exception:
+                pass
+
+            footer = build_browse_footer(target_domain, matched_flows, fast_result["steps_completed"], fast_result["total_steps"], fast_path=True, confidence=new_conf)
+            return "Completed via fast path ({}/{} steps).{}\n\nFinal screenshot: {}{}".format(
+                fast_result["steps_completed"], fast_result["total_steps"],
+                " Confidence bumped to {}.".format(new_conf),
+                shot_path, footer,
+            )
+        else:
+            # Fast path failed — reset confidence, fall through to visual mode
+            reset_flow_confidence(best_flow["domain"], best_flow["action"], level=1, failed=True)
+            log_persona_action(pname, "browse_fast_path_fail",
+                "Failed at step {}/{}: {}".format(fast_result["failed_at"], fast_result["total_steps"], fast_result["reason"]))
+            # Continue to visual mode below (don't return)
+
+    # --- Visual mode (guided or standard) ---
+
+    # Navigate to URL if provided (skip if fast path already navigated)
+    if url and not (best_flow and flow_confidence >= 3):
         try:
             await api_call("POST", "/navigate", {"url": url}, api_base)
             log_action("browse_navigate", url)
@@ -2081,6 +2418,13 @@ async def navvi_browse(
             current_url = ""
             current_title = ""
 
+        # Update target domain from actual URL if not set
+        if not target_domain and current_url:
+            target_domain = extract_domain(current_url)
+            if not matched_flows:
+                matched_flows = match_flows(current_url)
+                recipe_context = build_recipe_context(matched_flows) if matched_flows else ""
+
         # 2. Screenshot
         try:
             shot_resp = await api_call("GET", "/screenshot", api_base=api_base)
@@ -2099,8 +2443,12 @@ async def navvi_browse(
         except Exception:
             dom_elements = []
 
-        # 4. Analyze (pass recent steps so Haiku doesn't repeat failed actions)
-        analysis = await analyze(screenshot_b64, dom_elements, instruction, current_url, current_title, steps_log, viewport_info)
+        # 4. Analyze (inject recipe context for guided mode)
+        enriched_instruction = instruction
+        if recipe_context:
+            enriched_instruction = "{}\n\n{}".format(instruction, recipe_context)
+
+        analysis = await analyze(screenshot_b64, dom_elements, enriched_instruction, current_url, current_title, steps_log, viewport_info)
 
         tier = analysis.get("tier_used", "unknown")
         confidence = analysis.get("confidence", 0)
@@ -2121,7 +2469,13 @@ async def navvi_browse(
             log_persona_action(pname, "browse_complete", "{} ({} steps)".format(instruction, step + 1))
             shot_path = _save_screenshot(screenshot_b64) if screenshot_b64 else "(no screenshot)"
             summary = _format_steps_log(steps_log)
-            return "Completed in {} steps.\n\n{}\n\nFinal screenshot: {}".format(step + 1, summary, shot_path)
+
+            # Bump confidence if a guided flow completed successfully
+            if best_flow and flow_confidence < 3:
+                bump_flow_confidence(best_flow["domain"], best_flow["action"])
+
+            footer = build_browse_footer(target_domain, matched_flows, step + 1, step + 1, fast_path=False, confidence=flow_confidence)
+            return "Completed in {} steps.\n\n{}\n\nFinal screenshot: {}{}".format(step + 1, summary, shot_path, footer)
 
         # 5b. Check if stuck (3 identical consecutive actions)
         if len(steps_log) >= 3:
@@ -2132,17 +2486,19 @@ async def navvi_browse(
             ):
                 shot_path = _save_screenshot(screenshot_b64) if screenshot_b64 else "(no screenshot)"
                 summary = _format_steps_log(steps_log)
+                footer = build_browse_footer(target_domain, matched_flows, step + 1, max_steps, confidence=flow_confidence)
                 return (
                     "Stuck: repeated '{}' action 3 times on '{}' page with no progress.\n\n"
                     "Steps so far:\n{}\n\n"
                     "Screenshot: {}\n\n"
-                    "Use atomic tools (navvi_find, navvi_click) to interact directly."
-                ).format(last3[0]["action_taken"], last3[0]["page_type"], summary, shot_path)
+                    "Use atomic tools (navvi_find, navvi_click) to interact directly.{}"
+                ).format(last3[0]["action_taken"], last3[0]["page_type"], summary, shot_path, footer)
 
         # 6. Check if stuck (low confidence + heuristics tier = ask for guidance)
         if confidence < 0.5 and tier == "heuristics":
             shot_path = _save_screenshot(screenshot_b64) if screenshot_b64 else "(no screenshot)"
             summary = _format_steps_log(steps_log)
+            footer = build_browse_footer(target_domain, matched_flows, step + 1, max_steps, confidence=flow_confidence)
             return (
                 "Need guidance at step {}/{}.\n\n"
                 "Goal: {}\n"
@@ -2151,12 +2507,12 @@ async def navvi_browse(
                 "Description: {}\n\n"
                 "Steps so far:\n{}\n\n"
                 "Screenshot: {}\n\n"
-                "Suggestion: Use navvi_find to explore the page, then navvi_click/navvi_fill to continue."
+                "Suggestion: Use navvi_find to explore the page, then navvi_click/navvi_fill to continue.{}"
             ).format(
                 step + 1, max_steps, instruction, current_url,
                 analysis.get("page_type", "unknown"),
                 analysis.get("description", "could not classify"),
-                summary, shot_path,
+                summary, shot_path, footer,
             )
 
         # 7. Try reCAPTCHA before aborting
@@ -2179,7 +2535,8 @@ async def navvi_browse(
         if action.get("type") == "abort":
             reason = action.get("target", "unknown reason")
             log_persona_action(pname, "browse_abort", reason)
-            return "Aborted: {}\n\nSteps:\n{}".format(reason, _format_steps_log(steps_log))
+            footer = build_browse_footer(target_domain, matched_flows, step + 1, max_steps, confidence=flow_confidence)
+            return "Aborted: {}\n\nSteps:\n{}{}".format(reason, _format_steps_log(steps_log), footer)
 
         await _execute_action(action, api_base, dom_elements)
         await asyncio.sleep(1)  # Wait for page to settle
@@ -2190,8 +2547,9 @@ async def navvi_browse(
         shot_path = _save_screenshot(shot_resp.get("base64", ""))
     except Exception:
         shot_path = "(no screenshot)"
-    return "Reached max steps ({}). Last screenshot: {}\n\n{}".format(
-        max_steps, shot_path, _format_steps_log(steps_log),
+    footer = build_browse_footer(target_domain, matched_flows, max_steps, max_steps, confidence=flow_confidence)
+    return "Reached max steps ({}). Last screenshot: {}\n\n{}{}".format(
+        max_steps, shot_path, _format_steps_log(steps_log), footer,
     )
 
 

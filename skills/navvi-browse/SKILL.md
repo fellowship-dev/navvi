@@ -96,6 +96,38 @@ Record milestones for significant moments during browsing — not every click, b
 
 Always include full content text — this maintains persona voice consistency across sessions.
 
+## Flow Recipes (auto-improving workflows)
+
+After `navvi_browse` completes, check its response footer:
+
+### If footer says "No stored flow" — save it for next time:
+1. **Summarize the flow as a playbook** — you have full context of what just happened, so describe the steps, selectors used, expected URLs at each stage, and any caveats you encountered
+2. **Call `navvi_flow(action="save")`** with the verified recipe:
+   ```
+   navvi_flow(action="save", flow="domain.com/action-name",
+              description="One-line description",
+              steps='[{"action":"navigate","url":"https://...","expected_url":"domain.com"},
+                      {"action":"click","selector":"a[text=Dashboard]","expected_url":"domain.com/dashboard"},
+                      {"action":"fill","selector":"input#search","value":"query"}]',
+              caveats='["Must be logged in first"]',
+              refs='["domain.com/login"]')
+   ```
+3. The MCP runs a judge (Pass 2) to verify your playbook against the raw action log before storing
+
+### If footer shows a flow was used:
+- The flow was loaded automatically. Confidence updates happen inside `navvi_browse`.
+- No action needed from you.
+
+### Step format for recipes:
+Each step should include:
+- `action`: navigate, click, fill, press, scroll, autofill
+- `selector`: CSS selector (for click/fill)
+- `expected_url`: URL or domain expected after this step (for checkpoints)
+- `detail`: brief note about what this step does
+- `value`: text to type (fill only)
+- `key`: key name (press only)
+- `url`: target URL (navigate only)
+
 ## Response Format
 
 When done, return:
