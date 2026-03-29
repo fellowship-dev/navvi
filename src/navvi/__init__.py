@@ -509,14 +509,18 @@ async def navvi_persona(
     locale: str = "",
     timezone: str = "",
     viewport: str = "",
+    profile: str = "",
 ) -> str:
     """Manage browser personas. Actions: create, get, update, list, delete.
 
     Create: navvi_persona(action="create", name="mybot", description="GitHub admin", stealth="high")
     List: navvi_persona(action="list")
     Get: navvi_persona(action="get", name="mybot")
-    Update: navvi_persona(action="update", name="mybot", purpose="new purpose")
+    Update: navvi_persona(action="update", name="mybot", purpose="new purpose", profile="Casual tone, uses emoji")
     Delete: navvi_persona(action="delete", name="mybot")
+
+    The `profile` field stores voice, phrases, and writing style notes for the persona.
+    This gets injected into generate_brief() so sessions adopt the right tone.
 
     Personas store config (locale, timezone, stealth, purpose) and track accounts + action history.
     Each persona maps to a persistent Docker volume (navvi-profile-<name>).
@@ -538,6 +542,8 @@ async def navvi_persona(
                 kwargs["timezone"] = timezone
             if viewport:
                 kwargs["viewport"] = viewport
+            if profile:
+                kwargs["profile"] = profile
             p = create_persona(name, **kwargs)
             return f"Persona '{name}' created.\n\n{persona_state_summary(name)}"
 
@@ -565,6 +571,8 @@ async def navvi_persona(
                 kwargs["timezone"] = timezone
             if viewport:
                 kwargs["viewport"] = viewport
+            if profile:
+                kwargs["profile"] = profile
             update_persona(name, **kwargs)
             return f"Persona '{name}' updated.\n\n{persona_state_summary(name)}"
 

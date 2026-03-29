@@ -46,6 +46,7 @@ def init_db():
             locale TEXT DEFAULT 'en-US',
             timezone TEXT DEFAULT 'UTC',
             viewport TEXT DEFAULT '1024x768',
+            profile TEXT DEFAULT '',
             created_at REAL NOT NULL,
             last_used_at REAL,
             api_port INTEGER,
@@ -90,6 +91,12 @@ def init_db():
     except sqlite3.OperationalError:
         conn.execute("ALTER TABLE personas ADD COLUMN api_port INTEGER")
         conn.execute("ALTER TABLE personas ADD COLUMN vnc_port INTEGER")
+        conn.commit()
+    # Migrate: add profile column if missing (existing DBs)
+    try:
+        conn.execute("SELECT profile FROM personas LIMIT 1")
+    except sqlite3.OperationalError:
+        conn.execute("ALTER TABLE personas ADD COLUMN profile TEXT DEFAULT ''")
         conn.commit()
     conn.close()
 
@@ -147,13 +154,14 @@ def create_persona(
     locale: str = "en-US",
     timezone: str = "UTC",
     viewport: str = "1024x768",
+    profile: str = "",
 ) -> dict:
     conn = _connect()
     now = time.time()
     try:
         conn.execute(
-            "INSERT INTO personas (name, description, purpose, stealth, locale, timezone, viewport, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (name, description, purpose, stealth, locale, timezone, viewport, now),
+            "INSERT INTO personas (name, description, purpose, stealth, locale, timezone, viewport, profile, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (name, description, purpose, stealth, locale, timezone, viewport, profile, now),
         )
         conn.commit()
     except sqlite3.IntegrityError:
@@ -178,7 +186,7 @@ def update_persona(name: str, **kwargs) -> dict:
     if not existing:
         conn.close()
         raise ValueError(f"Persona '{name}' not found.")
-    allowed = {"description", "purpose", "stealth", "locale", "timezone", "viewport"}
+    allowed = {"description", "purpose", "stealth", "locale", "timezone", "viewport", "profile"}
     updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
     if not updates:
         conn.close()
@@ -408,6 +416,13 @@ def generate_brief(persona: str) -> str:
 
     lines = [f"# {persona} — Persona Brief", ""]
 
+    # Voice & Writing Style (from profile)
+    if p.get('profile'):
+        lines.append("## Voice & Writing Style")
+        lines.append("")
+        lines.append(p['profile'])
+        lines.append("")
+
     # Identity
     if p['description']:
         lines.append(f"**Who I am:** {p['description']}")
@@ -504,6 +519,7 @@ def persona_state_summary(name: str) -> str:
         f"locale: {p['locale']}",
         f"timezone: {p['timezone']}",
         f"viewport: {p['viewport']}",
+        f"profile: {p.get('profile', '')[:80]}..." if p.get('profile') else None,
         f"created: {_format_ts(p['created_at'])}",
         f"last_used: {_format_ts(p['last_used_at'])}" if p['last_used_at'] else None,
         f"docker_volume: navvi-profile-{p['name']}",
