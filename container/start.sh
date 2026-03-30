@@ -144,16 +144,36 @@ if ! kill -0 "$FIREFOX_PID" 2>/dev/null; then
 fi
 
 # Maximize browser window to fill the virtual display
-echo "[navvi] Maximizing browser window..."
-for i in 1 2 3; do
-  WID=$(xdotool search --onlyvisible --class "firefox\|Navigator\|camoufox" 2>/dev/null | head -1)
+# Firefox/Camoufox can override window size after initial render,
+# so we retry multiple times with increasing delays.
+maximize_window() {
+  WID=$(DISPLAY="$DISPLAY" xdotool search --name "Firefox" 2>/dev/null | head -1)
+  [ -z "$WID" ] && WID=$(DISPLAY="$DISPLAY" xdotool search --name "Camoufox" 2>/dev/null | head -1)
+  [ -z "$WID" ] && WID=$(DISPLAY="$DISPLAY" xdotool search --name "about:blank" 2>/dev/null | head -1)
   if [ -n "$WID" ]; then
-    xdotool windowactivate "$WID" windowsize "$WID" 1920 1080 windowmove "$WID" 0 0 2>/dev/null
-    echo "[navvi] Window $WID maximized"
+    DISPLAY="$DISPLAY" xdotool windowactivate "$WID" windowmove "$WID" 0 0 windowsize "$WID" 1920 1080 2>/dev/null
+    echo "[navvi] Window $WID maximized to 1920x1080 at 0,0"
+    return 0
+  fi
+  echo "[navvi] No Firefox window found to maximize"
+  return 1
+}
+
+echo "[navvi] Maximizing browser window..."
+for i in 1 2 3 4 5; do
+  if maximize_window; then
     break
   fi
   sleep 1
 done
+
+# Re-maximize after Firefox finishes restoring its saved window geometry.
+(
+  for delay in 3 5 8; do
+    sleep "$delay"
+    maximize_window
+  done
+) &
 
 echo "[navvi] Starting x11vnc..."
 x11vnc -display "$DISPLAY" -forever -shared -nopw -rfbport 5900 -bg -q 2>/dev/null

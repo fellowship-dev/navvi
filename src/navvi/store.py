@@ -72,6 +72,21 @@ def init_db():
             ts REAL NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS flows (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            domain TEXT NOT NULL,
+            action TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            confidence INTEGER DEFAULT 0,
+            steps TEXT DEFAULT '[]',
+            caveats TEXT DEFAULT '[]',
+            refs TEXT DEFAULT '[]',
+            created TEXT NOT NULL,
+            last_verified TEXT DEFAULT '',
+            last_failed TEXT DEFAULT '',
+            UNIQUE(domain, action)
+        );
+
         CREATE TABLE IF NOT EXISTS milestones (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             persona TEXT NOT NULL REFERENCES personas(name) ON DELETE CASCADE,
@@ -571,6 +586,128 @@ def _format_ts(ts: Optional[float]) -> str:
         return "never"
     import datetime
     return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
+
+
+# --- Flows (recipe store) ---
+
+
+def save_flow(
+    domain: str,
+    action: str,
+    description: str = "",
+    steps: list = None,
+    caveats: list = None,
+    refs: list = None,
+    confidence: int = 1,
+) -> dict:
+    """Save or update a flow recipe. Upserts on (domain, action)."""
+    import datetime
+    conn = _connect()
+    now = datetime.datetime.now().isoformat()
+    steps_json = json.dumps(steps or [])
+    caveats_json = json.dumps(caveats or [])
+    refs_json = json.dumps(refs or [])
+
+    existing = conn.execute(
+        "SELECT id FROM flows WHERE domain = ? AND action = ?",
+        (domain, action),
+    ).fetchone()
+
+    if existing:
+        conn.execute(
+            "UPDATE flows SET description = ?, steps = ?, caveats = ?, refs = ?, confidence = ?, last_verified = ? WHERE id = ?",
+            (description, steps_json, caveats_json, refs_json, confidence, now, existing["id"]),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO flows (domain, action, description, steps, caveats, refs, confidence, created, last_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (domain, action, description, steps_json, caveats_json, refs_json, confidence, now, now),
+        )
+    conn.commit()
+    conn.close()
+    return get_flow(domain, action)
+
+
+def get_flow(domain: str, action: str) -> Optional[dict]:
+    conn = _connect()
+    row = conn.execute(
+        "SELECT * FROM flows WHERE domain = ? AND action = ?",
+        (domain, action),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return _flow_to_dict(row)
+
+
+def get_flows_for_domain(domain: str) -> list:
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT * FROM flows WHERE domain = ? ORDER BY action",
+        (domain,),
+    ).fetchall()
+    conn.close()
+    return [_flow_to_dict(r) for r in rows]
+
+
+def list_all_flows() -> list:
+    conn = _connect()
+    rows = conn.execute("SELECT * FROM flows ORDER BY domain, action").fetchall()
+    conn.close()
+    return [_flow_to_dict(r) for r in rows]
+
+
+def delete_flow(domain: str, action: str) -> bool:
+    conn = _connect()
+    cursor = conn.execute(
+        "DELETE FROM flows WHERE domain = ? AND action = ?",
+        (domain, action),
+    )
+    conn.commit()
+    conn.close()
+    return cursor.rowcount > 0
+
+
+def bump_flow_confidence(domain: str, action: str) -> Optional[dict]:
+    """Increment confidence (max 10) and update last_verified."""
+    import datetime
+    conn = _connect()
+    now = datetime.datetime.now().isoformat()
+    conn.execute(
+        "UPDATE flows SET confidence = MIN(confidence + 1, 10), last_verified = ? WHERE domain = ? AND action = ?",
+        (now, domain, action),
+    )
+    conn.commit()
+    conn.close()
+    return get_flow(domain, action)
+
+
+def reset_flow_confidence(domain: str, action: str, level: int = 0, failed: bool = False) -> Optional[dict]:
+    """Reset confidence to a specific level. Optionally mark as failed."""
+    import datetime
+    conn = _connect()
+    now = datetime.datetime.now().isoformat()
+    if failed:
+        conn.execute(
+            "UPDATE flows SET confidence = ?, last_failed = ? WHERE domain = ? AND action = ?",
+            (level, now, domain, action),
+        )
+    else:
+        conn.execute(
+            "UPDATE flows SET confidence = ? WHERE domain = ? AND action = ?",
+            (level, domain, action),
+        )
+    conn.commit()
+    conn.close()
+    return get_flow(domain, action)
+
+
+def _flow_to_dict(row) -> dict:
+    d = dict(row)
+    d["steps"] = json.loads(d.get("steps", "[]"))
+    d["caveats"] = json.loads(d.get("caveats", "[]"))
+    d["refs"] = json.loads(d.get("refs", "[]"))
+    return d
 
 
 # Initialize on import

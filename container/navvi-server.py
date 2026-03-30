@@ -104,16 +104,21 @@ def _restart_firefox():
         # Wait for Marionette to become available
         time.sleep(3)
 
-        # Re-maximize the window
-        try:
-            subprocess.run(
-                ["bash", "-c",
-                 'WID=$(xdotool search --onlyvisible --class "firefox|Navigator|camoufox" 2>/dev/null | head -1); '
-                 '[ -n "$WID" ] && xdotool windowactivate "$WID" windowsize "$WID" 1920 1080 windowmove "$WID" 0 0'],
-                env=env, capture_output=True, timeout=5,
-            )
-        except Exception:
-            pass
+        # Re-maximize the window (move first, then resize — avoids partial offscreen)
+        def _maximize():
+            try:
+                subprocess.run(
+                    ["bash", "-c",
+                     'WID=$(xdotool search --class "Navigator" 2>/dev/null | head -1); '
+                     '[ -n "$WID" ] && xdotool windowactivate "$WID" windowmove "$WID" 0 0 windowsize "$WID" 1920 1080'],
+                    env=env, capture_output=True, timeout=5,
+                )
+            except Exception:
+                pass
+        _maximize()
+        # Re-maximize after Firefox finishes rendering
+        time.sleep(3)
+        _maximize()
 
         # Reconnect Marionette
         _marionette = Marionette(port=BASE_MARIONETTE_PORT)
@@ -240,6 +245,17 @@ class CredsImportRequest(BaseModel):
 
 def run_xdotool(args: str, timeout: float = 5.0) -> str:
     """Run an xdotool command and return stdout."""
+    # Clamp negative coordinates — xdotool interprets them as flags
+    if "mousemove" in args:
+        parts = args.split()
+        clamped = []
+        for p in parts:
+            try:
+                n = int(p)
+                clamped.append(str(max(0, n)))
+            except ValueError:
+                clamped.append(p)
+        args = " ".join(clamped)
     env = os.environ.copy()
     env["DISPLAY"] = display
     result = subprocess.run(

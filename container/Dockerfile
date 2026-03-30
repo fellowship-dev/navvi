@@ -75,6 +75,22 @@ WORKDIR /home/user
 RUN mkdir -p /home/user/.camoufox /home/user/.local/share/gopass \
     && mkdir -m 700 -p /home/user/.gnupg
 
+# Openbox config: force all Firefox/Camoufox windows to maximize at 0,0
+# Without this, Openbox's Smart placement centers the window at ~321,47
+RUN mkdir -p /home/user/.config/openbox && cat > /home/user/.config/openbox/rc.xml << 'OBXML'
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <placement><policy>Smart</policy><center>no</center></placement>
+  <theme><name>Clearlooks</name><titleLayout>NLIMC</titleLayout></theme>
+  <desktops><number>1</number></desktops>
+  <applications>
+    <application class="*">
+      <maximized>yes</maximized>
+    </application>
+  </applications>
+</openbox_config>
+OBXML
+
 EXPOSE 8024 6080
 
 ENTRYPOINT ["/opt/navvi/start.sh"]
