@@ -6,8 +6,10 @@ Schema:
   accounts: credential references per persona (service, email, gopass ref, status)
   actions:  append-only action log per persona (timestamped events)
   milestones: curated lifetime timeline per persona (events with evidence)
+  persona_context: persistent knowledge store per persona (what a persona knows)
 """
 
+import datetime
 import json
 import sqlite3
 import time
@@ -98,6 +100,18 @@ def init_db():
             source TEXT DEFAULT 'manual',
             ts REAL NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS persona_context (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            persona TEXT NOT NULL REFERENCES personas(name) ON DELETE CASCADE,
+            summary TEXT NOT NULL,
+            source TEXT,
+            tags TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT,
+            digested_at TEXT,
+            deleted_at TEXT
+        );
     """)
     conn.commit()
     # Migrate: add port columns if missing (existing DBs)
@@ -112,6 +126,12 @@ def init_db():
         conn.execute("SELECT profile FROM personas LIMIT 1")
     except sqlite3.OperationalError:
         conn.execute("ALTER TABLE personas ADD COLUMN profile TEXT DEFAULT ''")
+        conn.commit()
+    # Migrate: add context_summary column if missing (existing DBs)
+    try:
+        conn.execute("SELECT context_summary FROM personas LIMIT 1")
+    except sqlite3.OperationalError:
+        conn.execute("ALTER TABLE personas ADD COLUMN context_summary TEXT DEFAULT ''")
         conn.commit()
     conn.close()
 
@@ -494,6 +514,14 @@ def generate_brief(persona: str) -> str:
                 lines.append(f"> {m['detail'][:500]}")
                 lines.append("")
 
+    # Context — what I know (curated digest)
+    ctx_summary = get_context_summary(persona)
+    if ctx_summary:
+        lines.append("## What I Know")
+        lines.append("")
+        lines.append(ctx_summary)
+        lines.append("")
+
     # Rules
     lines.append("## Rules")
     lines.append("")
@@ -584,8 +612,163 @@ def personas_list_summary() -> str:
 def _format_ts(ts: Optional[float]) -> str:
     if not ts:
         return "never"
-    import datetime
     return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
+
+
+# --- Persona Context (knowledge store) ---
+
+
+def _now_iso() -> str:
+    return datetime.datetime.now().isoformat()
+
+
+def add_context(
+    persona: str,
+    summary: str,
+    source: str = None,
+    tags: str = None,
+) -> dict:
+    conn = _connect()
+    now = _now_iso()
+    cursor = conn.execute(
+        "INSERT INTO persona_context (persona, summary, source, tags, created_at) VALUES (?, ?, ?, ?, ?)",
+        (persona, summary, source, tags, now),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM persona_context WHERE id = ?", (cursor.lastrowid,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def list_context(persona: str, tags: str = None) -> list:
+    conn = _connect()
+    if tags:
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+        rows = conn.execute(
+            "SELECT * FROM persona_context WHERE persona = ? AND deleted_at IS NULL ORDER BY created_at",
+            (persona,),
+        ).fetchall()
+        conn.close()
+        # Filter: entry must contain at least one of the requested tags
+        results = []
+        for r in rows:
+            entry_tags = set(t.strip() for t in (r["tags"] or "").split(",") if t.strip())
+            if entry_tags & set(tag_list):
+                results.append(dict(r))
+        return results
+    else:
+        rows = conn.execute(
+            "SELECT * FROM persona_context WHERE persona = ? AND deleted_at IS NULL ORDER BY created_at",
+            (persona,),
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+
+def search_context(persona: str, query: str, tags: str = None) -> list:
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT * FROM persona_context WHERE persona = ? AND deleted_at IS NULL AND summary LIKE ? ORDER BY created_at",
+        (persona, f"%{query}%"),
+    ).fetchall()
+    conn.close()
+    results = [dict(r) for r in rows]
+    if tags:
+        tag_list = set(t.strip() for t in tags.split(",") if t.strip())
+        results = [
+            r for r in results
+            if set(t.strip() for t in (r["tags"] or "").split(",") if t.strip()) & tag_list
+        ]
+    return results
+
+
+def update_context(context_id: int, **kwargs) -> Optional[dict]:
+    conn = _connect()
+    allowed = {"summary", "source", "tags"}
+    updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
+    if not updates:
+        row = conn.execute("SELECT * FROM persona_context WHERE id = ?", (context_id,)).fetchone()
+        conn.close()
+        return dict(row) if row else None
+    updates["updated_at"] = _now_iso()
+    updates["digested_at"] = None  # Reset digest state on update
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    values = list(updates.values()) + [context_id]
+    conn.execute(f"UPDATE persona_context SET {set_clause} WHERE id = ?", values)
+    conn.commit()
+    row = conn.execute("SELECT * FROM persona_context WHERE id = ?", (context_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def remove_context(context_id: int) -> bool:
+    conn = _connect()
+    now = _now_iso()
+    cursor = conn.execute(
+        "UPDATE persona_context SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
+        (now, context_id),
+    )
+    conn.commit()
+    conn.close()
+    return cursor.rowcount > 0
+
+
+def get_digest_ingredients(persona: str) -> dict:
+    """Return current summary + entries needing digest (new, updated, deleted)."""
+    conn = _connect()
+    p = conn.execute("SELECT context_summary FROM personas WHERE name = ?", (persona,)).fetchone()
+    current_summary = (p["context_summary"] or "") if p else ""
+
+    # New: never digested, not deleted
+    new_rows = conn.execute(
+        "SELECT * FROM persona_context WHERE persona = ? AND digested_at IS NULL AND deleted_at IS NULL ORDER BY created_at",
+        (persona,),
+    ).fetchall()
+
+    # Updated: digested_at < updated_at, not deleted
+    updated_rows = conn.execute(
+        "SELECT * FROM persona_context WHERE persona = ? AND digested_at IS NOT NULL AND updated_at IS NOT NULL AND updated_at > digested_at AND deleted_at IS NULL ORDER BY created_at",
+        (persona,),
+    ).fetchall()
+
+    # Deleted: soft-deleted but not yet purged (digested_at doesn't matter)
+    deleted_rows = conn.execute(
+        "SELECT * FROM persona_context WHERE persona = ? AND deleted_at IS NOT NULL ORDER BY created_at",
+        (persona,),
+    ).fetchall()
+
+    conn.close()
+    return {
+        "current_summary": current_summary,
+        "new_entries": [dict(r) for r in new_rows],
+        "updated_entries": [dict(r) for r in updated_rows],
+        "deleted_entries": [dict(r) for r in deleted_rows],
+    }
+
+
+def save_digest(persona: str, summary: str) -> bool:
+    """Store new digest summary, mark entries as digested, hard-delete soft-deleted."""
+    conn = _connect()
+    now = _now_iso()
+    # Update persona summary
+    conn.execute("UPDATE personas SET context_summary = ? WHERE name = ?", (summary, persona))
+    # Mark all active undigested/updated entries as digested
+    conn.execute(
+        "UPDATE persona_context SET digested_at = ? WHERE persona = ? AND deleted_at IS NULL AND (digested_at IS NULL OR (updated_at IS NOT NULL AND updated_at > digested_at))",
+        (now, persona),
+    )
+    # Hard-delete soft-deleted entries
+    conn.execute("DELETE FROM persona_context WHERE persona = ? AND deleted_at IS NOT NULL", (persona,))
+    conn.commit()
+    conn.close()
+    return True
+
+
+def get_context_summary(persona: str) -> str:
+    conn = _connect()
+    row = conn.execute("SELECT context_summary FROM personas WHERE name = ?", (persona,)).fetchone()
+    conn.close()
+    return (row["context_summary"] or "") if row else ""
 
 
 # --- Flows (recipe store) ---

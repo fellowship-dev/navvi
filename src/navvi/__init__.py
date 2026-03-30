@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Navvi MCP Server v3.3.0 — persistent browser personas via Docker containers.
+Navvi MCP Server v3.19.0 — persistent browser personas via Docker containers.
 
 Lifecycle:
   navvi_start (local|remote), navvi_stop, navvi_status, navvi_list
@@ -77,6 +77,14 @@ from navvi.store import (
     delete_flow as store_delete_flow_fn,
     bump_flow_confidence,
     reset_flow_confidence,
+    add_context,
+    list_context,
+    search_context,
+    update_context,
+    remove_context,
+    get_digest_ingredients,
+    save_digest,
+    get_context_summary,
 )
 
 from navvi.flows import (
@@ -134,6 +142,13 @@ mcp.disable(tags={"recording"})
 def persona_state_resource(name: str) -> str:
     """Current persona state — config, accounts, recent actions."""
     return persona_state_summary(name)
+
+
+@mcp.resource("persona://{name}/context")
+def persona_context_resource(name: str) -> str:
+    """Curated knowledge summary for this persona — what they know."""
+    summary = get_context_summary(name)
+    return summary or f"No context stored for persona '{name}'."
 
 
 @mcp.resource("persona://{name}/accounts")
@@ -903,6 +918,140 @@ async def navvi_milestone(
 
         else:
             return f"Unknown action '{action}'. Valid: add, list, export, brief, delete."
+    except Exception as e:
+        return f"Error: {e}"
+
+
+@mcp.tool()
+async def navvi_context(
+    action: str,
+    persona: str = "default",
+    summary: str = "",
+    source: str = "",
+    tags: str = "",
+    query: str = "",
+    context_id: int = 0,
+) -> str:
+    """Persistent knowledge store for a persona — what they know. Actions: add, list, search, update, remove, digest, save_digest.
+
+    Add: navvi_context(action="add", persona="chet", summary="InboxGuard: email deliverability scanner with SPF/DMARC checks", source="https://inboxguard.me/", tags="competitor,inbox-angel")
+    List: navvi_context(action="list", persona="chet") or navvi_context(action="list", persona="chet", tags="competitor")
+    Search: navvi_context(action="search", persona="chet", query="email deliverability", tags="competitor")
+    Update: navvi_context(action="update", context_id=3, summary="Updated finding", tags="competitor,updated")
+    Remove: navvi_context(action="remove", context_id=3) — soft-deletes, included in next digest
+    Digest: navvi_context(action="digest", persona="chet") — returns current summary + undigested entries for LLM synthesis
+    Save digest: navvi_context(action="save_digest", persona="chet", summary="Synthesized knowledge summary...") — stores digest, marks entries processed
+
+    Milestones = what a persona did. Context = what a persona knows."""
+    try:
+        if action == "add":
+            if not summary:
+                return "Error: summary is required for add."
+            entry = add_context(
+                persona=persona,
+                summary=summary,
+                source=source or None,
+                tags=tags or None,
+            )
+            return f"Context #{entry['id']} added for '{persona}'."
+
+        elif action == "list":
+            entries = list_context(persona, tags=tags or None)
+            if not entries:
+                filter_info = f" with tags '{tags}'" if tags else ""
+                return f"No context entries for '{persona}'{filter_info}."
+            lines = []
+            for e in entries:
+                tag_str = f" [{e['tags']}]" if e['tags'] else ""
+                src = f" ({e['source']})" if e['source'] else ""
+                digested = " ✓" if e['digested_at'] else " •"
+                lines.append(f"[{e['id']}]{digested} {e['summary'][:120]}{tag_str}{src}")
+            return "\n".join(lines)
+
+        elif action == "search":
+            if not query:
+                return "Error: query is required for search."
+            entries = search_context(persona, query, tags=tags or None)
+            if not entries:
+                return f"No matches for '{query}' in '{persona}' context."
+            lines = []
+            for e in entries:
+                tag_str = f" [{e['tags']}]" if e['tags'] else ""
+                src = f" ({e['source']})" if e['source'] else ""
+                lines.append(f"[{e['id']}] {e['summary'][:120]}{tag_str}{src}")
+            return "\n".join(lines)
+
+        elif action == "update":
+            if not context_id:
+                return "Error: context_id is required for update."
+            kwargs = {}
+            if summary:
+                kwargs["summary"] = summary
+            if source:
+                kwargs["source"] = source
+            if tags:
+                kwargs["tags"] = tags
+            entry = update_context(context_id, **kwargs)
+            if not entry:
+                return f"Context entry {context_id} not found."
+            return f"Context #{context_id} updated. Digest state reset."
+
+        elif action == "remove":
+            if not context_id:
+                return "Error: context_id is required for remove."
+            if remove_context(context_id):
+                return f"Context #{context_id} soft-deleted. Will be included in next digest for summary update."
+            return f"Context entry {context_id} not found or already deleted."
+
+        elif action == "digest":
+            ingredients = get_digest_ingredients(persona)
+            if not ingredients["current_summary"] and not ingredients["new_entries"] and not ingredients["updated_entries"] and not ingredients["deleted_entries"]:
+                return f"No context to digest for '{persona}'. Add entries first."
+
+            lines = []
+            if ingredients["current_summary"]:
+                lines.append("## Current Summary")
+                lines.append(ingredients["current_summary"])
+                lines.append("")
+
+            if ingredients["new_entries"]:
+                lines.append(f"## New Entries ({len(ingredients['new_entries'])})")
+                for e in ingredients["new_entries"]:
+                    tag_str = f" [{e['tags']}]" if e['tags'] else ""
+                    src = f"\n  Source: {e['source']}" if e['source'] else ""
+                    lines.append(f"- [{e['id']}] {e['summary']}{tag_str}{src}")
+                lines.append("")
+
+            if ingredients["updated_entries"]:
+                lines.append(f"## Updated Entries ({len(ingredients['updated_entries'])})")
+                for e in ingredients["updated_entries"]:
+                    tag_str = f" [{e['tags']}]" if e['tags'] else ""
+                    lines.append(f"- [{e['id']}] {e['summary']}{tag_str}")
+                lines.append("")
+
+            if ingredients["deleted_entries"]:
+                lines.append(f"## Deleted Entries ({len(ingredients['deleted_entries'])})")
+                for e in ingredients["deleted_entries"]:
+                    lines.append(f"- [{e['id']}] {e['summary']}")
+                lines.append("")
+
+            if not lines:
+                return f"Nothing to digest for '{persona}' — all entries are up to date."
+
+            lines.append("---")
+            lines.append("Synthesize an updated summary incorporating new/updated entries and removing deleted ones. Then call navvi_context(action=\"save_digest\", persona=\"{}\", summary=\"...\")".format(persona))
+            return "\n".join(lines)
+
+        elif action == "save_digest":
+            if not summary:
+                return "Error: summary is required for save_digest."
+            save_digest(persona, summary)
+            # Regenerate brief with new context
+            generate_brief(persona)
+            return f"Digest saved for '{persona}'. Brief regenerated."
+
+        else:
+            return f"Unknown action '{action}'. Valid: add, list, search, update, remove, digest, save_digest."
     except Exception as e:
         return f"Error: {e}"
 
