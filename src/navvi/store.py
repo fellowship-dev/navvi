@@ -691,7 +691,9 @@ def update_context(context_id: int, **kwargs) -> Optional[dict]:
         conn.close()
         return dict(row) if row else None
     updates["updated_at"] = _now_iso()
-    updates["digested_at"] = None  # Reset digest state on update
+    # Keep digested_at intact — the query `updated_at > digested_at` will
+    # correctly identify this as "updated, needs re-digest". NULLing it would
+    # make it appear as a new entry instead of an updated one.
     set_clause = ", ".join(f"{k} = ?" for k in updates)
     values = list(updates.values()) + [context_id]
     conn.execute(f"UPDATE persona_context SET {set_clause} WHERE id = ?", values)

@@ -994,7 +994,7 @@ async def navvi_context(
             entry = update_context(context_id, **kwargs)
             if not entry:
                 return f"Context entry {context_id} not found."
-            return f"Context #{context_id} updated. Digest state reset."
+            return f"Context #{context_id} updated. Will appear as 'updated' in next digest."
 
         elif action == "remove":
             if not context_id:
