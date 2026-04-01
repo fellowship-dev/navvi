@@ -81,7 +81,9 @@ case "$CMD" in
       --name "$CNAME" \
       -p "${NAVVI_PORT}:8024" \
       -p "${VNC_PORT}:6080" \
-      -v "${VOLUME}:/home/user/.mozilla" \
+      -v "${VOLUME}:/home/user/.camoufox" \
+      -v "navvi-gpg:/home/user/.gnupg" \
+      -v "navvi-gopass:/home/user/.local/share/gopass" \
       -e "LOCALE=${LOCALE:-en-US}" \
       -e "TIMEZONE=${TIMEZONE:-UTC}" \
       "$IMAGE"

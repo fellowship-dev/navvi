@@ -1503,8 +1503,11 @@ async def navvi_url(persona: str = "") -> str:
 @mcp.tool()
 async def navvi_vnc(persona: str = "") -> str:
     """Get the noVNC URL for live browser view. Share with the user when human intervention is needed: visual CAPTCHAs that require image recognition, OAuth consent screens, or 2FA code entry. The user opens this URL in their real browser to interact directly."""
+    pname, _ = resolve_persona(persona or None)
+    ports = get_persona_ports(pname)
+    vnc_port = ports["vnc"] if ports and ports.get("vnc") else VNC_PORT
     # Start a local TCP proxy to bypass Docker Desktop WebSocket issues on macOS
-    proxy_port = VNC_PORT + 10000  # 6080 -> 16080
+    proxy_port = vnc_port + 10000
     proxy_url = "http://127.0.0.1:{}/vnc.html?autoconnect=true&resize=scale".format(proxy_port)
 
     # Check if proxy is already running
@@ -1516,15 +1519,15 @@ async def navvi_vnc(persona: str = "") -> str:
         test.close()
     except Exception:
         # Start proxy in background
-        _start_vnc_proxy(VNC_PORT, proxy_port)
+        _start_vnc_proxy(vnc_port, proxy_port)
 
     return (
-        "noVNC: {}\n\n"
+        "noVNC (persona: {}): {}\n\n"
         "Open this URL in a browser for live view. Use for:\n"
         "- Human CAPTCHA solving\n"
         "- OAuth login flows\n"
         "- Visual debugging"
-    ).format(proxy_url)
+    ).format(pname, proxy_url)
 
 
 def _start_vnc_proxy(docker_port: int, proxy_port: int):
@@ -1638,7 +1641,7 @@ async def navvi_creds(
       to a JSON array of {entry, username, password} objects. File is read and deleted after import.
     - "autofill": fill a login form from gopass — password goes gopass → xdotool → browser, NEVER in this response.
     """
-    _, api_base = resolve_persona(persona or None)
+    pname, api_base = resolve_persona(persona or None)
 
     if action == "list":
         try:
@@ -1647,7 +1650,6 @@ async def navvi_creds(
             if not entries:
                 return "No credentials stored in gopass. Use navvi_creds(action='generate') or navvi_creds(action='import') to add entries."
             # Filter by persona if specified
-            pname = persona or active_persona or ""
             if pname:
                 prefix = "navvi/{}/".format(pname)
                 filtered = [e for e in entries if e.startswith(prefix)]
