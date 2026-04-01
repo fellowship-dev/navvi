@@ -1181,7 +1181,7 @@ async def navvi_start(
                 pass
         else:
             stopped = gh_sh(
-                f'gh cs list --repo {REPO} --json name,state -q \'.[]\u00a0| select(.state=="Shutdown") | .name\''
+                f'gh cs list --repo {REPO} --json name,state -q \'.[] | select(.state=="Shutdown") | .name\''
             )
             if stopped:
                 cs_name = stopped.split("\n")[0]

@@ -47,6 +47,32 @@ if [ -d "/workspaces/.codespaces/.persistedshare" ]; then
   fi
 fi
 
+# Helper: migrate gopass + GPG to persistent storage after init (Codespaces only).
+# Called after gopass init to ensure credentials survive restarts.
+persist_gopass() {
+  PERSIST_DIR="/workspaces/.codespaces/.persistedshare/navvi"
+  [ ! -d "/workspaces/.codespaces/.persistedshare" ] && return 0
+
+  mkdir -p "$PERSIST_DIR"
+
+  # Migrate GPG keyring if not already persisted
+  if [ -d "$HOME/.gnupg" ] && [ ! -L "$HOME/.gnupg" ]; then
+    cp -a "$HOME/.gnupg" "$PERSIST_DIR/gnupg"
+    rm -rf "$HOME/.gnupg"
+    ln -s "$PERSIST_DIR/gnupg" "$HOME/.gnupg"
+    echo "[navvi] GPG keyring moved to persistent storage"
+  fi
+
+  # Migrate gopass store if not already persisted
+  if [ -d "$HOME/.local/share/gopass/stores" ] && [ ! -L "$HOME/.local/share/gopass/stores" ]; then
+    mkdir -p "$PERSIST_DIR/gopass"
+    cp -a "$HOME/.local/share/gopass/stores" "$PERSIST_DIR/gopass/stores"
+    rm -rf "$HOME/.local/share/gopass/stores"
+    ln -s "$PERSIST_DIR/gopass/stores" "$HOME/.local/share/gopass/stores"
+    echo "[navvi] Gopass store moved to persistent storage"
+  fi
+}
+
 # --- Gopass init ---
 # Priority: 1) GPG_PRIVATE_KEY (pre-existing key), 2) existing key in volume, 3) NAVVI_GPG_PASSPHRASE (generate new)
 if [ -n "${GPG_PRIVATE_KEY:-}" ]; then
@@ -60,6 +86,7 @@ if [ -n "${GPG_PRIVATE_KEY:-}" ]; then
       gopass init --path "$HOME/.local/share/gopass/stores/root" "$GPG_ID" 2>/dev/null
     fi
     echo "[navvi] Gopass ready (imported key: ${GPG_ID:0:8}...)"
+    persist_gopass
   fi
   unset GPG_PRIVATE_KEY
 elif [ -n "$(gpg --list-secret-keys 2>/dev/null)" ]; then
@@ -68,6 +95,7 @@ elif [ -n "$(gpg --list-secret-keys 2>/dev/null)" ]; then
   if [ -n "$GPG_ID" ] && [ ! -d "$HOME/.local/share/gopass/stores/root" ]; then
     gopass init --path "$HOME/.local/share/gopass/stores/root" "$GPG_ID" 2>/dev/null
   fi
+  persist_gopass
   echo "[navvi] Gopass ready (existing key: ${GPG_ID:0:8}...)"
 elif [ -n "${NAVVI_GPG_PASSPHRASE:-}" ]; then
   # Generate a new GPG key protected by the user's passphrase
@@ -86,6 +114,7 @@ elif [ -n "${NAVVI_GPG_PASSPHRASE:-}" ]; then
       gpgconf --kill gpg-agent 2>/dev/null
       GPG_ID=$(echo "$GPG_FPR" | tail -c 17)
       gopass init --path "$HOME/.local/share/gopass/stores/root" "$GPG_ID" 2>/dev/null
+      persist_gopass
       echo "[navvi] Gopass ready (new key: ${GPG_ID:0:8}...)"
     fi
   ) &
