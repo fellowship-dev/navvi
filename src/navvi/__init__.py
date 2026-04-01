@@ -1215,10 +1215,15 @@ async def navvi_start(
                 pass
             await asyncio.sleep(3)
 
-        # Port forward
+        # Allocate unique local ports so remote personas don't collide with local ones
+        ports = allocate_ports(persona)
+        local_api = ports["api"]
+        local_vnc = ports["vnc"]
+
+        # Port forward: unique local ports → fixed remote ports
         kill_pidfile(PIDFILE_FWD)
         child = subprocess.Popen(
-            ["gh", "cs", "ports", "forward", f"{NAVVI_PORT}:{NAVVI_PORT}", f"{VNC_PORT}:{VNC_PORT}", "-c", cs_name],
+            ["gh", "cs", "ports", "forward", f"{local_api}:{NAVVI_PORT}", f"{local_vnc}:{VNC_PORT}", "-c", cs_name],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             env=gh_env,
@@ -1228,9 +1233,10 @@ async def navvi_start(
             f.write(str(child.pid))
 
         await asyncio.sleep(3)
-        reachable = is_api_reachable(NAVVI_PORT)
+        reachable = is_api_reachable(local_api)
         set_mode(f"remote:{cs_name}")
         active_persona = persona
+        navvi_api = "http://127.0.0.1:{}".format(local_api)
 
         if reachable:
             health = "healthy"
@@ -1240,7 +1246,7 @@ async def navvi_start(
             health = "starting..."
 
         return (
-            f"Navvi started (remote). Codespace: {cs_name}\nAPI: localhost:{NAVVI_PORT} ({health})\nVNC: localhost:{VNC_PORT}\n\n"
+            f"Navvi started (remote). Codespace: {cs_name}\nAPI: localhost:{local_api} ({health})\nVNC: localhost:{local_vnc}\n\n"
             f"Available prompts: signup_flow(service), login_flow(service), qa_walk(url)\n"
             f"Companion agents: navvi-browse, navvi-login, navvi-signup"
         )

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "navvi"
-version = "3.20.0"
+version = "3.20.1"
 description = "Give your AI agent a real browser identity — MCP server with persistent personas, anti-detection browser, and credential vault."
 readme = "README.md"
 license = "MIT"
