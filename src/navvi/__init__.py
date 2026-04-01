@@ -1220,10 +1220,10 @@ async def navvi_start(
         local_api = ports["api"]
         local_vnc = ports["vnc"]
 
-        # Port forward: unique local ports → fixed remote ports
+        # Port forward: gh syntax is remote:local
         kill_pidfile(PIDFILE_FWD)
         child = subprocess.Popen(
-            ["gh", "cs", "ports", "forward", f"{local_api}:{NAVVI_PORT}", f"{local_vnc}:{VNC_PORT}", "-c", cs_name],
+            ["gh", "cs", "ports", "forward", f"{NAVVI_PORT}:{local_api}", f"{VNC_PORT}:{local_vnc}", "-c", cs_name],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             env=gh_env,
