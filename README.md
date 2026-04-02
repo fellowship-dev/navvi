@@ -10,6 +10,8 @@
   MCP server with persistent personas, anti-detection browser, and credential vault.
   <br />
   Works with Claude Code, Cursor, and other MCP clients.
+  <br />
+  Open-source alternative to <a href="https://www.browserbase.com/">Browserbase</a> and <a href="https://www.hyperbrowser.ai/">Hyperbrowser</a>.
 </p>
 
 <p align="center">
@@ -118,6 +120,12 @@ curl -fsSL https://raw.githubusercontent.com/fellowship-dev/navvi/main/install-c
 - **navvi-browse** &mdash; autonomous web browsing with vision-driven navigation
 - **navvi-login** &mdash; login with stored credentials, handles reCAPTCHA and 2FA
 - **navvi-signup** &mdash; create new accounts with auto-generated credentials
+
+---
+
+If Navvi is useful to you, please [⭐ star the repo](https://github.com/fellowship-dev/navvi) — it helps others discover it.
+
+---
 
 ## Use Cases
 
@@ -266,21 +274,7 @@ Persona config and state live in `~/.navvi/navvi.db`. Each persona's browser pro
 
 ## Contributing
 
-```bash
-git clone https://github.com/fellowship-dev/navvi.git
-cd navvi
-
-# Build the container image locally
-docker build -t navvi -f container/Dockerfile container/
-
-# Install the MCP server in editable mode
-pip install -e .
-
-# Run the MCP server (points to local image)
-NAVVI_IMAGE=navvi python -m navvi
-```
-
-Set `NAVVI_IMAGE=navvi` in your `.mcp.json` env to use the locally built image instead of GHCR.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 
 ## License
 
