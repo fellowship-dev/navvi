@@ -129,10 +129,8 @@ mcp = FastMCP(
 # Ensure default persona exists on startup
 ensure_default()
 
-# Recording tools hidden by default (rarely needed).
-# Atomic tools are always visible — Claude Code doesn't support dynamic
-# tool registration mid-session, so hide/reveal via navvi_atomic is broken.
-mcp.disable(tags={"recording"})
+# Uncomment to hide recording tools by default:
+# mcp.disable(tags={"recording"})
 
 
 # --- MCP Resources ---
