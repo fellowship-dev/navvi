@@ -27,7 +27,7 @@ import logging
 import signal
 import time
 
-app = FastAPI(title="Navvi Server", version="3.0.0")
+app = FastAPI(title="Navvi Server", version="3.21.0")
 log = logging.getLogger("navvi-server")
 
 # --- Globals ---
@@ -172,6 +172,90 @@ def _with_marionette_retry(fn):
             return fn(m)
         except Exception as retry_err:
             raise MarionetteError(f"Failed after recovery: {retry_err}") from first_err
+
+
+# --- Marionette ↔ visual tab sync ---
+#
+# Problem: Marionette's "active handle" and Firefox's visually-focused tab
+# are independent. Manual VNC interaction or xdotool tab clicks change the
+# visual tab without updating Marionette, causing the MCP to read/control
+# the wrong tab.
+#
+# _sync_marionette_to_visual(): switch Marionette to the visually-focused tab.
+# _raise_marionette_tab():      bring Marionette's active tab to visual foreground.
+
+_last_sync_handle: Optional[str] = None
+_last_sync_time: float = 0.0
+_SYNC_DEBOUNCE_S: float = 0.5
+
+
+def _sync_marionette_to_visual():
+    """Switch Marionette to whichever tab the user sees on screen (VNC).
+
+    Uses document.hasFocus() to detect the visually-focused tab.
+    Fast path: current handle already has focus (~5ms, 1 round-trip).
+    Slow path: iterates all handles when tabs diverged.
+    """
+    global _last_sync_handle, _last_sync_time
+
+    now = time.monotonic()
+    if now - _last_sync_time < _SYNC_DEBOUNCE_S and _last_sync_handle:
+        return _last_sync_handle
+
+    try:
+        m = get_marionette()
+
+        # Fast path — current Marionette handle is already the focused tab
+        if m.execute_script("return document.hasFocus()"):
+            handle = m.get_window_handle()
+            _last_sync_handle = handle
+            _last_sync_time = now
+            return handle
+
+        # Slow path — scan all handles
+        original = m.get_window_handle()
+        for h in m.get_window_handles():
+            m.switch_to_window(h)
+            if m.execute_script("return document.hasFocus()"):
+                log.info("[sync] Marionette synced to visual tab: %s", h)
+                _last_sync_handle = h
+                _last_sync_time = now
+                return h
+
+        # No tab has focus (Firefox lost OS-level focus). Keep current.
+        m.switch_to_window(original)
+        log.warning("[sync] No tab has focus — keeping current handle %s", original)
+        _last_sync_handle = original
+        _last_sync_time = now
+        return original
+
+    except Exception as e:
+        log.warning("[sync] Failed to sync: %s", e)
+        return _last_sync_handle
+
+
+def _raise_marionette_tab():
+    """Bring Marionette's active tab to visual foreground in Firefox.
+
+    Called after /navigate, /tab/switch, /tab/new so that VNC shows
+    what Marionette is controlling.
+    """
+    global _last_sync_handle, _last_sync_time
+
+    try:
+        m = get_marionette()
+        m.execute_script("window.focus()")
+        _last_sync_handle = m.get_window_handle()
+        _last_sync_time = time.monotonic()
+    except Exception as e:
+        log.warning("[sync] Failed to raise tab: %s", e)
+
+
+def _invalidate_sync_cache():
+    """Invalidate the sync debounce cache (after tab/navigation changes)."""
+    global _last_sync_handle, _last_sync_time
+    _last_sync_handle = None
+    _last_sync_time = 0.0
 
 
 # --- Pydantic models ---
@@ -358,12 +442,14 @@ async def health():
 async def navigate(req: NavigateRequest):
     """Navigate to a URL via Marionette."""
     try:
+        _sync_marionette_to_visual()
         def _nav_and_read(m):
             m.navigate(req.url)
             return m
         _with_marionette_retry(_nav_and_read)
         # Give the page a moment to start loading
         await asyncio.sleep(0.5)
+        _raise_marionette_tab()
         result = _with_marionette_retry(lambda m: {"url": m.get_url(), "title": m.get_title()})
         return {"ok": True, **result}
     except MarionetteError as e:
@@ -374,6 +460,7 @@ async def navigate(req: NavigateRequest):
 async def get_url():
     """Get current page URL."""
     try:
+        _sync_marionette_to_visual()
         url = _with_marionette_retry(lambda m: m.get_url())
         return {"url": url}
     except MarionetteError as e:
@@ -384,6 +471,7 @@ async def get_url():
 async def get_title():
     """Get current page title."""
     try:
+        _sync_marionette_to_visual()
         title = _with_marionette_retry(lambda m: m.get_title())
         return {"title": title}
     except MarionetteError as e:
@@ -503,6 +591,7 @@ async def scroll(req: ScrollRequest):
 @app.get("/screenshot")
 async def screenshot():
     """Take a screenshot with scrot and return base64 PNG."""
+    _sync_marionette_to_visual()
     env = os.environ.copy()
     env["DISPLAY"] = display
     tmp_path = os.path.join(tempfile.gettempdir(), "navvi-shot.png")
@@ -541,6 +630,7 @@ async def cursor():
 async def execute_js(req: ExecuteJSRequest):
     """Execute JavaScript in Firefox via Marionette."""
     try:
+        _sync_marionette_to_visual()
         result = _with_marionette_retry(lambda m: m.execute_script(req.script, req.args))
         return {"ok": True, "value": result}
     except MarionetteError as e:
@@ -558,6 +648,7 @@ def get_viewport_offset():
     of the top-left corner of the viewport.
     """
     try:
+        _sync_marionette_to_visual()
         result = _with_marionette_retry(lambda m: m.execute_script(
             "return { x: window.mozInnerScreenX || 0, y: window.mozInnerScreenY || 0 }"
         ))
@@ -693,6 +784,7 @@ async def tab_list():
 async def tab_new(req: TabNewRequest):
     """Open a new tab, optionally navigate to a URL. Switches to the new tab."""
     try:
+        _invalidate_sync_cache()
         m = get_marionette()
         result = m.new_window("tab")
         handle = result.get("handle", "")
@@ -700,6 +792,7 @@ async def tab_new(req: TabNewRequest):
         if req.url:
             m.navigate(req.url)
             await asyncio.sleep(0.5)
+        _raise_marionette_tab()
         url = m.get_url()
         title = m.get_title()
         return {"ok": True, "handle": handle, "url": url, "title": title}
@@ -711,8 +804,10 @@ async def tab_new(req: TabNewRequest):
 async def tab_switch(handle: str):
     """Switch to a tab by handle. Returns url and title of the switched-to tab."""
     try:
+        _invalidate_sync_cache()
         m = get_marionette()
         m.switch_to_window(handle)
+        _raise_marionette_tab()
         url = m.get_url()
         title = m.get_title()
         return {"ok": True, "handle": handle, "url": url, "title": title}
@@ -724,6 +819,7 @@ async def tab_switch(handle: str):
 async def tab_close(handle: str):
     """Close a tab by handle. Cannot close the last tab."""
     try:
+        _invalidate_sync_cache()
         m = get_marionette()
         handles = m.get_window_handles()
         if len(handles) <= 1:
@@ -733,6 +829,7 @@ async def tab_close(handle: str):
         # Switch to first remaining tab
         if remaining:
             m.switch_to_window(remaining[0])
+            _raise_marionette_tab()
             url = m.get_url()
             title = m.get_title()
             return {"ok": True, "closed": handle, "active": remaining[0], "url": url, "title": title, "remaining": len(remaining)}
