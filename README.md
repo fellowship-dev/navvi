@@ -27,6 +27,10 @@
   <a href="#mcp-tools">MCP Tools</a>
 </p>
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/fellowship-dev/navvi/main/docs/navvi-demo.gif" alt="Navvi demo — searching and finding Navvi on GitHub" width="800" />
+</p>
+
 ---
 
 ## The Problem
