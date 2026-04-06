@@ -2744,16 +2744,39 @@ async def navvi_login(service: str, persona: str = "default") -> str:
     if not account.get("creds_ref"):
         return "Account for '{}' has no credential reference. Update it with navvi_account.".format(service)
 
-    # 2. Navigate to service
+    # 2. Determine login URL — prefer saved flow, fall back to https://{service}
+    svc_domain = account["service"]
+    login_url = None
+    login_flow = store_get_flow_fn(svc_domain, "login")
+    if login_flow and login_flow.get("steps"):
+        try:
+            steps = json.loads(login_flow["steps"]) if isinstance(login_flow["steps"], str) else login_flow["steps"]
+            for step in steps:
+                if step.get("action") == "navigate" and step.get("url"):
+                    login_url = step["url"]
+                    break
+        except (ValueError, TypeError):
+            pass
+    if not login_url:
+        # Ensure domain has a TLD — bare names like "indiehackers" won't resolve
+        if "." not in svc_domain:
+            return (
+                "Service '{}' is not a valid domain (no TLD). "
+                "Update the account with navvi_account(action='update', account_id={}, service='{}.com') "
+                "or whichever TLD is correct."
+            ).format(svc_domain, account["id"], svc_domain)
+        login_url = "https://{}".format(svc_domain)
+
     log_persona_action(pname, "login_start", service)
     try:
-        await api_call("POST", "/navigate", {"url": "https://{}".format(service)}, api_base)
+        await api_call("POST", "/navigate", {"url": login_url}, api_base)
     except Exception as e:
-        return "Failed to navigate to {}: {}".format(service, e)
+        return "Failed to navigate to {}: {}".format(login_url, e)
     await asyncio.sleep(2)
 
-    # 3. Try autofill
-    creds_ref = account["creds_ref"].replace("gopass://", "")
+    # 3. Try autofill — use parse_creds_ref to strip container ID prefixes
+    parsed = parse_creds_ref(account["creds_ref"])
+    creds_ref = parsed["path"]
     try:
         result = await api_call("POST", "/creds/autofill", {"entry": creds_ref}, api_base)
         if result.get("ok") or result.get("username_at"):
