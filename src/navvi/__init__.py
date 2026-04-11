@@ -2790,6 +2790,10 @@ async def navvi_login(service: str, persona: str = "default") -> str:
 
 def main():
     """CLI entry point for `uvx navvi` / `navvi` command."""
+    if "--version" in sys.argv:
+        from importlib.metadata import version
+        print(f"navvi {version('navvi')}")
+        return
     mcp.run(transport="stdio")
 
 
