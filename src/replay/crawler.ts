@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Actor } from "apify";
 import { PlaywrightCrawler, ProxyConfiguration, type Configuration, type Dataset, type KeyValueStore, type PlaywrightCrawlingContext } from "crawlee";
 import type { BrowserContext, Page } from "playwright";
@@ -6,7 +6,7 @@ import { buildCrawleeLaunchContext, restoreProfileCookies, saveProfileCookies } 
 import { isAllowedRequestUrl, registrableDomain } from "../browser/policy.js";
 import { createChooser, NavviError, NeedsHumanError, type Chooser } from "../chooser/index.js";
 import { compile, type CompileResult } from "../compile/index.js";
-import { isAllowedUrl, type Profile, type RunInput } from "../input/schema.js";
+import { LIMITS, isAllowedUrl, type Profile, type RunInput } from "../input/schema.js";
 import type { RunSummary } from "../main.js";
 import { dismissConsent, runPreSteps, type Notifier } from "../prestep/index.js";
 import { extractPage, fingerprintMatches, type ItemExtraction } from "../scraper/extract.js";
@@ -14,7 +14,10 @@ import { cacheKey, validateScraper, type CompiledScraper, type Status, type Trac
 import { ScraperStore, ScraperStoreError } from "../scraper/store.js";
 import { findPlaceholders, MissingSecretError, resolveSecrets, type CommandRunner, type Secret } from "../secrets/resolve.js";
 import { groupByTemplate, pickSampleUrls } from "../template/index.js";
+import { compileDetail, DETAIL_LINK_FIELD, detailLinkOf, extractDetail, hasDetailTemplate, mergeDetail, withDetailLink } from "./detail.js";
 import { entryModeFor, replayTrace, type ReplayPolicy, type StepFailureAction } from "./entry.js";
+import { createHealer, findUnmappedCandidates, type HealingEvent, type UnmappedCandidate } from "./heal.js";
+import { defaultPaginate } from "./paginate.js";
 
 /**
  * The crawler shell (U8, KTD4): one PlaywrightCrawler owns the browser for
@@ -22,7 +25,8 @@ import { entryModeFor, replayTrace, type ReplayPolicy, type StepFailureAction } 
  * navigator, the compiler and stores the scraper; `record` and `list`
  * requests replay on selectors and, in trace mode, on the recorded trace once
  * per session. The route guard (R26) and the click policy (R24/R25) run on
- * every page. Healing (U13) and navigation (U7) enter through hooks.
+ * every page. Healing and pagination (U13) and navigation (U7) enter through
+ * hooks with defaults from `heal.ts`, `paginate.ts` and `navigator.ts`.
  */
 
 export const REQUEST_HANDLER_TIMEOUT_SECS = 180;
@@ -63,9 +67,13 @@ export interface HealContext {
   scraper: CompiledScraper;
   chooser: Chooser;
   failure: HealFailure;
+  /** The run's mutation allowlist, for the control policy during step healing (R42). */
+  allowMutations?: readonly string[] | undefined;
 }
 
-export type HealOutcome = { healed: true; scraper: CompiledScraper; event: unknown } | { healed: false; reason: string };
+export type HealOutcome =
+  | { healed: true; scraper: CompiledScraper; event: HealingEvent; unmapped?: UnmappedCandidate[] | undefined }
+  | { healed: false; reason: string; unmapped?: UnmappedCandidate[] | undefined };
 
 /** U13: repairs a scraper after drift; the crawler stores the result and re-extracts. */
 export type HealerHook = (ctx: HealContext) => Promise<HealOutcome>;
@@ -220,8 +228,11 @@ interface RunState {
   traceReplays: number;
   blockedRequests: number;
   requests: Record<RequestLabel, number>;
-  healingEvents: unknown[];
+  healingEvents: HealingEvent[];
+  unmappedCandidates: UnmappedCandidate[];
   fieldsNotFound: Set<string>;
+  /** R16: dedupe keys of every record pushed this run (list rows dedupe within their listing crawl). */
+  seen: Set<string>;
   replayedSessions: Set<string>;
   guardedContexts: WeakSet<BrowserContext>;
 }
@@ -255,7 +266,7 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
     templates: plans.length,
     cacheHit: plans.length > 0 && plans.every((p) => p.cacheHit),
     healingEvents: state.healingEvents,
-    unmappedCandidates: [],
+    unmappedCandidates: state.unmappedCandidates,
     fieldsNotFound: [...state.fieldsNotFound].sort(),
     chooser: usage ? { name: usage.chooser, questions: usage.questions, inputTokens: usage.inputTokens, waitMs: usage.waitMs, costUsd: usage.costUsd } : null,
     input: redactInput(input),
@@ -300,7 +311,11 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   const actor: CrawlActor = deps.actor ?? Actor;
   const chooser = deps.chooser ?? createChooser({ chooser: input.chooser, env });
   const navigator: NavigatorHook | undefined = deps.navigator ?? (await import("./navigator.js")).defaultNavigator;
+  const healer: HealerHook = deps.healer ?? createHealer();
+  const paginateHook: PaginateHook = deps.paginate ?? defaultPaginate;
   const fields = (input.fields ?? []).map((f) => f.name);
+  const detailFields = input.followDetailPages ? (input.detailFields ?? []) : [];
+  const detailFieldNames = detailFields.map((f) => f.name);
   const mode = input.mode ?? "list";
   const state: RunState = {
     stop: null,
@@ -312,7 +327,9 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     blockedRequests: 0,
     requests: { compile: 0, list: 0, record: 0 },
     healingEvents: [],
+    unmappedCandidates: [],
     fieldsNotFound: new Set(),
+    seen: new Set(),
     replayedSessions: new Set(),
     guardedContexts: new WeakSet(),
   };
@@ -523,7 +540,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       ctxLog(`template ${plan.templateKey}: ${result.status}`);
       return;
     }
-    const compiled = result.scraper;
+    const compiled = input.followDetailPages && result.detailLink ? withDetailLink(result.scraper, result.detailLink) : result.scraper;
     const entry = trace.length > 0 && compiled.entry.mode === "trace" ? { mode: "trace" as const, url: request.url } : compiled.entry;
     const scraper = validateScraper({ ...compiled, trace, entry });
     await store.put(scraper);
@@ -550,49 +567,181 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     return failed;
   }
 
+  /** Healing runs one page at a time, so concurrent pages share the first repair instead of each asking (R33). */
+  let healChain: Promise<unknown> = Promise.resolve();
+  function withHealLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = healChain.then(fn, fn);
+    healChain = run.catch(() => undefined);
+    return run;
+  }
+
+  function noteUnmapped(found: readonly UnmappedCandidate[] | undefined): void {
+    for (const candidate of found ?? []) {
+      if (state.unmappedCandidates.length >= 50) return;
+      if (!state.unmappedCandidates.some((u) => u.selector === candidate.selector && u.text === candidate.text)) state.unmappedCandidates.push(candidate);
+    }
+  }
+
+  const driftSeen = (): boolean => state.healingEvents.length > 0 || state.unhealed > 0;
+
   async function heal(ctx: PlaywrightCrawlingContext, plan: TemplatePlan, failure: HealFailure): Promise<CompiledScraper | null> {
-    if (!deps.healer || !plan.scraper) return null;
-    const outcome = await deps.healer({ page: ctx.page, scraper: plan.scraper, chooser, failure });
-    if (!outcome.healed) return null;
+    if (!plan.scraper || state.stop) return null;
+    let outcome: HealOutcome;
+    try {
+      outcome = await healer({ page: ctx.page, scraper: plan.scraper, chooser, failure, allowMutations: input.allowMutations });
+    } catch (error) {
+      // R19: a chooser failure skips healing; the page counts as unhealed and the crawl goes on.
+      if (error instanceof NeedsHumanError) throw error;
+      ctxLog(`healing skipped on ${ctx.page.url()}: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+    noteUnmapped(outcome.unmapped);
+    if (!outcome.healed) {
+      ctxLog(`healing found nothing on ${ctx.page.url()}: ${outcome.reason}`);
+      return null;
+    }
+    if (state.healingEvents.length >= LIMITS.healingEvents) {
+      stopWith(state, crawler, { status: "drift", message: `healing budget of ${LIMITS.healingEvents} events per run exhausted at ${ctx.page.url()}` });
+      return null;
+    }
     state.healingEvents.push(outcome.event);
     await store.put(outcome.scraper);
     plan.scraper = outcome.scraper;
     return outcome.scraper;
   }
 
-  async function pushItems(ctx: PlaywrightCrawlingContext, plan: TemplatePlan, scraper: CompiledScraper, sourceUrl: string): Promise<void> {
-    let extraction = await extractPage(ctx.page, scraper, { sourceUrl, fields });
-    let items = extraction.items;
-    let failedNames = new Set<string>();
-    for (const item of items) for (const name of checkFields(scraper, item)) failedNames.add(name);
-    const allFailed = items.length === 0 || items.every((item) => Object.keys(scraper.fields).some((n) => item.values[n] === null));
-    if (allFailed && Object.keys(scraper.fields).length > 0) {
-      const healed = await heal(ctx, plan, { kind: "fields", fields: [...failedNames] });
-      if (healed) {
-        extraction = await extractPage(ctx.page, healed, { sourceUrl, fields });
-        items = extraction.items;
-        failedNames = new Set();
-        for (const item of items) for (const name of checkFields(healed, item)) failedNames.add(name);
-      } else {
-        state.unhealed += 1;
+  interface Extracted {
+    scraper: CompiledScraper;
+    items: ItemExtraction[];
+    /** Fields that failed on at least one item (R17). */
+    failed: Set<string>;
+  }
+
+  async function extractChecked(page: Page, scraper: CompiledScraper, sourceUrl: string): Promise<Extracted> {
+    const extraction = await extractPage(page, scraper, { sourceUrl, fields: [...fields, ...detailFieldNames] });
+    const items = scraper.mode === "record" && extraction.items.length === 0 ? [extraction] : extraction.items;
+    const failed = new Set<string>();
+    for (const item of items) for (const name of checkFields(scraper, item)) failed.add(name);
+    return { scraper, items, failed };
+  }
+
+  /** R33: a page whose every item leaves a compiled field empty asks for healing; an empty listing is an end, not drift. */
+  const needsHealing = (e: Extracted): boolean =>
+    e.items.length > 0 && Object.keys(e.scraper.fields).length > 0 && e.items.every((item) => Object.keys(e.scraper.fields).some((n) => item.values[n] === null));
+
+  /** R16: source URL in record mode, the detail link in list mode, else a hash of every field. Rows with no value at all are never collapsed. */
+  function dedupeKey(scraper: CompiledScraper, item: ItemExtraction, sourceUrl: string): string | null {
+    if (scraper.mode === "record") return `url:${sourceUrl}`;
+    const link = detailLinkOf(scraper, item);
+    if (link) return `link:${link}`;
+    const names = Object.keys(item.values)
+      .filter((n) => n !== DETAIL_LINK_FIELD)
+      .sort();
+    if (names.every((n) => item.values[n] === null)) return null;
+    return `hash:${createHash("sha256").update(JSON.stringify(names.map((n) => [n, item.values[n]]))).digest("hex")}`;
+  }
+
+  /** R18: compiles the detail template on first use, then merges each item's detail page; every detail page is a scraped page. */
+  async function mergeDetails(ctx: PlaywrightCrawlingContext, plan: TemplatePlan, scraper: CompiledScraper, items: ItemExtraction[]): Promise<ItemExtraction[]> {
+    let live = scraper;
+    const samples = new Map<string, ItemExtraction>();
+    const links = items.map((item) => detailLinkOf(live, item));
+    if (!hasDetailTemplate(live)) {
+      const room = input.maxPages - state.pages;
+      const sampleLinks = [...new Set(links.filter((l): l is string => l !== null))].slice(0, Math.max(0, room));
+      if (sampleLinks.length === 0) return items.map((item) => mergeDetail(item, null, detailFieldNames));
+      const result = await compileDetail({
+        context: ctx.page.context(),
+        scraper: live,
+        links: sampleLinks,
+        detailFields,
+        description: input.description,
+        chooser,
+        chooserId: input.chooser,
+        profile: input.profile,
+        startUrls: urls,
+        allowedDomains: input.allowedDomains,
+        prepare: (page) => dismissConsent(page).then(() => undefined),
+      });
+      state.pages += result.pagesOpened;
+      for (const name of result.fieldsNotFound) state.fieldsNotFound.add(name);
+      if (!result.ok) return items.map((item) => mergeDetail(item, null, detailFieldNames));
+      live = result.scraper;
+      await store.put(live);
+      plan.scraper = live;
+      for (const [url, sample] of result.samples) samples.set(url, sample);
+    }
+    const out: ItemExtraction[] = [];
+    let detailPage: Page | null = null;
+    try {
+      for (const [i, item] of items.entries()) {
+        const link = links[i] ?? null;
+        let detail = link ? (samples.get(link) ?? null) : null;
+        if (link && !detail && state.pages < input.maxPages) {
+          detailPage ??= await ctx.page.context().newPage();
+          state.pages += 1;
+          detail = await extractDetail(detailPage, live, link, detailFieldNames);
+        }
+        out.push(mergeDetail(item, detail, detailFieldNames));
       }
+    } finally {
+      await detailPage?.close().catch(() => undefined);
     }
-    if (scraper.mode === "record" && items.length === 0) items = [extraction];
-    const room = Math.max(0, input.maxItems - state.items);
-    const rows = items.slice(0, room);
-    for (const item of rows) {
-      if (Object.keys(scraper.fields).some((n) => item.values[n] === null)) state.failedItems += 1;
+    return out;
+  }
+
+  /** Extracts, heals, dedupes against `seen`, and pushes one page; resolves to the rows it added. */
+  async function pushItems(ctx: PlaywrightCrawlingContext, plan: TemplatePlan, scraper: CompiledScraper, sourceUrl: string, seen: Set<string>): Promise<number> {
+    const { page } = ctx;
+    let current = await extractChecked(page, scraper, sourceUrl);
+    let healAttempted = false;
+    if (needsHealing(current)) {
+      await withHealLock(async () => {
+        // another page may have healed the template meanwhile: re-check on the live scraper first
+        if (plan.scraper && plan.scraper !== current.scraper) current = await extractChecked(page, plan.scraper, sourceUrl);
+        if (!needsHealing(current)) return;
+        healAttempted = true;
+        const healed = await heal(ctx, plan, { kind: "fields", fields: [...current.failed] });
+        if (healed) current = await extractChecked(page, healed, sourceUrl);
+        else if (!state.stop) state.unhealed += 1;
+      });
     }
-    if (rows.length > 0) await dataset.pushData(rows.map((item) => ({ ...item.values, _source: sourceUrl })));
-    state.items += rows.length;
+    if (state.stop) return 0;
+    if (!healAttempted && driftSeen()) noteUnmapped(await findUnmappedCandidates(page, current.scraper).catch(() => []));
     state.pages += 1;
+    const live = current.scraper;
+    const fresh: ItemExtraction[] = [];
+    for (const item of current.items) {
+      const key = dedupeKey(live, item, sourceUrl);
+      if (key !== null) {
+        if (seen.has(key)) continue;
+        seen.add(key);
+      }
+      fresh.push(item);
+    }
+    const room = Math.max(0, input.maxItems - state.items);
+    let rows = fresh.slice(0, room);
+    if (live.mode === "list" && live.detail && detailFieldNames.length > 0 && rows.length > 0) rows = await mergeDetails(ctx, plan, live, rows);
+    for (const item of rows) {
+      if (Object.keys(live.fields).some((n) => item.values[n] === null)) state.failedItems += 1;
+    }
+    if (rows.length > 0) {
+      await dataset.pushData(
+        rows.map((item) => {
+          const { [DETAIL_LINK_FIELD]: _hidden, ...values } = item.values;
+          return { ...values, _source: sourceUrl };
+        }),
+      );
+    }
+    state.items += rows.length;
+    return rows.length;
   }
 
   async function handleRecord(ctx: PlaywrightCrawlingContext, data: ReplayUserData): Promise<void> {
     const plan = planFor(data.templateKey);
     if (!plan.scraper || state.items >= input.maxItems) return;
     await dismissConsent(ctx.page).catch(() => undefined);
-    await pushItems(ctx, plan, plan.scraper, ctx.request.url);
+    await pushItems(ctx, plan, plan.scraper, ctx.request.url, state.seen);
   }
 
   async function handleList(ctx: PlaywrightCrawlingContext, data: ReplayUserData): Promise<void> {
@@ -610,7 +759,13 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
         if (page.url() !== scraper.entry.url) await page.goto(scraper.entry.url, { waitUntil: "domcontentloaded" });
         const onStepFailed = async (stepIndex: number, failedPage: Page, reason: string): Promise<StepFailureAction> => {
           const healed = await heal(ctx, plan, { kind: "step", stepIndex, reason });
-          if (healed) return "retry";
+          if (healed) {
+            // replayTrace retries the step it captured before the heal: mirror the appended alternatives into it (R42)
+            const step = scraper.trace[stepIndex];
+            const healedStep = healed.trace[stepIndex];
+            if (step && healedStep) step.alternatives.splice(0, step.alternatives.length, ...healedStep.alternatives);
+            return "retry";
+          }
           if (input.goal && navigator) {
             const nav = await navigator(failedPage, input.goal, {
               chooser,
@@ -642,16 +797,21 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     await listPages(ctx, plan);
   }
 
-  /** Extracts the listing the page stands on, then follows the paginate hook (U13; default: one page). */
+  /** Extracts the listing the page stands on, then follows the paginate hook (R15); two consecutive empty pages end the listing (R16). */
   async function listPages(ctx: PlaywrightCrawlingContext, plan: TemplatePlan): Promise<void> {
     let pageIndex = 0;
+    let emptyStreak = 0;
+    // R16: rows repeated across the pages of one listing are pushed once
+    const seen = new Set<string>();
     for (;;) {
       const scraper = plan.scraper;
       if (!scraper) return;
-      await pushItems(ctx, plan, scraper, ctx.page.url());
+      const pushed = await pushItems(ctx, plan, scraper, ctx.page.url(), seen);
+      if (state.stop) return;
       pageIndex += 1;
-      if (state.items >= input.maxItems || pageIndex >= input.maxPages) return;
-      const moved = deps.paginate ? await deps.paginate(ctx.page, scraper, pageIndex) : false;
+      emptyStreak = pushed === 0 ? emptyStreak + 1 : 0;
+      if (emptyStreak >= 2 || state.items >= input.maxItems || state.pages >= input.maxPages) return;
+      const moved = await paginateHook(ctx.page, plan.scraper ?? scraper, pageIndex);
       if (!moved) return;
     }
   }

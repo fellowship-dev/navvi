@@ -9,16 +9,19 @@ import { fileURLToPath } from "node:url";
  * URL layout:
  * - `/demo/pharmacy/...`      the pharmacy version selected with `switchDemo` (heal proof: same URLs, new markup)
  * - `/demo/pharmacy-v1/...`   and `/demo/pharmacy-v2/...` directly
- * - `/login/`, `/login/index-renamed.html`, `/login/account.html` (cookie-gated), `POST /login`
+ * - `/login/`, `/login/index-renamed.html`, `/login/account.html` (cookie-gated), `POST /login`;
+ *   `switchLogin("renamed")` serves the renamed form (button "Sign in") at `/login/` (heal proof for a trace step)
  * - `/fixtures/<name>.html`   from tests/fixtures; `challenge.html` is served with status 503
  */
 
 export type DemoVersion = "v1" | "v2";
+export type LoginVersion = "normal" | "renamed";
 
 export interface FixtureServer {
   baseUrl: string;
   switchDemo(version: DemoVersion): void;
   currentDemo(): DemoVersion;
+  switchLogin(version: LoginVersion): void;
   close(): Promise<void>;
 }
 
@@ -80,6 +83,7 @@ async function sendFile(res: http.ServerResponse, file: string, status = 200): P
 
 export async function startFixtureServer(): Promise<FixtureServer> {
   let demo: DemoVersion = "v1";
+  let login: LoginVersion = "normal";
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -108,7 +112,7 @@ export async function startFixtureServer(): Promise<FixtureServer> {
           redirect(res, "/login/");
           return;
         }
-        const file = resolveWithin(path.join(DEMO_DIR, "login"), rest || "index.html");
+        const file = resolveWithin(path.join(DEMO_DIR, "login"), rest || (login === "renamed" ? "index-renamed.html" : "index.html"));
         if (!file) return void notFound(res);
         await sendFile(res, file);
         return;
@@ -162,6 +166,9 @@ export async function startFixtureServer(): Promise<FixtureServer> {
       demo = version;
     },
     currentDemo: () => demo,
+    switchLogin(version) {
+      login = version;
+    },
     close: () =>
       new Promise<void>((resolve, reject) => {
         server.closeAllConnections();
