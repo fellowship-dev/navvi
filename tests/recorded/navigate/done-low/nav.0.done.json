@@ -1,0 +1,9 @@
+{
+  "id": "nav.0.done",
+  "kind": "boolean",
+  "index": 0,
+  "probability": 0.4,
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "chooser": "agent"
+}

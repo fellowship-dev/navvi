@@ -1,0 +1,9 @@
+{
+  "id": "nav.0.op",
+  "kind": "choice",
+  "index": 5,
+  "note": "BLOCKED",
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "chooser": "agent"
+}

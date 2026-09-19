@@ -1,0 +1,9 @@
+{
+  "id": "nav.1.op",
+  "kind": "choice",
+  "index": 3,
+  "note": "WAIT",
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "chooser": "agent"
+}

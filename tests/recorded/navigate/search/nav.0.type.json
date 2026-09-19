@@ -1,0 +1,9 @@
+{
+  "id": "nav.0.type",
+  "kind": "choice",
+  "index": 0,
+  "note": "Search jobs",
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "chooser": "agent"
+}

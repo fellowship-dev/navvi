@@ -1,0 +1,9 @@
+{
+  "id": "nav.3.op",
+  "kind": "choice",
+  "index": 3,
+  "note": "DONE",
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "chooser": "agent"
+}
