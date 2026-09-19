@@ -4,5 +4,6 @@
   "index": 0,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "note": "main/article/div/h1 = Amoxicilina 500 mg x 21 cápsulas"
 }

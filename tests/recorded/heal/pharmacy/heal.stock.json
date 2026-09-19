@@ -1,8 +1,9 @@
 {
   "id": "heal.stock",
   "kind": "choice",
-  "index": 4,
+  "index": 0,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "note": "main/article/div/p/span = Disponible"
 }
