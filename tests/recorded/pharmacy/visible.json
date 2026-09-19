@@ -1,0 +1,9 @@
+{
+  "id": "visible",
+  "kind": "boolean",
+  "index": 1,
+  "probability": 0.93,
+  "inputTokens": 120,
+  "outputTokens": 0,
+  "chooser": "jev"
+}
