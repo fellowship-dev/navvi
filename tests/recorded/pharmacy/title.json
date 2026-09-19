@@ -1,0 +1,9 @@
+{
+  "id": "title",
+  "kind": "text",
+  "index": null,
+  "text": "Farmacia Store B",
+  "inputTokens": 40,
+  "outputTokens": 8,
+  "chooser": "model"
+}
