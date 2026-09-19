@@ -1,0 +1,19 @@
+{
+  "fields": {
+    "title": {
+      "alternatives": [
+        {
+          "selector": "a",
+          "fingerprint": {
+            "samples": [
+              "Senior Python Engineer II",
+              "Backend Developer (Django)",
+              "Data Engineer"
+            ],
+            "shape": "text"
+          }
+        }
+      ]
+    }
+  }
+}

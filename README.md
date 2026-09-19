@@ -8,7 +8,9 @@ zero model calls, and when the site drifts it heals the broken field or step
 instead of failing. No API key needed when a coding agent runs it: the agent
 answers the compile questions itself.
 
-<!-- demo gif: docs/demo.gif (U19) -->
+![Navvi demo](docs/demo.gif)
+
+The same site, three runs: compile on v1, heal on v2 when the markup changes, replay v1 with zero questions. Video: [docs/demo.mp4](docs/demo.mp4) — reproduce it with `npm run demo`.
 
 ## Install and run
 

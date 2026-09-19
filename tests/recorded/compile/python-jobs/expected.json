@@ -1,0 +1,81 @@
+{
+  "fields": {
+    "title": {
+      "alternatives": [
+        {
+          "selector": "a",
+          "fingerprint": {
+            "samples": [
+              "Senior Python Engineer II",
+              "Backend Developer (Django)",
+              "Data Engineer"
+            ],
+            "shape": "text"
+          }
+        }
+      ]
+    },
+    "company": {
+      "alternatives": [
+        {
+          "selector": "span.company",
+          "fingerprint": {
+            "samples": [
+              "Anaconda",
+              "Canonical",
+              "Mozilla"
+            ],
+            "shape": "text"
+          }
+        }
+      ]
+    },
+    "location": {
+      "alternatives": [
+        {
+          "selector": "span.location",
+          "fingerprint": {
+            "samples": [
+              "Remote",
+              "Berlin, Germany",
+              "London, UK"
+            ],
+            "shape": "text"
+          }
+        }
+      ]
+    },
+    "date": {
+      "alternatives": [
+        {
+          "selector": "time.posted",
+          "attr": "datetime",
+          "fingerprint": {
+            "samples": [
+              "2026-08-28",
+              "2026-08-27",
+              "2026-08-26"
+            ],
+            "shape": "date"
+          }
+        }
+      ]
+    },
+    "link": {
+      "alternatives": [
+        {
+          "selector": "a",
+          "attr": "href",
+          "fingerprint": {
+            "samples": [
+              "{{base}}/fixtures/jobs/100.html",
+              "{{base}}/fixtures/jobs/101.html",
+              "{{base}}/fixtures/jobs/102.html"
+            ],
+            "shape": "url"
+          }
+        }
+      ]
+    }
+  }
+}

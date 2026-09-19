@@ -1,0 +1,64 @@
+{
+  "fields": {
+    "name": {
+      "alternatives": [
+        {
+          "selector": "h1.producto-nombre",
+          "fingerprint": {
+            "samples": [
+              "Paracetamol 500 mg x 16 comprimidos",
+              "Ibuprofeno 400 mg x 20 comprimidos",
+              "Omeprazol 20 mg x 30 cápsulas"
+            ],
+            "shape": "text"
+          }
+        }
+      ]
+    },
+    "laboratory": {
+      "alternatives": [
+        {
+          "selector": "p.producto-laboratorio > span.valor",
+          "fingerprint": {
+            "samples": [
+              "Laboratorio Chile",
+              "Mintlab",
+              "Saval"
+            ],
+            "shape": "text"
+          }
+        }
+      ]
+    },
+    "price": {
+      "alternatives": [
+        {
+          "selector": "div.producto-precio > span.precio",
+          "fingerprint": {
+            "samples": [
+              "$ 2.490",
+              "$ 3.990",
+              "$ 5.490"
+            ],
+            "shape": "money"
+          }
+        }
+      ]
+    },
+    "stock": {
+      "alternatives": [
+        {
+          "selector": "span.stock",
+          "fingerprint": {
+            "samples": [
+              "Disponible",
+              "Disponible",
+              "Disponible"
+            ],
+            "shape": "text"
+          }
+        }
+      ]
+    }
+  }
+}

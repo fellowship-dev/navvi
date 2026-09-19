@@ -1,0 +1,65 @@
+{
+  "fields": {
+    "title": {
+      "alternatives": [
+        {
+          "selector": "a.titlelink",
+          "fingerprint": {
+            "samples": [
+              "Show HN: A self-healing scraper compiler",
+              "Rust 2.0 announced",
+              "Why SQLite is enough"
+            ],
+            "shape": "text"
+          }
+        }
+      ]
+    },
+    "link": {
+      "alternatives": [
+        {
+          "selector": "a.titlelink",
+          "attr": "href",
+          "fingerprint": {
+            "samples": [
+              "https://example.org/story/45000000",
+              "https://example.org/story/45000007",
+              "https://example.org/story/45000014"
+            ],
+            "shape": "url"
+          }
+        }
+      ]
+    },
+    "points": {
+      "alternatives": [
+        {
+          "selector": "span.score",
+          "fingerprint": {
+            "samples": [
+              "12 points",
+              "49 points",
+              "86 points"
+            ],
+            "shape": "text"
+          }
+        }
+      ]
+    },
+    "comments": {
+      "alternatives": [
+        {
+          "selector": ":scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)",
+          "fingerprint": {
+            "samples": [
+              "3 comments",
+              "16 comments",
+              "29 comments"
+            ],
+            "shape": "text"
+          }
+        }
+      ]
+    }
+  }
+}
