@@ -1,0 +1,49 @@
+{
+  "fields": {
+    "title": {
+      "alternatives": [
+        {
+          "selector": "a.card-title",
+          "fingerprint": {
+            "samples": [
+              "Card 1: Fix login",
+              "Card 2: Ship v3",
+              "Card 3: Write docs"
+            ],
+            "shape": "text"
+          }
+        }
+      ]
+    },
+    "owner": {
+      "alternatives": [
+        {
+          "selector": "span.owner",
+          "fingerprint": {
+            "samples": [
+              "ana",
+              "bruno",
+              "carla"
+            ],
+            "shape": "text"
+          }
+        }
+      ]
+    },
+    "points": {
+      "alternatives": [
+        {
+          "selector": "span.points",
+          "fingerprint": {
+            "samples": [
+              "1",
+              "4",
+              "7"
+            ],
+            "shape": "int"
+          }
+        }
+      ]
+    }
+  }
+}

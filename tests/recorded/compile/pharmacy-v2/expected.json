@@ -1,0 +1,64 @@
+{
+  "fields": {
+    "name": {
+      "alternatives": [
+        {
+          "selector": "h1",
+          "fingerprint": {
+            "samples": [
+              "Paracetamol 500 mg x 16 comprimidos",
+              "Omeprazol 20 mg x 30 cápsulas",
+              "Loratadina 10 mg x 30 comprimidos"
+            ],
+            "shape": "text"
+          }
+        }
+      ]
+    },
+    "laboratory": {
+      "alternatives": [
+        {
+          "selector": ":scope > body > main > article > div > p:nth-of-type(1) > span:nth-of-type(2)",
+          "fingerprint": {
+            "samples": [
+              "Laboratorio Chile",
+              "Saval",
+              "Andrómaco"
+            ],
+            "shape": "text"
+          }
+        }
+      ]
+    },
+    "price": {
+      "alternatives": [
+        {
+          "selector": ":scope > body > main > article > aside > span:nth-of-type(2)",
+          "fingerprint": {
+            "samples": [
+              "$ 2.490",
+              "$ 4.390",
+              "$ 4.290"
+            ],
+            "shape": "money"
+          }
+        }
+      ]
+    },
+    "stock": {
+      "alternatives": [
+        {
+          "selector": ":scope > body > main > article > div > p:nth-of-type(2) > span:nth-of-type(2)",
+          "fingerprint": {
+            "samples": [
+              "Disponible",
+              "Disponible",
+              "Disponible"
+            ],
+            "shape": "text"
+          }
+        }
+      ]
+    }
+  }
+}
