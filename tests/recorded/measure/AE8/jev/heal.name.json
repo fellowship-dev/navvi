@@ -1,0 +1,22 @@
+{
+  "id": "heal.name",
+  "index": 0,
+  "probabilities": [
+    0.46,
+    0.03,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.1,
+    0,
+    0,
+    0
+  ],
+  "kind": "choice",
+  "inputTokens": 534,
+  "outputTokens": 134,
+  "chooser": "jev"
+}

@@ -70,16 +70,16 @@ outside the markers is kept.
 <!-- measurements:start -->
 | chooser | scenario | questions | input tokens | chooser wait (ms) | total wall (ms) | cost (USD) | fields correct | healing events | status |
 |---|---|---|---|---|---|---|---|---|---|
-| agent | AE1 | 7 | 1392 | 1 | 2683 | 0.000000 | 125/125 | 0 | ok |
-| agent | AE7 | 4 | 5789 | 0 | 4140 | 0.000000 | 48/48 | 0 | ok |
-| agent | AE8 | 9 | 9027 | 1 | 7175 | 0.000000 | 48/48 | 1 | ok |
-| agent | AE15 | 1 | 105 | 0 | 11426 | 0.000000 | 10/10 | 1 | ok |
-| jev | AE1 | 0 | 0 | 0 | 0 | 0.000000 | 0/0 | 0 | skipped: no key (set AI_GATEWAY_API_KEY or TYPESAFE_API_KEY) |
-| jev | AE7 | 0 | 0 | 0 | 0 | 0.000000 | 0/0 | 0 | skipped: no key (set AI_GATEWAY_API_KEY or TYPESAFE_API_KEY) |
-| jev | AE8 | 0 | 0 | 0 | 0 | 0.000000 | 0/0 | 0 | skipped: no key (set AI_GATEWAY_API_KEY or TYPESAFE_API_KEY) |
-| jev | AE15 | 0 | 0 | 0 | 0 | 0.000000 | 0/0 | 0 | skipped: no key (set AI_GATEWAY_API_KEY or TYPESAFE_API_KEY) |
-| model | AE1 | 0 | 0 | 0 | 0 | 0.000000 | 0/0 | 0 | skipped: no key (set ANTHROPIC_API_KEY) |
-| model | AE7 | 0 | 0 | 0 | 0 | 0.000000 | 0/0 | 0 | skipped: no key (set ANTHROPIC_API_KEY) |
-| model | AE8 | 0 | 0 | 0 | 0 | 0.000000 | 0/0 | 0 | skipped: no key (set ANTHROPIC_API_KEY) |
-| model | AE15 | 0 | 0 | 0 | 0 | 0.000000 | 0/0 | 0 | skipped: no key (set ANTHROPIC_API_KEY) |
+| agent | AE1 | 7 | 1392 | 1 | 2624 | 0.000000 | 125/125 | 0 | ok |
+| agent | AE7 | 4 | 5789 | 0 | 4229 | 0.000000 | 48/48 | 0 | ok |
+| agent | AE8 | 9 | 7225 | 1 | 6546 | 0.000000 | 48/48 | 1 | ok |
+| agent | AE15 | 1 | 105 | 0 | 11211 | 0.000000 | 10/10 | 1 | ok |
+| jev | AE1 | 1 | 448 | 1208 | 2458 | 0.000019 | 0/125 | 0 | failed |
+| jev | AE7 | 4 | 10325 | 568 | 4711 | 0.000434 | 48/48 | 0 | ok |
+| jev | AE8 | 15 | 16258 | 2635 | 9234 | 0.000683 | 13/48 | 1 | failed |
+| jev | AE15 | 1 | 441 | 869 | 12070 | 0.000019 | 10/10 | 1 | ok |
+| claude | AE1 | 7 | 20 | 18392 | 20881 | 0.000000 | 125/125 | 0 | ok |
+| claude | AE7 | 4 | 10 | 10246 | 14399 | 0.000000 | 48/48 | 0 | ok |
+| claude | AE8 | 9 | 30 | 61985 | 68553 | 0.000000 | 46/48 | 2 | ok |
+| claude | AE15 | 1 | 10 | 8182 | 19368 | 0.000000 | 10/10 | 1 | ok |
 <!-- measurements:end -->

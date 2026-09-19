@@ -26,6 +26,18 @@ Node 22+. The first run downloads Camoufox; set `NAVVI_BROWSER=chromium` to
 use Playwright's Chromium instead. Agents: read [`SKILL.md`](SKILL.md) first;
 [`llms.txt`](llms.txt) indexes everything.
 
+## Measured, with and without Jev
+
+First live comparison, 2026-09-19, same scenarios per chooser (`npm run measure -- --choosers agent,jev,claude`). Full table in [`docs/measurements.md`](docs/measurements.md).
+
+| chooser | list compile (AE1) | record compile (AE7) | field heal (AE8) | step heal (AE15) | chooser wait per scenario | cost |
+|---|---|---|---|---|---|---|
+| `jev` (TypeSafe, direct API) | flips on a single-candidate group: 125/125 or 0/125 | 48/48 | 13/48 | 10/10 | 0.5 to 2.6 s | under $0.001 |
+| `claude` (Claude Code, Haiku, subscription) | 125/125 | 48/48 | 46/48 | 10/10 | 8 to 62 s | $0 billed |
+| `agent` (recorded replay of a person's answers) | 125/125 | 48/48 | 48/48 | 10/10 | 0 | $0 |
+
+Read it plainly: Jev is fast and cheap and reliable when the question is "which of these leaves is the price" on a record page. It is not yet reliable when asked to confirm the only item group on a listing, or to pick a replacement candidate during healing, where it prefers `none`. Those two questions need better state and premise engineering; the harness above is the eval for that work. Claude on a subscription gets every scenario right and costs time instead of money.
+
 ## What you get
 
 - **Records**: a JSON array on stdout or in `--out <file>` (`.csv` writes CSV),

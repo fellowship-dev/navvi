@@ -1,0 +1,8 @@
+{
+  "id": "field.stock",
+  "index": 6,
+  "kind": "choice",
+  "inputTokens": 3,
+  "outputTokens": 235,
+  "chooser": "claude"
+}

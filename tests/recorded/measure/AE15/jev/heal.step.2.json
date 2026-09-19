@@ -1,0 +1,12 @@
+{
+  "id": "heal.step.2",
+  "index": 0,
+  "probabilities": [
+    0.58,
+    0.01
+  ],
+  "kind": "choice",
+  "inputTokens": 441,
+  "outputTokens": 47,
+  "chooser": "jev"
+}
