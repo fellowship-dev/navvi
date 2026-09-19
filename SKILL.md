@@ -47,7 +47,7 @@ Answer each batch on stdin with one JSON line, then keep reading; the records pr
 
 `index` is the option position, `null` for none, `1`/`0` for booleans; `text` is for text questions only and must satisfy the question's `schema`.
 
-If you cannot keep stdin open (a tool that runs a command to completion), add `--agent-mode file`. Navvi writes `storage/questions/<token>.json`, prints the token and exits **3**. Read the file, write an answers file in the same shape, and rerun the same command with `--answers answers.json --resume <token>`. Repeat if it parks again; every answered question is remembered.
+If you cannot keep stdin open (a tool that runs a command to completion), add `--agent-mode file`. Navvi writes the batch to `<storage>/questions/<token>.json` (`storage/questions/` by default, or under `--storage <dir>`), prints the path and the token on stderr, and exits **3** with nothing on stdout. Read the file, write an answers file in the shape it names, and rerun the **same command and flags** with `--answers answers.json --resume <token>`. A run can park more than once (a listing asks for the item group first, then the fields): each park prints a **new** token, so always resume with the latest one. Answers you already gave ride along in the parked file, so each answers file needs only the new batch. `--out` is written only when the run finishes. Answer a next-page question honestly; `--max-pages` still caps the crawl.
 
 ## With a Key: Unattended
 
@@ -75,7 +75,7 @@ If you cannot keep stdin open (a tool that runs a command to completion), add `-
 | 0 | `succeeded` | Use the data |
 | 1 | `no_items_found`, `drift`, `blocked_bot_detection`, `blocked_login_required`, `blocked_no_progress` | Read the stderr message; a redesign needs a new prompt, a login needs `--profile local` and secrets |
 | 2 | configuration or validation error | Fix the flags; the message names the env vars for keys |
-| 3 | `needs_human` | Answer `storage/questions/<token>.json`, rerun with `--answers --resume` |
+| 3 | `needs_human` | Answer `<storage>/questions/<token>.json`, rerun the same command with `--answers <file> --resume <latest token>` |
 | 4 | `budget_exhausted`, `model_unavailable`, `charge_limit` | Retry later, raise the cap, or switch chooser |
 
 ## Limits

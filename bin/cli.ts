@@ -262,7 +262,8 @@ function needsHumanBlock(token: string | undefined, questionsFile: string | unde
   if (token) {
     lines.push(`  token: ${token}`);
     lines.push(`  Read the questions file, write {"answers":[{"id":"<question id>","index":<option index, null for none, 1/0 for booleans>,"text":"<text questions only>"}]}`);
-    lines.push(`  to a file, then rerun the same command with: --answers <answers.json> --resume ${token}`);
+    lines.push(`  to a file, then rerun the same command and flags with: --answers <answers.json> --resume ${token}`);
+    lines.push(`  Only this batch is needed; earlier answers are carried forward. A later park prints a new token: resume with the latest one.`);
   }
   return lines.join("\n") + "\n";
 }
@@ -340,6 +341,11 @@ function chooserFor(args: CliArgs, io: CliIo, storageDir: string): Chooser {
     const file = join(questionsDir, `${args.resume}.json`);
     if (!existsSync(file)) throw new CliError(`--resume ${args.resume}: no parked questions at ${file}`);
     if (!answers) throw new CliError(`--resume ${args.resume} needs --answers <file>`);
+    // Answers from earlier parks ride along in the parked file; the new file wins on conflicts.
+    const parked = JSON.parse(readFileSync(file, "utf8")) as { answered?: Answer[] };
+    const merged = new Map<string, Answer>((parked.answered ?? []).map((a) => [a.id, a]));
+    for (const a of answers) merged.set(a.id, a);
+    answers = [...merged.values()];
   }
   return createChooser({
     chooser: name,

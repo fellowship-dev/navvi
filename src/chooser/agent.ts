@@ -26,6 +26,8 @@ export interface QuestionBatchFile {
   createdAt: string;
   questions: Question[];
   answerWith: string;
+  /** Every answer already known when this batch parked; carried into the next resume so a reader never re-answers. */
+  answered?: Answer[];
 }
 
 export interface AgentChooserOptions extends BaseChooserOptions {
@@ -124,7 +126,6 @@ export class AgentChooser extends BaseChooser {
       const known = this.preloaded.get(q.id);
       if (known) {
         answers.push(known);
-        this.preloaded.delete(q.id);
       } else {
         pending.push(q);
       }
@@ -157,6 +158,7 @@ export class AgentChooser extends BaseChooser {
       createdAt: new Date().toISOString(),
       questions,
       answerWith: 'JSON {"answers":[{"id":"<question id>","index":<option index or null for none; booleans 1/0>,"text":"<text questions only>"}]}',
+      answered: [...this.preloaded.values()],
     };
     writeFileSync(file, JSON.stringify(payload, null, 2) + "\n");
     return file;
