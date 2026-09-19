@@ -1,0 +1,9 @@
+{
+  "id": "text.0.1",
+  "kind": "text",
+  "index": null,
+  "text": "{\"text\":\"a@b.com\"}",
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "chooser": "agent"
+}
