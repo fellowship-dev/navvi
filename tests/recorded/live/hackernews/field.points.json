@@ -1,0 +1,9 @@
+{
+  "id": "field.points",
+  "kind": "choice",
+  "index": 8,
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "chooser": "agent",
+  "note": "answered live by Fry on 2026-09-19 against https://news.ycombinator.com/"
+}
