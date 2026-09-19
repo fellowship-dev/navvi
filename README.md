@@ -1,3 +1,9 @@
+> [!WARNING]
+> **Final release.** Navvi v2, this MCP browser server, is frozen on the
+> [`v2` branch](https://github.com/fellowship-dev/navvi/tree/v2) and receives
+> no further updates. This PyPI package stops at 3.22.0.
+> Navvi v3 is a TypeScript CLI on `main`, published on npm as `navvi`.
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/fellowship-dev/navvi/main/docs/navvi-logo.png" alt="Navvi" width="120" />
 </p>
