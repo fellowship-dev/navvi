@@ -1,3 +1,4 @@
+import { ensureEvaluateShim } from "../browser/snapshot.js";
 import type { Page } from "playwright";
 import type { CompiledScraper, Fingerprint, Shape } from "./schema.js";
 
@@ -249,6 +250,7 @@ export async function extractPage(page: Page, scraper: CompiledScraper, options:
     fields: specs,
     maxChars: MAX_VALUE_CHARS,
   };
+  await ensureEvaluateShim(page);
   const result = await page.evaluate(extractInPage, arg);
 
   const items: ItemExtraction[] = result.items.map((row) => {
