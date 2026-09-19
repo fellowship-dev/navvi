@@ -112,8 +112,8 @@ describe("list mode (AE1, AE2, AE3)", () => {
       // one state per batch: the description travels once
       expect(new Set(spy.batches[1]!.map((q) => q.state)).size).toBe(1);
       expect(spy.batches[1]![0]!.state).toContain("python job listing");
-      expect(result.questions).toBe(7);
-      expect(result.batches).toBe(2);
+      expect(spy.usage().questions).toBe(7);
+      expect(spy.usage().batches).toBe(2);
       expect(result.fieldsNotFound).toEqual([]);
 
       const scraper = validateScraper(result.scraper);
@@ -215,7 +215,7 @@ describe("list mode (AE1, AE2, AE3)", () => {
       expect(result.status).toBe("no_items_found");
       expect(result.fieldsNotFound).toEqual(["title"]);
       expect(spy.batches.map((b) => b.map((q) => q.id))).toEqual([["group"], ["group.retry"]]);
-      expect(result.questions).toBe(2);
+      expect(spy.usage().questions).toBe(2);
       const scrolled = await pages[0]!.evaluate(() => window.scrollY > 0 || document.documentElement.scrollHeight <= window.innerHeight);
       expect(scrolled).toBe(true);
     } finally {
@@ -228,8 +228,9 @@ describe("list mode (AE1, AE2, AE3)", () => {
     try {
       const spy = new SpyChooser(new RecordedChooser({ fixture: "compile/none-group" }));
       const result = await compile(options(pages, "none-group", { fields: F("title", "price"), description: "product", chooser: spy }));
-      expect(result).toMatchObject({ ok: false, status: "no_items_found", fieldsNotFound: ["title", "price"], questions: 0, batches: 0 });
+      expect(result).toMatchObject({ ok: false, status: "no_items_found", fieldsNotFound: ["title", "price"] });
       expect(spy.batches).toEqual([]);
+      expect(spy.usage().questions).toBe(0);
     } finally {
       await closePages(pages);
     }
@@ -262,8 +263,8 @@ describe("record mode (AE7)", () => {
         expect(q.options!.length).toBeGreaterThan(10);
       }
       expect(batchChars(spy.batches[0]!)).toBeLessThan(CHUNK_BUDGET_CHARS);
-      expect(result.batches).toBe(1);
-      expect(result.questions).toBe(4);
+      expect(spy.usage().batches).toBe(1);
+      expect(spy.usage().questions).toBe(4);
       const scraper = result.scraper;
       expect(scraper.mode).toBe("record");
       expect(scraper.item).toBeUndefined();

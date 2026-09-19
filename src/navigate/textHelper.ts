@@ -2,6 +2,7 @@ import { isModelTextAllowed, type Control } from "../browser/policy.js";
 import type { SnapshotControl } from "../browser/snapshot.js";
 import { TEXT_INPUT_CAP, type Chooser, type Question } from "../chooser/chooser.js";
 import { premises } from "../chooser/questions.js";
+import { clip, isRecord } from "../util/text.js";
 
 /**
  * Text helper (KTD11, R24): the one place model-written text enters a run.
@@ -9,9 +10,7 @@ import { premises } from "../chooser/questions.js";
  * context and recent actions; the answer must be a JSON object with exactly
  * one string `text`. Invalid output is retried once, then the caller ends
  * BLOCKED. Model text never lands in personal-data fields and never looks
- * like an email, phone or card number (`isModelTextAllowed`). The value is
- * cached while the entire helper input is identical (a stale re-decision
- * reuses it) and discarded after a successful mutation.
+ * like an email, phone or card number (`isModelTextAllowed`).
  */
 
 /** Visible page context offered to the helper, before the batch cap trims it. */
@@ -48,10 +47,6 @@ export function policyControl(c: SnapshotControl): Control {
   return control;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /** KTD11: the JSON must contain exactly one key, `text`, a non-empty string (or null for "missing"). */
 export function parseTextAnswer(raw: string): { text: string } | { text: null } | { error: string } {
   let parsed: unknown;
@@ -71,64 +66,25 @@ export function parseTextAnswer(raw: string): { text: string } | { text: null } 
   return { text };
 }
 
-function cap(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, Math.max(0, max - 1))}…` : text;
-}
-
 /** The state string for the helper: JSON of the input with the page text trimmed to fit the batch cap. */
 export function textHelperState(input: TextHelperInput, premise: string): string {
   const field = { name: input.field.name, role: input.field.role, value: input.field.value, scope: input.field.scope };
   const actions = input.recentActions.slice(-6);
   const build = (text: string): string => JSON.stringify({ goal: input.goal, field, page: { title: input.context.title, text }, recentActions: actions });
-  let context = cap(input.context.text, TEXT_CONTEXT_CHARS);
+  let context = clip(input.context.text, TEXT_CONTEXT_CHARS);
   let state = build(context);
   // The chooser refuses premise + state over TEXT_INPUT_CAP; the page text is the part that gives.
   while (state.length + premise.length > TEXT_INPUT_CAP && context.length > 0) {
     const over = state.length + premise.length - TEXT_INPUT_CAP;
-    context = cap(context, Math.max(0, context.length - over - 1));
+    context = clip(context, context.length - over - 1);
     state = build(context);
   }
   return state;
 }
 
-/** Cache key: the entire helper input. */
-export function textHelperKey(input: TextHelperInput): string {
-  return JSON.stringify({
-    goal: input.goal,
-    field: { id: input.field.id, name: input.field.name, role: input.field.role, value: input.field.value },
-    context: input.context,
-    recentActions: input.recentActions.slice(-6),
-  });
-}
-
 export interface GenerateTextOptions {
   /** Question id for the first attempt; the retry appends `.1`. */
   questionId: string;
-}
-
-export class TextHelper {
-  private pending: { key: string; text: string } | null = null;
-
-  constructor(private readonly chooser: Chooser) {}
-
-  /** Reuses the cached value while the whole input is identical (reference behaviour). */
-  cached(input: TextHelperInput): string | null {
-    const key = textHelperKey(input);
-    return this.pending && this.pending.key === key ? this.pending.text : null;
-  }
-
-  /** Called after the typed value reached the page. */
-  consume(): void {
-    this.pending = null;
-  }
-
-  async generate(input: TextHelperInput, options: GenerateTextOptions): Promise<TextHelperResult> {
-    const cached = this.cached(input);
-    if (cached !== null) return { ok: true, text: cached, requests: 0 };
-    const result = await generateText(this.chooser, input, options);
-    if (result.ok) this.pending = { key: textHelperKey(input), text: result.text };
-    return result;
-  }
 }
 
 /**

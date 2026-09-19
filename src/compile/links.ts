@@ -3,6 +3,7 @@ import type { LinkCandidate } from "../browser/snapshot.js";
 import type { Answer, Question } from "../chooser/chooser.js";
 import { premises } from "../chooser/questions.js";
 import type { Pagination } from "../scraper/schema.js";
+import { clip } from "../util/text.js";
 import type { FieldCandidate } from "./fields.js";
 
 /**
@@ -13,8 +14,6 @@ import type { FieldCandidate } from "./fields.js";
 
 export const NEXT_LINK_QUESTION_ID = "link.next";
 export const DETAIL_LINK_QUESTION_ID = "link.detail";
-
-const clip = (s: string, max: number): string => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 
 /** Next-page candidates: on-domain (R25) anchors that appear once, never a per-item link. */
 export function nextLinkCandidates(links: readonly LinkCandidate[], startUrls: readonly string[], allowedDomains: readonly string[]): LinkCandidate[] {

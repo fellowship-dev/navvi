@@ -1,12 +1,14 @@
 import type { Locator, Page } from "playwright";
 import { freshnessToken, isStale, waitForSettle, type SettleOptions } from "../browser/guards.js";
 import { allowedControl, isOnAllowedDomain, isPersonalDataField } from "../browser/policy.js";
-import { getControls, serializeControls, type SnapshotControl } from "../browser/snapshot.js";
+import { getControls, serializeControls, type AriaRole, type SnapshotControl } from "../browser/snapshot.js";
 import type { Answer, Chooser, Question } from "../chooser/chooser.js";
 import { premises } from "../chooser/questions.js";
 import { LIMITS, type Profile } from "../input/schema.js";
 import type { StepExpect, TraceStep } from "../scraper/schema.js";
-import { TextHelper, policyControl, type RecentAction } from "./textHelper.js";
+import { maskSecrets } from "../secrets/resolve.js";
+import { clip } from "../util/text.js";
+import { generateText, policyControl, type RecentAction } from "./textHelper.js";
 import { captureExpectation, readLandmarks, secretNameFor, TraceRecorder, type Landmark } from "./trace.js";
 
 /**
@@ -77,9 +79,13 @@ export interface NavigateOptions {
 
 export type NavigateStatus = "DONE" | "BLOCKED";
 
+/** Why a navigation ended BLOCKED: a login wall (a password field with no secret), a budget (R28), or no progress. */
+export type BlockedBy = "login" | "budget" | "no_progress";
+
 export interface NavigateResult {
   status: NavigateStatus;
   reason?: string;
+  blockedBy?: BlockedBy;
   trace: TraceStep[];
   /** Executed actions. */
   steps: number;
@@ -112,7 +118,6 @@ interface Observation {
 }
 
 interface HistoryEntry extends RecentAction {
-  kind: string;
   pageChanged: boolean;
 }
 
@@ -127,39 +132,24 @@ interface Decision {
   select: SelectTarget | null;
 }
 
-type AriaRole = Parameters<Page["getByRole"]>[0];
 const ARIA_ROLES: ReadonlySet<string> = new Set(["button", "link", "checkbox", "radio", "switch", "tab", "menuitem", "menuitemradio", "option", "gridcell", "combobox", "textbox", "searchbox", "spinbutton"]);
 const TYPE_ROLES: ReadonlySet<string> = new Set(["textbox", "searchbox", "spinbutton"]);
-
-function cap(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, Math.max(0, max - 1))}…` : text;
-}
 
 function isTypeable(c: SnapshotControl): boolean {
   if (c.disabled || c.tag === "select") return false;
   return c.tag === "textarea" || TYPE_ROLES.has(c.role) || (c.role === "combobox" && c.tag === "input");
 }
 
-class Redactor {
-  private readonly entries: Array<[string, string]>;
-  constructor(secrets: Readonly<Record<string, string>>) {
-    this.entries = Object.entries(secrets).filter(([, value]) => value.length >= 3).map(([name, value]) => [value, `[secret:${name}]`]);
-  }
-  apply(text: string): string {
-    let out = text;
-    for (const [value, replacement] of this.entries) out = out.split(value).join(replacement);
-    return out;
-  }
-}
-
 function describeControl(c: SnapshotControl): string {
-  const bits = [`${c.role} ${JSON.stringify(cap(c.name, 60))}`];
-  if (c.value) bits.push(`value=${JSON.stringify(cap(c.value, 40))}`);
+  const bits = [`${c.role} ${JSON.stringify(clip(c.name, 60))}`];
+  if (c.value) bits.push(`value=${JSON.stringify(clip(c.value, 40))}`);
   if (c.checked !== undefined) bits.push(`checked=${c.checked}`);
-  if (c.href) bits.push(`-> ${cap(c.href, 80)}`);
-  if (c.scope) bits.push(`in ${JSON.stringify(cap(c.scope, 60))}`);
+  if (c.href) bits.push(`-> ${clip(c.href, 80)}`);
+  if (c.scope) bits.push(`in ${JSON.stringify(clip(c.scope, 60))}`);
   return bits.join(" ");
 }
+
+const firstLine = (err: unknown): string => (err instanceof Error ? (err.message.split("\n")[0] ?? "") : String(err));
 
 function renderHistory(history: readonly HistoryEntry[]): string {
   const recent = history.slice(-10);
@@ -257,11 +247,12 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
   const maxRequests = options.maxRequests ?? LIMITS.navigationRequests;
   const settle: SettleOptions = options.settle ?? { idleMs: 150, maxMs: 2_000 };
   const secrets = options.secrets ?? {};
-  const redactor = new Redactor(secrets);
+  const secretEntries = Object.entries(secrets);
+  /** R39: every string that reaches the chooser or the result carries `[secret:name]` in place of a value. */
+  const redact = (text: string): string => maskSecrets(text, secretEntries);
   const policy = { allowMutations };
 
   const recorder = new TraceRecorder();
-  const helper = new TextHelper(chooser);
   const history: HistoryEntry[] = [];
   let steps = 0;
   let requests = 0;
@@ -278,10 +269,10 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
 
   const onDomain = (url: string): boolean => isOnAllowedDomain(url, options.startUrls, allowedDomains);
 
-  const blocked = (reason: string): NavigateResult => {
+  const blocked = (by: BlockedBy, reason: string): NavigateResult => {
     const password = lastControls.find((c) => c.secretCapable);
     const hint = password && !secretFor(password) ? `login required: a password field ("${password.name}") is visible and no secret is available; ` : "";
-    return { status: "BLOCKED", reason: `${hint}${reason}`, trace: recorder.steps, steps, requests };
+    return { status: "BLOCKED", blockedBy: hint ? "login" : by, reason: `${hint}${reason}`, trace: recorder.steps, steps, requests };
   };
 
   const ask = async (batch: Question[]): Promise<Answer[] | null> => {
@@ -293,7 +284,7 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
   const noProgressAttempt = (action: string, kind: string): void => {
     noProgress += 1;
     lastNoProgress = kind;
-    history.push({ action, kind, pageChanged: false });
+    history.push({ action, pageChanged: false });
   };
 
   async function observe(): Promise<Observation> {
@@ -302,7 +293,7 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
     lastControls = controls;
     const url = page.url();
     const title = await page.title().catch(() => "");
-    const text = cap(await page.evaluate(() => document.body?.innerText ?? "").catch(() => ""), VISIBLE_TEXT_CHARS);
+    const text = clip(await page.evaluate(() => document.body?.innerText ?? "").catch(() => ""), VISIBLE_TEXT_CHARS);
     const landmarks = await readLandmarks(page).catch((): Landmark[] => []);
 
     const type = controls.filter((c) => {
@@ -320,9 +311,7 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
     for (const c of controls.filter((c) => c.tag === "select" && !c.disabled)) select.push(...(await selectOptions(page, controls, c)));
 
     const offered = OPERATIONS.filter((op) => (op === "CLICK" ? click.length > 0 : op === "TYPE_TEXT" ? type.length > 0 : op === "SELECT" ? select.length > 0 : true));
-    const state = redactor.apply(
-      [`GOAL: ${goal}`, `URL: ${url}`, `TITLE: ${title}`, "VISIBLE TEXT:", text, serializeControls(controls), renderHistory(history)].join("\n"),
-    );
+    const state = redact([`GOAL: ${goal}`, `URL: ${url}`, `TITLE: ${title}`, "VISIBLE TEXT:", text, serializeControls(controls), renderHistory(history)].join("\n"));
     return { token, url, title, text, controls, targets: { click, type, select }, offered, state, landmarks };
   }
 
@@ -331,17 +320,17 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
       { id: `nav.${n}.op`, kind: "choice", premise: premises.operationChoice(goal), options: o.offered.map((op) => OPERATION_LABELS[op]), state: o.state },
     ];
     if (o.targets.click.length > 0) {
-      batch.push({ id: `nav.${n}.click`, kind: "choice", premise: premises.operationTarget("CLICK", goal), options: o.targets.click.map((c) => redactor.apply(describeControl(c))), state: o.state });
+      batch.push({ id: `nav.${n}.click`, kind: "choice", premise: premises.operationTarget("CLICK", goal), options: o.targets.click.map((c) => redact(describeControl(c))), state: o.state });
     }
     if (o.targets.type.length > 0) {
-      batch.push({ id: `nav.${n}.type`, kind: "choice", premise: premises.operationTarget("TYPE_TEXT", goal), options: o.targets.type.map((c) => redactor.apply(describeControl(c))), state: o.state });
+      batch.push({ id: `nav.${n}.type`, kind: "choice", premise: premises.operationTarget("TYPE_TEXT", goal), options: o.targets.type.map((c) => redact(describeControl(c))), state: o.state });
     }
     if (o.targets.select.length > 0) {
       batch.push({
         id: `nav.${n}.select`,
         kind: "choice",
         premise: premises.operationTarget("SELECT", goal),
-        options: o.targets.select.map((s) => redactor.apply(`${describeControl(s.control)} = ${JSON.stringify(cap(s.label, 60))}`)),
+        options: o.targets.select.map((s) => redact(`${describeControl(s.control)} = ${JSON.stringify(clip(s.label, 60))}`)),
         state: o.state,
       });
     }
@@ -360,6 +349,22 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
   }
 
   async function execute(n: number, o: Observation, d: Decision): Promise<ExecutionOutcome> {
+    /** KTD14: getControls already filtered; re-check the one control that is about to act. The skip reason, or null. */
+    const refused = (control: SnapshotControl): string | null => {
+      const decision = allowedControl(policyControl(control), profile, policy);
+      return decision.allowed ? null : (decision.reason ?? "policy");
+    };
+    /** Locates `control` among the observed ones and runs `fn` on it; a missing control or a failed action is a skip reason. */
+    const act = async (control: SnapshotControl, label: string, verb: string, fn: (locator: Locator) => Promise<unknown>): Promise<string | null> => {
+      const locator = await locate(page, o.controls, control);
+      if (!locator) return `${label} not found`;
+      try {
+        await fn(locator);
+        return null;
+      } catch (err) {
+        return `${verb} failed: ${firstLine(err)}`;
+      }
+    };
     switch (d.op) {
       case "WAIT":
         await page.waitForTimeout(WAIT_MS);
@@ -371,31 +376,17 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
       case "CLICK": {
         const control = d.click;
         if (!control) return { executed: false, skipped: "no click target" };
-        // KTD14: getControls already filtered; re-check the one control that is about to act.
-        const decision = allowedControl(policyControl(control), profile, policy);
-        if (!decision.allowed) return { executed: false, skipped: decision.reason ?? "policy" };
-        const locator = await locate(page, o.controls, control);
-        if (!locator) return { executed: false, skipped: `control ${control.role} "${control.name}" not found` };
-        try {
-          await locator.click({ timeout: ACTION_TIMEOUT_MS });
-        } catch (err) {
-          return { executed: false, skipped: `click failed: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}` };
-        }
+        const skipped = refused(control) ?? (await act(control, `control ${control.role} "${control.name}"`, "click", (locator) => locator.click({ timeout: ACTION_TIMEOUT_MS })));
+        if (skipped !== null) return { executed: false, skipped };
         const submit = control.form !== null && (control.inputType === "submit" || control.inputType === "image" || (control.tag === "button" && (control.inputType === undefined || control.inputType === "submit")));
         return { executed: true, control, typedOk: false, navigation: Boolean(control.href) || submit, op: "click" };
       }
       case "SELECT": {
         const target = d.select;
         if (!target) return { executed: false, skipped: "no select target" };
-        const decision = allowedControl(policyControl(target.control), profile, policy);
-        if (!decision.allowed) return { executed: false, skipped: decision.reason ?? "policy" };
-        const locator = await locate(page, o.controls, target.control);
-        if (!locator) return { executed: false, skipped: `select ${target.control.name} not found` };
-        try {
-          await locator.selectOption({ value: target.value }, { timeout: ACTION_TIMEOUT_MS });
-        } catch (err) {
-          return { executed: false, skipped: `select failed: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}` };
-        }
+        const skipped =
+          refused(target.control) ?? (await act(target.control, `select ${target.control.name}`, "select", (locator) => locator.selectOption({ value: target.value }, { timeout: ACTION_TIMEOUT_MS })));
+        if (skipped !== null) return { executed: false, skipped };
         return { executed: true, control: target.control, text: target.label, typedOk: true, navigation: false, op: "select" };
       }
       case "TYPE_TEXT": {
@@ -407,10 +398,11 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
           value = secrets[secret] ?? "";
         } else {
           if (control.secretCapable || isPersonalDataField(policyControl(control))) return { executed: false, skipped: "personal-data field without a secret" };
-          const decision = allowedControl(policyControl(control), profile, policy);
-          if (!decision.allowed) return { executed: false, skipped: decision.reason ?? "policy" };
-          const result = await helper.generate(
-            { goal, field: control, context: { title: o.title, text: redactor.apply(o.text) }, recentActions: history.map(({ action, text }) => ({ action, text })) },
+          const refusal = refused(control);
+          if (refusal !== null) return { executed: false, skipped: refusal };
+          const result = await generateText(
+            chooser,
+            { goal, field: control, context: { title: o.title, text: redact(o.text) }, recentActions: history.map(({ action, text }) => ({ action, text })) },
             { questionId: `text.${n}` },
           );
           requests += result.requests;
@@ -422,16 +414,13 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
           // The helper was another request: the page must still be the one the decision saw.
           if (await isStale(page, o.token)) return { executed: false, skipped: "page changed during text generation" };
         }
-        const locator = await locate(page, o.controls, control);
-        if (!locator) return { executed: false, skipped: `field ${control.role} "${control.name}" not found` };
-        try {
+        let landed = "";
+        const skipped = await act(control, `field ${control.role} "${control.name}"`, "fill", async (locator) => {
           await locator.fill(value, { timeout: ACTION_TIMEOUT_MS });
-        } catch (err) {
-          return { executed: false, skipped: `fill failed: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}` };
-        }
-        const landed = await locator.evaluate((el) => ("value" in el ? String((el as HTMLInputElement).value) : (el.textContent ?? ""))).catch(() => "");
+          landed = await locator.evaluate((el) => ("value" in el ? String((el as HTMLInputElement).value) : (el.textContent ?? ""))).catch(() => "");
+        });
+        if (skipped !== null) return { executed: false, skipped };
         const typedOk = landed === value;
-        if (typedOk && secret === null) helper.consume();
         if (secret !== null) return { executed: true, control, secret, typedOk, navigation: false, op: "type" };
         return { executed: true, control, text: value, typedOk, navigation: false, op: "type" };
       }
@@ -443,18 +432,18 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
   }
 
   for (;;) {
-    if (steps >= maxSteps) return blocked(`step budget of ${maxSteps} reached`);
-    if (noProgress >= NO_PROGRESS_LIMIT) return blocked(`no progress after ${NO_PROGRESS_LIMIT} attempts (last: ${lastNoProgress})`);
+    if (steps >= maxSteps) return blocked("budget", `step budget of ${maxSteps} reached`);
+    if (noProgress >= NO_PROGRESS_LIMIT) return blocked("no_progress", `no progress after ${NO_PROGRESS_LIMIT} attempts (last: ${lastNoProgress})`);
 
     // Decide over a fresh observation; a page that changed in between is decided again (bounded).
     let observation: Observation | null = null;
     let decision: Decision | null = null;
     for (let attempt = 0; ; attempt++) {
-      if (requests >= maxRequests) return blocked(`request budget of ${maxRequests} reached`);
+      if (requests >= maxRequests) return blocked("budget", `request budget of ${maxRequests} reached`);
       observation = await observe();
       const n = decisions++;
       const answers = await ask(batchFor(n, observation));
-      if (!answers) return blocked(`request budget of ${maxRequests} reached`);
+      if (!answers) return blocked("budget", `request budget of ${maxRequests} reached`);
       decision = interpret(n, observation, answers);
       if (!(await isStale(page, observation.token))) break;
       if (attempt >= MAX_REDECISIONS) {
@@ -472,10 +461,10 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
       noProgressAttempt("no operation chosen", "none");
       continue;
     }
-    if (decision.op === "BLOCKED") return blocked("the chooser found no supported operation that makes progress");
+    if (decision.op === "BLOCKED") return blocked("no_progress", "the chooser found no supported operation that makes progress");
     if (decision.op === "DONE") {
       const answers = await ask([{ id: `nav.${n}.done`, kind: "boolean", premise: premises.goalAchieved(goal), state: observation.state }]);
-      if (!answers) return blocked(`request budget of ${maxRequests} reached`);
+      if (!answers) return blocked("budget", `request budget of ${maxRequests} reached`);
       const p = probabilityOfTrue(answers[0]);
       if (p >= DONE_THRESHOLD) return { status: "DONE", trace: recorder.steps, steps, requests };
       noProgressAttempt(`DONE rejected (P(goal achieved) ${p.toFixed(2)} < ${DONE_THRESHOLD})`, "done rejected");
@@ -486,7 +475,7 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
     try {
       outcome = await execute(n, observation, decision);
     } catch (err) {
-      if (err instanceof TextHelperFailure) return blocked(err.message);
+      if (err instanceof TextHelperFailure) return blocked("no_progress", err.message);
       throw err;
     }
     if (!outcome.executed) {
@@ -497,7 +486,7 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
 
     const urlBefore = observation.url;
     await settleAfter(page, outcome.control, outcome.navigation, urlBefore, settle);
-    const label = outcome.control ? `${outcome.op} ${outcome.control.role} ${JSON.stringify(cap(outcome.control.name, 60))}` : outcome.op;
+    const label = outcome.control ? `${outcome.op} ${outcome.control.role} ${JSON.stringify(clip(outcome.control.name, 60))}` : outcome.op;
     const shownText = outcome.secret !== undefined ? `{{secret:${outcome.secret}}}` : outcome.text;
 
     const url = page.url();
@@ -506,13 +495,13 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
       await waitForSettle(page, settle).catch(() => undefined);
       noProgress += 1;
       lastNoProgress = "left the allowed domain";
-      history.push({ action: `${label} (undone: left the allowed domain)`, kind: outcome.op, text: shownText, pageChanged: false });
+      history.push({ action: `${label} (undone: left the allowed domain)`, text: shownText, pageChanged: false });
       continue;
     }
 
     const pageChanged = (await freshnessToken(page).catch(() => observation.token)) !== observation.token;
     const progressed = pageChanged || outcome.typedOk;
-    history.push({ action: label, kind: outcome.op, text: shownText, pageChanged });
+    history.push({ action: label, text: shownText, pageChanged });
     if (!progressed) {
       noProgress += 1;
       lastNoProgress = outcome.op;

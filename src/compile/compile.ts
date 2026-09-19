@@ -2,7 +2,8 @@ import type { BrowserContext, Page } from "playwright";
 import { waitForSettle, type SettleOptions } from "../browser/guards.js";
 import { DEFAULT_CAPS, ensureSnapshotScript, getCandidates, type Candidates } from "../browser/snapshot.js";
 import type { Answer, Chooser, Question } from "../chooser/chooser.js";
-import { CHOOSERS, type Chooser as ChooserId, type Mode, type Profile } from "../input/schema.js";
+import { isChooserId, type Chooser as ChooserId, type Mode, type Profile } from "../input/schema.js";
+import { scrollToBottom } from "../replay/entry.js";
 import { SCRAPER_VERSION, validateScraper, type CompiledScraper, type ENTRY_MODES, type Field, type FieldAlternative, type Pagination } from "../scraper/schema.js";
 import { pickSampleRows } from "../template/index.js";
 import {
@@ -69,8 +70,6 @@ export interface CompileOptions {
 export interface CompileSuccess {
   ok: true;
   scraper: CompiledScraper;
-  questions: number;
-  batches: number;
   /** Requested fields mapped to `none`; replay emits null for them (R8). */
   fieldsNotFound: string[];
   /** List mode with `followDetailPages`: the chosen per-item detail link, for the detail compile (R18). */
@@ -80,35 +79,16 @@ export interface CompileSuccess {
 export interface CompileNoItems {
   ok: false;
   status: "no_items_found";
-  questions: number;
-  batches: number;
   fieldsNotFound: string[];
 }
 
 export type CompileResult = CompileSuccess | CompileNoItems;
 
-/** Counts what the chooser was asked, chunking fan-outs to the budget. */
-class Asker {
-  questions = 0;
-  batches = 0;
-  constructor(private readonly chooser: Chooser) {}
-
-  async ask(batch: Question[]): Promise<Answer[]> {
-    if (batch.length === 0) return [];
-    this.batches += 1;
-    this.questions += batch.length;
-    return this.chooser.ask(batch);
-  }
-
-  async askChunked(questions: Question[]): Promise<Answer[]> {
-    const out: Answer[] = [];
-    for (const chunk of chunkQuestions(questions)) out.push(...(await this.ask(chunk)));
-    return out;
-  }
-}
-
-function isChooserId(name: string): name is ChooserId {
-  return (CHOOSERS as readonly string[]).includes(name);
+/** Asks a fan-out in batches that fit the chunk budget; the chooser's own `usage()` counts them. */
+export async function askChunked(chooser: Chooser, questions: readonly Question[]): Promise<Answer[]> {
+  const out: Answer[] = [];
+  for (const chunk of chunkQuestions(questions)) out.push(...(await chooser.ask(chunk)));
+  return out;
 }
 
 async function resolveSpecs(page: Page, specs: readonly LeafSpec[], scope: { within?: string; itemIndex?: number; span?: number }): Promise<Array<string | null>> {
@@ -136,11 +116,6 @@ function recordResolver(pages: readonly Page[]): SampleResolver {
   };
 }
 
-async function scrollToBottom(page: Page, settle: SettleOptions | undefined): Promise<void> {
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-  await waitForSettle(page, settle);
-}
-
 function fanOutState(description: string, fields: readonly CompileField[], samples: readonly string[], how: string): string {
   const lines = [
     `Records: ${description}`,
@@ -162,7 +137,7 @@ interface Parts {
   detailLink: FieldAlternative | null;
 }
 
-function finish(options: CompileOptions, asker: Asker, mapped: Map<string, FieldCandidate | null>, parts: Parts): CompileSuccess {
+function finish(options: CompileOptions, mapped: Map<string, FieldCandidate | null>, parts: Parts): CompileSuccess {
   const fields: Record<string, Field> = {};
   const fieldsNotFound: string[] = [];
   for (const field of options.fields) {
@@ -185,11 +160,11 @@ function finish(options: CompileOptions, asker: Asker, mapped: Map<string, Field
     createdAt: new Date().toISOString(),
   };
   if (parts.item) doc.item = parts.item;
-  return { ok: true, scraper: validateScraper(doc), questions: asker.questions, batches: asker.batches, fieldsNotFound, detailLink: parts.detailLink };
+  return { ok: true, scraper: validateScraper(doc), fieldsNotFound, detailLink: parts.detailLink };
 }
 
-function noItems(options: CompileOptions, asker: Asker): CompileNoItems {
-  return { ok: false, status: "no_items_found", questions: asker.questions, batches: asker.batches, fieldsNotFound: options.fields.map((f) => f.name) };
+function noItems(options: CompileOptions): CompileNoItems {
+  return { ok: false, status: "no_items_found", fieldsNotFound: options.fields.map((f) => f.name) };
 }
 
 /**
@@ -216,7 +191,7 @@ export async function probeEntry(context: BrowserContext, url: string, item: Ite
   }
 }
 
-async function compileList(options: CompileOptions, asker: Asker): Promise<CompileResult> {
+async function compileList(options: CompileOptions): Promise<CompileResult> {
   const page = options.pages[0];
   if (!page) throw new Error("list mode compile needs the listing page");
   const description = options.description ?? "record";
@@ -228,7 +203,8 @@ async function compileList(options: CompileOptions, asker: Asker): Promise<Compi
   for (let attempt = 0; attempt < 2; attempt++) {
     const suffix = attempt === 0 ? "" : RETRY_SUFFIX;
     if (attempt > 0) {
-      await scrollToBottom(page, options.settle);
+      await scrollToBottom(page);
+      await waitForSettle(page, options.settle);
       minItems = Math.min(minItems, RETRY_MIN_GROUP_ITEMS);
     }
     const cands = await getCandidates(page, { minGroupItems: minItems });
@@ -236,7 +212,7 @@ async function compileList(options: CompileOptions, asker: Asker): Promise<Compi
     if (groups.length === 0) continue;
 
     const groupState = `Records: ${description}\nFields: ${names.join(", ")}\nPage: ${page.url()}`;
-    const [groupAnswer] = await asker.ask([buildGroupQuestion(groups, description, names, groupState, suffix)]);
+    const [groupAnswer] = await options.chooser.ask([buildGroupQuestion(groups, description, names, groupState, suffix)]);
     const group = groupAnswer && groupAnswer.index !== null ? groups[groupAnswer.index] : undefined;
     if (!group) continue;
 
@@ -253,7 +229,7 @@ async function compileList(options: CompileOptions, asker: Asker): Promise<Compi
     const detailCands = options.followDetailPages ? detailLinkCandidates(candidates, page.url(), options.startUrls, allowed) : [];
     if (detailCands.length > 0) questions.push(buildDetailLinkQuestion(detailCands, description, state, suffix));
 
-    const answers = await asker.askChunked(questions);
+    const answers = await askChunked(options.chooser, questions);
     const mapped = applyFieldAnswers(options.fields, candidates, answers, suffix);
     if (allNone(mapped)) continue;
 
@@ -262,7 +238,7 @@ async function compileList(options: CompileOptions, asker: Asker): Promise<Compi
     const detailIndex = chosenIndex(answers, `${DETAIL_LINK_QUESTION_ID}${suffix}`);
     const detail = detailIndex === null ? null : (detailCands[detailIndex] ?? null);
     const entryMode = options.entryMode ?? (options.context ? await probeEntry(options.context, page.url(), item, minItems, options.settle) : "direct");
-    return finish(options, asker, mapped, {
+    return finish(options, mapped, {
       mode: "list",
       entry: { mode: entryMode, url: page.url() },
       item,
@@ -271,10 +247,10 @@ async function compileList(options: CompileOptions, asker: Asker): Promise<Compi
       detailLink: detail ? toAlternative(detail, [page.url()]) : null,
     });
   }
-  return noItems(options, asker);
+  return noItems(options);
 }
 
-async function compileRecord(options: CompileOptions, asker: Asker): Promise<CompileResult> {
+async function compileRecord(options: CompileOptions): Promise<CompileResult> {
   const pages = options.pages.slice(0, 3);
   if (pages.length === 0) throw new Error("record mode compile needs at least one sample page");
   const description = options.description ?? "record";
@@ -282,18 +258,23 @@ async function compileRecord(options: CompileOptions, asker: Asker): Promise<Com
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const suffix = attempt === 0 ? "" : RETRY_SUFFIX;
-    if (attempt > 0) for (const page of pages) await scrollToBottom(page, options.settle);
+    if (attempt > 0) {
+      for (const page of pages) {
+        await scrollToBottom(page);
+        await waitForSettle(page, options.settle);
+      }
+    }
     const leaves = [];
     for (const page of pages) leaves.push((await getCandidates(page)).leaves);
     const candidates = await intersectCandidates(leaves, recordResolver(pages));
     if (candidates.length === 0) continue;
 
     const state = fanOutState(description, options.fields, pages.map((p) => p.url()), `record mode, ${pages.length} sample pages`);
-    const answers = await asker.askChunked(buildFieldQuestions(options.fields, candidates, state, suffix));
+    const answers = await askChunked(options.chooser, buildFieldQuestions(options.fields, candidates, state, suffix));
     const mapped = applyFieldAnswers(options.fields, candidates, answers, suffix);
     if (allNone(mapped)) continue;
 
-    return finish(options, asker, mapped, {
+    return finish(options, mapped, {
       mode: "record",
       entry: { mode: "direct", url: pages[0]!.url() },
       pagination: { mode: "none" },
@@ -301,12 +282,11 @@ async function compileRecord(options: CompileOptions, asker: Asker): Promise<Com
       detailLink: null,
     });
   }
-  return noItems(options, asker);
+  return noItems(options);
 }
 
 /** Compiles the template from the given sample pages with any chooser. */
 export async function compile(options: CompileOptions): Promise<CompileResult> {
   if (options.fields.length === 0) throw new Error("compile needs at least one field");
-  const asker = new Asker(options.chooser);
-  return options.mode === "list" ? compileList(options, asker) : compileRecord(options, asker);
+  return options.mode === "list" ? compileList(options) : compileRecord(options);
 }

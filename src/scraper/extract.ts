@@ -54,7 +54,8 @@ export function resolveUrl(raw: string | null | undefined, base: string): string
   return url.href;
 }
 
-function isHttpUrl(value: string): boolean {
+/** True for an absolute http(s) URL. */
+export function isHttpUrl(value: string): boolean {
   try {
     const url = new URL(value);
     return url.protocol === "http:" || url.protocol === "https:";
