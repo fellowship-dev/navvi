@@ -432,6 +432,32 @@ describe("secrets (R27/R39)", () => {
     expect(seen?.profile).toBe("local");
     expect(io.stderr.text).not.toContain("p@ss");
   });
+
+  it("--secrets-file with invalid JSON reports the path only, never the file contents", async () => {
+    const file = join(dir, "secrets-broken.json");
+    const leak = "hunter2-do-not-echo";
+    // Not JSON at all: the parser's message would quote the file contents.
+    writeFileSync(file, `password: ${leak}`);
+    const io = makeIo({ run: async () => summary() });
+    expect(await main(["--mode", "record", "--fields", "a", "--secrets-file", file, "https://example.org/"], io)).toBe(2);
+    expect(io.stderr.text).toContain(file);
+    expect(io.stderr.text).not.toContain(leak);
+    expect(io.stderr.text).not.toContain("password");
+  });
+});
+
+describe("prompt-derived input validation (exit 2)", () => {
+  it("a prompt whose structured answer fails input validation is a configuration error, not a stack trace", async () => {
+    const structured = JSON.stringify({ mode: "record", description: "orders", fields: [{ name: "id" }], goal: "sign in with token: abc123" });
+    const agent = scriptedAgent({ "prompt-": structured });
+    const io = makeIo({ stdin: agent.stdin, stdout: agent.stdout });
+    const code = await main(["list my orders", "--allow-private-host", "127.0.0.1", "--browser", "chromium", "--agent-mode", "stdio", "--storage", storageFor("prompt-invalid"), ...productUrls().slice(0, 1)], io);
+    expect(agent.batches.flat().map((q) => q.kind)).toEqual(["text"]);
+    expect(code).toBe(2);
+    expect(io.stderr.text).toContain("configuration_error");
+    expect(io.stderr.text).toMatch(/goal/);
+    expect(io.stderr.text).not.toMatch(/ZodError|\n\s+at /);
+  }, 30_000);
 });
 
 describe("notifications (R41)", () => {

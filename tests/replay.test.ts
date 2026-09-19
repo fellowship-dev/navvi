@@ -3,14 +3,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Actor } from "apify";
 import { MemoryStorage } from "crawlee";
+import type { Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { launch, type LaunchedBrowser } from "../src/browser/launch.js";
 import type { Chooser } from "../src/chooser/chooser.js";
 import { RecordedChooser } from "../src/chooser/recorded.js";
 import { parseInput, type RunInput } from "../src/input/schema.js";
+import { urlPatternFor } from "../src/navigate/trace.js";
 import { runCrawl, type CrawlDeps } from "../src/replay/crawler.js";
+import { replayTrace, type ReplayPolicy } from "../src/replay/entry.js";
 import { MAX_SCROLL_ROUNDS } from "../src/replay/paginate.js";
-import { SCRAPER_VERSION, cacheKey, type CompiledScraper } from "../src/scraper/schema.js";
+import { SCRAPER_VERSION, cacheKey, type CompiledScraper, type TraceStep } from "../src/scraper/schema.js";
 import { ScraperStore } from "../src/scraper/store.js";
+import { Secret } from "../src/secrets/resolve.js";
 import { groupByTemplate } from "../src/template/index.js";
 import { startFixtureServer, type FixtureServer } from "./server.js";
 
@@ -23,13 +28,16 @@ import { startFixtureServer, type FixtureServer } from "./server.js";
 
 let server: FixtureServer;
 let dir: string;
+let browser: LaunchedBrowser;
 
 beforeAll(async () => {
   server = await startFixtureServer();
   dir = mkdtempSync(join(tmpdir(), "navvi-replay-"));
+  browser = await launch({ browser: "chromium", headed: false });
 });
 
 afterAll(async () => {
+  await browser?.close();
   await server?.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -236,4 +244,89 @@ describe("detail pages (R18)", () => {
     expect(again.pages).toBe(4);
     expect(empty.usage().questions).toBe(0);
   }, 50_000);
+});
+
+describe("replayTrace (R24, R25, R42)", () => {
+  async function withPage<T>(path: string, fn: (page: Page) => Promise<T>): Promise<T> {
+    const page = await browser.context.newPage();
+    try {
+      await page.goto(`${server.baseUrl}${path}`);
+      return await fn(page);
+    } finally {
+      await page.close();
+    }
+  }
+
+  function policyFor(profile: "store" | "local" = "store"): ReplayPolicy {
+    return { profile, startUrls: [`${server.baseUrl}/`], allowedDomains: [], allowMutations: [] };
+  }
+
+  function traced(trace: TraceStep[], profile: "store" | "local" = "store"): CompiledScraper {
+    return seeded({ templateKey: "t", cacheKey: "c", profile, entry: { mode: "trace", url: `${server.baseUrl}/` }, trace });
+  }
+
+  it("a urlPattern expectation recorded by the navigator matches the URL it was captured from, and not another path", async () => {
+    const results = `${server.baseUrl}/fixtures/results.html?q=python`;
+    const search = (expect: TraceStep["expect"]): TraceStep[] => [
+      { op: "type", text: "python", alternatives: [{ role: "searchbox", name: "Search jobs", exact: true }] },
+      { op: "click", alternatives: [{ role: "button", name: "Search", exact: true }], target: { form: { method: "get", action: "/fixtures/results.html" } }, expect },
+    ];
+    await withPage("/fixtures/search-form.html", async (page) => {
+      const ok = await replayTrace(page, traced(search({ urlPattern: urlPatternFor(results) })), { secrets: new Map(), policy: policyFor() });
+      expect(ok).toEqual({ ok: true, steps: 2 });
+      expect(page.url()).toBe(results);
+    });
+    await withPage("/fixtures/search-form.html", async (page) => {
+      const other = await replayTrace(page, traced(search({ urlPattern: urlPatternFor(`${server.baseUrl}/fixtures/python-jobs.html`) })), { secrets: new Map(), policy: policyFor() });
+      expect(other.ok).toBe(false);
+      if (!other.ok) expect(other.reason).toMatch(/expectation failed/);
+    });
+  }, 40_000);
+
+  it("a username secret types into an email input and the password secret into the password input; the password secret is refused elsewhere", async () => {
+    const secrets = new Map([
+      ["username", new Secret("max@example.com")],
+      ["password", new Secret("hunter2-secret")],
+    ]);
+    const email = { role: "textbox", name: "Email", exact: true };
+    const password = { role: "textbox", name: "Password", exact: true };
+    await withPage("/login/", async (page) => {
+      const ok = await replayTrace(
+        page,
+        traced(
+          [
+            { op: "type", secret: "username", alternatives: [email] },
+            { op: "type", secret: "password", alternatives: [password] },
+          ],
+          "local",
+        ),
+        { secrets, policy: policyFor("local") },
+      );
+      expect(ok).toEqual({ ok: true, steps: 2 });
+      expect(await page.locator("#email").inputValue()).toBe("max@example.com");
+      expect(await page.locator("#password").inputValue()).toBe("hunter2-secret");
+    });
+    await withPage("/login/", async (page) => {
+      const refused = await replayTrace(page, traced([{ op: "type", secret: "password", alternatives: [email] }], "local"), { secrets, policy: policyFor("local") });
+      expect(refused.ok).toBe(false);
+      if (!refused.ok) {
+        expect(refused.status).toBe("blocked_no_progress");
+        expect(refused.reason).toMatch(/password input/);
+      }
+      expect(await page.locator("#email").inputValue()).toBe("");
+    });
+  }, 40_000);
+
+  it("a click whose recorded and live href is javascript: replays without a domain refusal", async () => {
+    await withPage("/fixtures/search-form.html", async (page) => {
+      await page.setContent(`<h1>Job search</h1><a href="javascript:void(document.title='clicked')">Toggle filters</a>`);
+      const result = await replayTrace(
+        page,
+        traced([{ op: "click", alternatives: [{ role: "link", name: "Toggle filters", exact: true }], target: { href: "javascript:void(document.title='clicked')" } }]),
+        { secrets: new Map(), policy: policyFor() },
+      );
+      expect(result).toEqual({ ok: true, steps: 1 });
+      expect(await page.title()).toBe("clicked");
+    });
+  }, 40_000);
 });

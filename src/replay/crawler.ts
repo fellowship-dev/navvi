@@ -13,7 +13,7 @@ import { dismissConsent, runPreSteps, type Notifier } from "../prestep/index.js"
 import { extractPage, fingerprintMatches, type ItemExtraction } from "../scraper/extract.js";
 import { cacheKey, validateScraper, type CompiledScraper, type Status, type TraceStep } from "../scraper/schema.js";
 import { ScraperStore, ScraperStoreError } from "../scraper/store.js";
-import { findPlaceholders, MASK, MissingSecretError, resolveSecrets, type CommandRunner, type Secret } from "../secrets/resolve.js";
+import { findPlaceholders, MissingSecretError, redactRunInput, resolveSecrets, type CommandRunner, type Secret } from "../secrets/resolve.js";
 import { groupByTemplate, pickSampleUrls } from "../template/index.js";
 import { compileDetail, DETAIL_LINK_FIELD, detailLinkOf, extractDetail, hasDetailTemplate, mergeDetail, withDetailLink } from "./detail.js";
 import { entryModeFor, replayTrace, type ReplayPolicy, type StepFailureAction } from "./entry.js";
@@ -98,6 +98,8 @@ export interface CrawlDeps {
   /** A person is present for bot-challenge handoffs (R41). Defaults to `input.headed`. */
   attended?: boolean | undefined;
   maxConcurrency?: number | undefined;
+  /** Requests running from the start (Crawlee scales up from one otherwise); never above `maxConcurrency`. */
+  minConcurrency?: number | undefined;
   fetchText?: ((url: string) => Promise<{ contentType: string; body: string }>) | undefined;
 }
 
@@ -235,8 +237,10 @@ interface RunState {
   fieldsNotFound: Set<string>;
   /** R16: dedupe keys of every record pushed this run (list rows dedupe within their listing crawl). */
   seen: Set<string>;
-  replayedSessions: Set<string>;
-  guardedContexts: WeakSet<BrowserContext>;
+  /** R14: `session:startUrl` pairs whose trace already replayed; every start URL of a trace template gets its own replay. */
+  replayed: Set<string>;
+  /** The guard install per context, memoized in flight so a concurrent request waits for it instead of navigating past it (R26). */
+  guardedContexts: Map<BrowserContext, Promise<void>>;
 }
 
 interface CompileUserData {
@@ -271,7 +275,8 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
     unmappedCandidates: state.unmappedCandidates,
     fieldsNotFound: [...state.fieldsNotFound].sort(),
     chooser: usage ? { name: usage.chooser, questions: usage.questions, inputTokens: usage.inputTokens, waitMs: usage.waitMs, costUsd: usage.costUsd } : null,
-    input: redactInput(input),
+    // R39: every secret value and proxy credential masked
+    input: redactRunInput(input),
     requests: { ...state.requests },
     traceReplays: state.traceReplays,
     blockedRequests: state.blockedRequests,
@@ -328,8 +333,8 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     unmappedCandidates: [],
     fieldsNotFound: new Set(),
     seen: new Set(),
-    replayedSessions: new Set(),
-    guardedContexts: new WeakSet(),
+    replayed: new Set(),
+    guardedContexts: new Map(),
   };
   const plans: TemplatePlan[] = [];
   const fail = (status: Status, message: string): RunSummary => {
@@ -413,9 +418,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   const proxyConfiguration = input.proxy?.useApifyProxy && actor.createProxyConfiguration ? await actor.createProxyConfiguration() : undefined;
 
   const profileDir = launch.userDataDir;
-  const guardContext = async (context: BrowserContext): Promise<void> => {
-    if (state.guardedContexts.has(context)) return;
-    state.guardedContexts.add(context);
+  const installGuard = async (context: BrowserContext): Promise<void> => {
     await installSnapshot(context);
     await context.route("**/*", (route) => {
       if (guard(route.request().url())) return route.continue();
@@ -424,6 +427,14 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     });
     if (profileDir) await restoreProfileCookies(profileDir, context);
   };
+  const guardContext = (context: BrowserContext): Promise<void> => {
+    let pending = state.guardedContexts.get(context);
+    if (!pending) {
+      pending = installGuard(context);
+      state.guardedContexts.set(context, pending);
+    }
+    return pending;
+  };
 
   const requestFor = (label: RequestLabel, url: string, userData: UserData): { url: string; uniqueKey: string; label: string; userData: UserData; noRetry?: boolean } => {
     state.requests[label] += 1;
@@ -431,10 +442,17 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     return label === "compile" ? { ...request, noRetry: true } : request;
   };
 
+  /**
+   * The pages a compiled scraper replays on. A list scraper that entered
+   * `direct` after a goal was compiled on the listing the navigator reached,
+   * so that URL (`entry.url`) is the request, not the start URL it set out from.
+   */
   const replayRequests = (plan: TemplatePlan, scraper: CompiledScraper) => {
     const userData: ReplayUserData = { label: scraper.mode === "record" ? "record" : "list", templateKey: plan.templateKey };
+    const navigatedListing = scraper.mode === "list" && input.goal && scraper.entry.mode === "direct" ? scraper.entry.url : null;
     const targets = scraper.mode === "record" ? plan.urls.slice(0, input.maxItems) : plan.urls.slice(0, input.maxPages);
-    return targets.map((url) => requestFor(userData.label, url, userData));
+    const urls = navigatedListing && targets.length > 0 ? [navigatedListing] : targets;
+    return urls.map((url) => requestFor(userData.label, url, userData));
   };
 
   const crawler = new PlaywrightCrawler(
@@ -444,6 +462,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       headless: !input.headed,
       proxyConfiguration,
       maxConcurrency: deps.maxConcurrency ?? (singleSession ? 1 : 4),
+      ...(deps.minConcurrency !== undefined ? { minConcurrency: deps.minConcurrency } : {}),
       maxRequestRetries: 1,
       requestHandlerTimeoutSecs: REQUEST_HANDLER_TIMEOUT_SECS,
       navigationTimeoutSecs: 60,
@@ -471,7 +490,8 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     actor.config,
   );
 
-  const sessionKey = (ctx: PlaywrightCrawlingContext): string => ctx.session?.id ?? "default";
+  /** R14: one trace replay per session and start URL. */
+  const replayKey = (ctx: PlaywrightCrawlingContext): string => `${ctx.session?.id ?? "default"}:${ctx.request.url}`;
   const planFor = (templateKey: string): TemplatePlan => {
     const plan = plans.find((p) => p.templateKey === templateKey);
     if (!plan) throw new Error(`unknown template ${templateKey}`);
@@ -552,8 +572,8 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     await store.put(scraper);
     plan.scraper = scraper;
     if (entryModeFor(scraper) === "trace") {
-      // The session already stands on the listing: this is the one replay of the session (R14).
-      state.replayedSessions.add(sessionKey(ctx));
+      // The session already stands on the listing: this start URL's replay is done (R14).
+      state.replayed.add(replayKey(ctx));
       await listPages(ctx, plan);
       return;
     }
@@ -758,9 +778,9 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     await dismissConsent(page).catch(() => undefined);
 
     if (entryModeFor(scraper) === "trace") {
-      const key = sessionKey(ctx);
-      if (!state.replayedSessions.has(key)) {
-        state.replayedSessions.add(key);
+      const key = replayKey(ctx);
+      if (!state.replayed.has(key)) {
+        state.replayed.add(key);
         state.traceReplays += 1;
         if (page.url() !== scraper.entry.url) await page.goto(scraper.entry.url, { waitUntil: "domcontentloaded" });
         const onStepFailed = async (stepIndex: number, failedPage: Page, reason: string): Promise<StepFailureAction> => {
@@ -768,9 +788,10 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
           // the retry runs the healed step, with its appended alternative (R42)
           if (healed) return { action: "retry", step: healed.trace[stepIndex] };
           if (input.goal) {
+            // the navigator starts from the page the steps before this one reached (logged in, say): those steps stay
             const nav = await navigator(failedPage, input.goal, navigateContext);
             if (nav.ok) {
-              const renavigated = validateScraper({ ...plan.scraper!, trace: nav.steps });
+              const renavigated = validateScraper({ ...plan.scraper!, trace: [...plan.scraper!.trace.slice(0, stepIndex), ...nav.steps] });
               await store.put(renavigated);
               plan.scraper = renavigated;
               return { action: "done" };
@@ -817,11 +838,6 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
 
   await crawler.run(initial);
   return summaryOf(input, state, plans, chooser);
-}
-
-/** The summary echoes the input with every secret value masked (R39). */
-function redactInput(input: RunInput): RunInput {
-  return { ...input, secrets: Object.fromEntries(Object.keys(input.secrets).map((name) => [name, MASK])) };
 }
 
 /** On the platform a secret may also be a `SECRET_<NAME>` record in the run's default store. */

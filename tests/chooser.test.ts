@@ -398,6 +398,66 @@ describe("agent chooser (R45, KTD17)", () => {
     expect(chooser.usage().questions).toBe(0);
   });
 
+  it("asks the same question id again over stdio when the offered options differ (memory is keyed by id and options)", async () => {
+    const seen: string[][] = [];
+    const { stdin, stdout } = scripted((b) => {
+      seen.push(b.questions.map((q) => q.options ?? []).flat());
+      return { answers: b.questions.map((q) => ({ id: q.id, index: (q.options?.length ?? 1) - 1 })) };
+    });
+    const chooser = new AgentChooser({ stdin, stdout, questionsDir: join(tmp, "questions-rekey"), timeoutMs: 5_000, env: {} });
+    const first = await chooser.ask([{ id: "group", kind: "choice", premise: SAMPLE_PREMISE.groupChoice("price"), options: ["li.x", "li.p", "div.q"], state: STATE }]);
+    expect(first[0]?.index).toBe(2);
+    const second = await chooser.ask([{ id: "group", kind: "choice", premise: SAMPLE_PREMISE.groupChoice("price"), options: ["tr.row", "div.card"], state: STATE + "<p>page 2</p>" }]);
+    expect(second[0]?.index).toBe(1);
+    expect(seen).toHaveLength(2);
+    // The identical question is still served from memory without a third round trip.
+    const again = await chooser.ask([{ id: "group", kind: "choice", premise: SAMPLE_PREMISE.groupChoice("price"), options: ["li.x", "li.p", "div.q"], state: STATE }]);
+    expect(again[0]?.index).toBe(2);
+    expect(seen).toHaveLength(2);
+  });
+
+  it("drops a preloaded answer that fails validation and parks normally with a token", async () => {
+    const dir = join(tmp, "questions-stale");
+    const chooser = new AgentChooser({ stdin: null, stdout: new PassThrough(), questionsDir: dir, answers: [{ id: "group", index: 7 }], env: {} });
+    const err = await chooser.ask([batch()[0]!]).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(NeedsHumanError);
+    const token = (err as NeedsHumanError).token;
+    expect(token).toMatch(/^[a-f0-9]{12}$/);
+    const parked = JSON.parse(readFileSync(join(dir, `${token}.json`), "utf8")) as { questions: Question[]; answered: Answer[] };
+    expect(parked.questions.map((q) => q.id)).toEqual(["group"]);
+    expect(parked.answered).toEqual([]);
+  });
+
+  it("prints the same token in the stdio batch that the parked file gets when the batch parks", async () => {
+    let printed: string | undefined;
+    const { stdin, stdout } = scripted((b) => {
+      printed = b.token;
+      stdin.end();
+      return { answers: [] };
+    });
+    const dir = join(tmp, "questions-token");
+    const chooser = new AgentChooser({ stdin, stdout, questionsDir: dir, timeoutMs: 5_000, env: {} });
+    const err = await chooser.ask(batch()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(NeedsHumanError);
+    expect(printed).toMatch(/^[a-f0-9]{12}$/);
+    expect((err as NeedsHumanError).token).toBe(printed);
+    expect(existsSync(join(dir, `${printed}.json`))).toBe(true);
+  });
+
+  it("accepts an answer batch written without a trailing newline before stdin ends", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    stdout.on("data", (chunk: Buffer) => {
+      if (chunk.toString().includes(QUESTIONS_END)) {
+        stdin.write(JSON.stringify({ answers: [{ id: "group", index: 1 }, { id: "visible", index: 0 }, { id: "quality", index: 2 }] }));
+        stdin.end();
+      }
+    });
+    const chooser = new AgentChooser({ stdin, stdout, questionsDir: join(tmp, "questions-eof"), timeoutMs: 5_000, env: {} });
+    const answers = await chooser.ask(batch());
+    expect(answers.map((a) => a.index)).toEqual([1, 0, 2]);
+  });
+
   it("is the default and the no-key path", () => {
     expect(createChooser({ env: {} }).name).toBe("agent");
   });

@@ -9,7 +9,7 @@ import type { RunStatus } from "../src/billing/budget.js";
 import { parseArgs, usage, type CliArgs } from "../src/cli/args.js";
 import { NotifyConfigurationError, createNotifier } from "../src/cli/notify.js";
 import { formatRows, type OutputFormat, type Row } from "../src/cli/output.js";
-import { createChooser, loadAnswersFile, missingCredentialsMessage, NavviError, NeedsHumanError, readQuestionsFile, type Answer, type Chooser } from "../src/chooser/index.js";
+import { createChooser, loadAnswersFile, mergeAnswers, missingCredentialsMessage, NavviError, NeedsHumanError, readQuestionsFile, type Chooser, type StoredAnswer } from "../src/chooser/index.js";
 import { defaultBrowser, defaultChooser } from "../src/input/schema.js";
 import { run as runNavvi, type RunSummary } from "../src/main.js";
 import type { Notifier } from "../src/prestep/human.js";
@@ -93,10 +93,17 @@ async function collectSecrets(args: CliArgs, io: CliIo): Promise<Record<string, 
   if (args.secretsFile) {
     const file = resolve(io.cwd, args.secretsFile);
     let parsed: unknown;
+    let text: string;
     try {
-      parsed = JSON.parse(readFileSync(file, "utf8"));
+      text = readFileSync(file, "utf8");
     } catch (error) {
-      throw new CliError(`--secrets-file ${args.secretsFile}: ${error instanceof Error ? error.message : String(error)}`);
+      throw new CliError(`--secrets-file ${args.secretsFile}: ${error instanceof Error && "code" in error ? String(error.code) : "cannot read the file"}`);
+    }
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      // The parser's message quotes the file around the error: never echo secret material to stderr.
+      throw new CliError(`--secrets-file ${args.secretsFile} is not valid JSON`);
     }
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new CliError(`--secrets-file ${args.secretsFile} must be a JSON object of name -> value`);
     for (const [name, value] of Object.entries(parsed as Record<string, unknown>)) {
@@ -311,7 +318,7 @@ function chooserFor(args: CliArgs, io: CliIo, storageDir: string): Chooser {
     throw new CliError(`${missingCredentialsMessage("model")} On the command line that is \`--chooser agent\`.`);
   }
   const questionsDir = join(storageDir, "questions");
-  let answers: Answer[] | undefined;
+  let answers: StoredAnswer[] | undefined;
   if (args.answers) {
     const file = resolve(io.cwd, args.answers);
     try {
@@ -324,11 +331,9 @@ function chooserFor(args: CliArgs, io: CliIo, storageDir: string): Chooser {
     const file = join(questionsDir, `${args.resume}.json`);
     if (!existsSync(file)) throw new CliError(`--resume ${args.resume}: no parked questions at ${file}`);
     if (!answers) throw new CliError(`--resume ${args.resume} needs --answers <file>`);
-    // Answers from earlier parks ride along in the parked file; the new file wins on conflicts.
+    // Answers from earlier parks ride along in the parked file (each tied to the question it answered); the new file wins on conflicts.
     const parked = readQuestionsFile(args.resume, questionsDir);
-    const merged = new Map<string, Answer>((parked.answered ?? []).map((a) => [a.id, a]));
-    for (const a of answers) merged.set(a.id, a);
-    answers = [...merged.values()];
+    answers = mergeAnswers(parked.answered ?? [], answers);
   }
   return createChooser({
     chooser: name,

@@ -7,7 +7,7 @@ import type { Chooser } from "./chooser.js";
 
 export * from "./chooser.js";
 export * from "./questions.js";
-export { AgentChooser, loadAnswersFile, readQuestionsFile, QUESTIONS_START, QUESTIONS_END, PROTOCOL, type AgentChooserOptions, type AgentMode, type QuestionBatchFile } from "./agent.js";
+export { AgentChooser, loadAnswersFile, mergeAnswers, questionKey, readQuestionsFile, QUESTIONS_START, QUESTIONS_END, PROTOCOL, type AgentChooserOptions, type AgentMode, type QuestionBatchFile, type StoredAnswer } from "./agent.js";
 export { JevChooser, TypeSafeEvaluationModel, JEV_PRICE_PER_MILLION_INPUT_USD, JEV_MAX_STATE_TOKENS, JEV_GATEWAY_MODEL_ID, missingCredentialsMessage, type JevChooserOptions, type JevProvider } from "./jev.js";
 export { ModelChooser, MODEL_PRICES, DEFAULT_MODEL_ID, DEFAULT_MODEL_STATE_CHARS, priceFor, type ModelChooserOptions } from "./model.js";
 export { RecordedChooser, RecordingChooser, DEFAULT_RECORDED_DIR, type RecordedChooserOptions, type RecordingChooserOptions, type RecordedAnswerFile } from "./recorded.js";

@@ -1,6 +1,8 @@
 import { inspect } from "node:util";
 import { describe, expect, it, vi } from "vitest";
-import { MissingSecretError, Secret, findPlaceholders, resolveSecrets, secretEnvName, type CommandRunner } from "../src/secrets/resolve.js";
+import { MASK, MissingSecretError, Secret, findPlaceholders, maskUrlCredentials, redactRunInput, resolveSecrets, secretEnvName, type CommandRunner } from "../src/secrets/resolve.js";
+import { parseInput } from "../src/input/schema.js";
+import { summaryFor } from "../src/main.js";
 import { loginFixture } from "./scraper-schema.test.js";
 
 describe("Secret (R39)", () => {
@@ -73,5 +75,35 @@ describe("resolveSecrets", () => {
     };
     const out = await resolveSecrets(["x"], { env: {}, platform: "darwin", runCommand, apify: async () => "v" });
     expect(out.get("x")?.reveal()).toBe("v");
+  });
+});
+
+describe("redactRunInput (R39)", () => {
+  const raw = {
+    mode: "record",
+    fields: [{ name: "price" }],
+    startUrls: ["https://example.com/a"],
+    profile: "local",
+    secrets: { password: "hunter2-value" },
+    proxy: { useApifyProxy: false, proxyUrls: ["http://proxyuser:proxy-pass-123@proxy.example.com:8080/", "http://proxy.example.com:8081"] },
+  };
+
+  it("masks secret values and the credentials inside proxy URLs", () => {
+    const out = redactRunInput(parseInput(raw));
+    expect(out.secrets).toEqual({ password: MASK });
+    expect(out.proxy?.proxyUrls).toEqual([`http://${MASK}@proxy.example.com:8080/`, "http://proxy.example.com:8081"]);
+    expect(out.proxy?.useApifyProxy).toBe(false);
+    expect(JSON.stringify(out)).not.toContain("proxy-pass-123");
+    expect(JSON.stringify(out)).not.toContain("proxyuser");
+    expect(maskUrlCredentials("not a url with u:p@host")).toBe("not a url with u:p@host");
+    expect(maskUrlCredentials("socks5h://u:p@host:1080")).toBe(`socks5h://${MASK}@host:1080`);
+  });
+
+  it("summaryFor echoes the input without the proxy password", () => {
+    const summary = summaryFor("needs_human", parseInput(raw), "parked");
+    const text = JSON.stringify(summary);
+    expect(text).not.toContain("proxy-pass-123");
+    expect(text).not.toContain("hunter2-value");
+    expect(summary.input?.proxy?.proxyUrls?.[0]).toBe(`http://${MASK}@proxy.example.com:8080/`);
   });
 });

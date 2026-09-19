@@ -191,7 +191,12 @@ export function allowedControl(control: Control, profile: Profile, ctx: PolicyCo
 
 const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/;
 const CARD = /(?:\d[ -]?){13,19}/;
-const PHONE = /(?:\+|\b)\d[\d ().-]{6,}\d\b/;
+/**
+ * A phone number needs a leading `+`, a parenthesized area code, or digits in
+ * three separator-delimited groups. A bare run of digits or an ISO date
+ * (`2026-09-19`, `20260919`, `ORD-12345678`) is not personal data.
+ */
+const PHONE = /\+\d[\d ().-]{6,}\d\b|\(\d{2,4}\)[\s.-]?\d{3,4}[\s.-]?\d{3,4}\b|\b\d{2,4}[\s.-]\d{3,4}[\s.-]\d{3,4}\b/;
 
 function digitCount(text: string): number {
   return (text.match(/\d/g) ?? []).length;

@@ -151,14 +151,17 @@ export function applyFieldAnswers(fields: readonly CompileField[], candidates: r
 /**
  * KTD6 alternative from a chosen candidate. Link and media samples are made
  * absolute; samples with a non-http(s) scheme are dropped from the fingerprint
- * (replay yields null for them, R4).
+ * (replay yields null for them, R4). The shape is what the sample values show,
+ * not what the attribute name implies (a bare-year `datetime` is an int, and
+ * must replay as one); the attribute's shape stands only with no sample left.
  */
 export function toAlternative(candidate: FieldCandidate, baseUrls: readonly string[]): FieldAlternative {
   const urlAttr = candidate.attr !== undefined && URL_ATTRS.has(candidate.attr);
   const samples = urlAttr
     ? candidate.values.map((v, i) => resolveUrl(v, baseUrls[i] ?? baseUrls[0] ?? "")).filter((v): v is string => v !== null)
     : [...candidate.values];
-  const alt: FieldAlternative = { selector: candidate.selector, fingerprint: { samples, shape: candidate.shape } };
+  const shape = samples.length > 0 ? commonShape(samples) : candidate.shape;
+  const alt: FieldAlternative = { selector: candidate.selector, fingerprint: { samples, shape } };
   if (candidate.attr) alt.attr = candidate.attr;
   return alt;
 }

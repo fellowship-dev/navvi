@@ -8,7 +8,7 @@ import { ModelUnavailableError } from "../src/billing/budget.js";
 import type { Answer, Chooser, ChooserUsage, Question } from "../src/chooser/chooser.js";
 import { RecordedChooser } from "../src/chooser/recorded.js";
 import { LIMITS, parseInput, type RunInput } from "../src/input/schema.js";
-import { runCrawl, type CrawlDeps, type HealerHook } from "../src/replay/crawler.js";
+import { runCrawl, type CrawlDeps, type HealerHook, type NavigatorHook } from "../src/replay/crawler.js";
 import { isFieldHealingEvent, isStepHealingEvent, type UnmappedCandidate } from "../src/replay/heal.js";
 import { SCRAPER_VERSION, cacheKey, markHealed, type CompiledScraper, type TraceStep } from "../src/scraper/schema.js";
 import { ScraperStore } from "../src/scraper/store.js";
@@ -351,5 +351,53 @@ describe("step healing (AE15, R42)", () => {
     expect(normalRun.healingEvents).toEqual([]);
     expect(empty.usage().questions).toBe(0);
     expect(await datasetItems(actor)).toHaveLength(10);
+  }, 45_000);
+
+  it("re-navigation after an unhealed step keeps the steps that already succeeded, so the stored trace still logs in", async () => {
+    const actor = makeActor();
+    const store = await ScraperStore.open({ actor });
+    const loginUrls = [`${server.baseUrl}/login/`];
+    const goal = "open my orders";
+    const key = keyFor(loginUrls, { goal, fields: ["order", "total"], profile: "local" });
+    await store.put(
+      seeded({
+        ...key,
+        profile: "local",
+        mode: "list",
+        entry: { mode: "trace", url: loginUrls[0]! },
+        trace: loginTrace,
+        item: { anchorSelector: "ul.orders > li.order", span: 1 },
+        fields: {
+          order: { alternatives: [{ selector: "a", fingerprint: { samples: ["Order #1001"], shape: "text" } }] },
+          total: { alternatives: [{ selector: "span.total", fingerprint: { samples: ["$ 45.990"], shape: "money" } }] },
+        },
+      }),
+    );
+    const healer: HealerHook = async () => ({ healed: false, reason: "nothing fits" });
+    const navigated: string[] = [];
+    const signIn: TraceStep = { op: "click", alternatives: [{ role: "button", name: "Sign in", exact: true }], target: { form: { method: "post", action: "/login" } }, expect: { role: "heading", name: "Orders" } };
+    const navigator: NavigatorHook = async (page) => {
+      navigated.push(page.url());
+      // the credentials are already typed: the navigator only has to submit the renamed form
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await page.getByRole("heading", { name: "Orders" }).waitFor();
+      return { ok: true, steps: [signIn] };
+    };
+
+    server.switchLogin("renamed");
+    const chooser = new RecordedChooser({ fixture: "crawler/empty" });
+    const run = await runCrawl(
+      input({ startUrls: loginUrls, goal, mode: "list", fields: F("order", "total"), profile: "local" }),
+      makeDeps(actor, chooser, { env: { NAVVI_SECRET_PASSWORD: "hunter2-secret" }, healer, navigator }),
+    );
+    expect(run.status).toBe("succeeded");
+    expect(run.items).toBe(5);
+    expect(run.traceReplays).toBe(1);
+    expect(run.healingEvents).toEqual([]);
+    expect(navigated).toEqual([`${server.baseUrl}/login/`]);
+
+    const stored = await store.get(key.cacheKey);
+    expect(stored?.trace).toEqual([loginTrace[0], loginTrace[1], signIn]);
+    expect(JSON.stringify(stored)).not.toContain("hunter2");
   }, 45_000);
 });

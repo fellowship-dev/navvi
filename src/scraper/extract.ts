@@ -1,14 +1,16 @@
 import { ensureEvaluateShim } from "../browser/snapshot.js";
 import type { Page } from "playwright";
-import type { CompiledScraper, Fingerprint, Shape } from "./schema.js";
+import type { CompiledScraper, FieldAlternative, Fingerprint, Shape } from "./schema.js";
 
 /**
- * Replay extraction (U5.6): one `page.evaluate` per page runs every field's
- * alternatives in order against the item rows (list mode) or the document
- * (record mode). No model is involved; selectors only ever reach
- * `querySelector`. The shape classifier here mirrors `shapeOf` in
- * snapshot.inject.js so a compiled fingerprint accepts the values the snapshot
- * classified the same way.
+ * Replay extraction (U5.6): one `page.evaluate` per page resolves every
+ * field's alternatives against the item rows (list mode) or the document
+ * (record mode); the first alternative whose value fits its fingerprint wins,
+ * so a drifted early alternative that still yields text of the wrong shape
+ * cannot shadow a healed one appended after it (R17). No model is involved;
+ * selectors only ever reach `querySelector`. The shape classifier here mirrors
+ * `shapeOf` in snapshot.inject.js so a compiled fingerprint accepts the values
+ * the snapshot classified the same way.
  */
 
 /** Longest extracted text value, in characters. */
@@ -152,8 +154,8 @@ interface EvaluateArg {
 
 interface EvaluateResult {
   baseUri: string;
-  /** Per item: per field the raw value and the alternative index that produced it. */
-  items: Array<{ raw: Array<string | null>; by: Array<number | null> }>;
+  /** Per item, per field: the raw value of every alternative, in alternative order. */
+  items: Array<{ candidates: Array<Array<string | null>> }>;
 }
 
 /** Runs inside the page. Self-contained: Playwright serializes it, so nothing from module scope is referenced. */
@@ -199,26 +201,9 @@ function extractInPage(arg: EvaluateArg): EvaluateResult {
   };
   const itemRows: Element[][] =
     arg.mode === "list" ? Array.from(document.querySelectorAll(arg.anchorSelector)).map((a) => rowsFor(a, arg.span)) : [[document.documentElement]];
-  const items = itemRows.map((rows) => {
-    const raw: Array<string | null> = [];
-    const by: Array<number | null> = [];
-    for (const field of arg.fields) {
-      let value: string | null = null;
-      let index: number | null = null;
-      for (let i = 0; i < field.alternatives.length; i++) {
-        const alt = field.alternatives[i]!;
-        const v = resolve(rows, alt.selector, alt.attr);
-        if (v !== null && v !== "") {
-          value = v;
-          index = i;
-          break;
-        }
-      }
-      raw.push(value);
-      by.push(index);
-    }
-    return { raw, by };
-  });
+  const items = itemRows.map((rows) => ({
+    candidates: arg.fields.map((field) => field.alternatives.map((alt) => resolve(rows, alt.selector, alt.attr))),
+  }));
   return { baseUri: document.baseURI, items };
 }
 
@@ -228,6 +213,22 @@ function nullFilled(names: readonly string[], sourceUrl: string): ItemExtraction
     resolvedBy: Object.fromEntries(names.map((n) => [n, null])),
     sourceUrl,
   };
+}
+
+/**
+ * The alternative that resolves a field: the first whose value (a link or
+ * media attribute made absolute) fits its fingerprint, else the first with any
+ * non-empty value, else none.
+ */
+function pickAlternative(raws: ReadonlyArray<string | null>, alternatives: readonly FieldAlternative[], baseUri: string): { by: number; value: string | null } | null {
+  const resolved = raws.map((raw, i) => {
+    if (raw === null || raw === "") return null;
+    const attr = alternatives[i]?.attr;
+    return attr !== undefined && URL_ATTRS.has(attr) ? resolveUrl(raw, baseUri) : raw;
+  });
+  let by = resolved.findIndex((value, i) => value !== null && fingerprintMatches(value, alternatives[i]!.fingerprint));
+  if (by < 0) by = raws.findIndex((raw) => raw !== null && raw !== "");
+  return by < 0 ? null : { by, value: resolved[by] ?? null };
 }
 
 /**
@@ -257,12 +258,9 @@ export async function extractPage(page: Page, scraper: CompiledScraper, options:
   const items: ItemExtraction[] = result.items.map((row) => {
     const out = nullFilled(requested, sourceUrl);
     specs.forEach((spec, i) => {
-      const by = row.by[i] ?? null;
-      const raw = row.raw[i] ?? null;
-      const attr = by === null ? undefined : spec.alternatives[by]?.attr;
-      const value = raw !== null && attr !== undefined && URL_ATTRS.has(attr) ? resolveUrl(raw, result.baseUri) : raw;
-      out.values[spec.name] = value;
-      out.resolvedBy[spec.name] = value === null ? null : by;
+      const picked = pickAlternative(row.candidates[i] ?? [], scraper.fields[spec.name]!.alternatives, result.baseUri);
+      out.values[spec.name] = picked?.value ?? null;
+      out.resolvedBy[spec.name] = picked && picked.value !== null ? picked.by : null;
     });
     return out;
   });

@@ -9,7 +9,7 @@ import type { StepExpect, TraceStep } from "../scraper/schema.js";
 import { maskSecrets } from "../secrets/resolve.js";
 import { clip } from "../util/text.js";
 import { generateText, policyControl, type RecentAction } from "./textHelper.js";
-import { captureExpectation, readLandmarks, secretNameFor, TraceRecorder, type Landmark } from "./trace.js";
+import { captureExpectation, isHttpHref, readLandmarks, secretNameFor, TraceRecorder, type Landmark } from "./trace.js";
 
 /**
  * Navigate phase (U7): the jev-ultrafast loop with the chooser in Jev's seat.
@@ -379,7 +379,8 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
         const skipped = refused(control) ?? (await act(control, `control ${control.role} "${control.name}"`, "click", (locator) => locator.click({ timeout: ACTION_TIMEOUT_MS })));
         if (skipped !== null) return { executed: false, skipped };
         const submit = control.form !== null && (control.inputType === "submit" || control.inputType === "image" || (control.tag === "button" && (control.inputType === undefined || control.inputType === "submit")));
-        return { executed: true, control, typedOk: false, navigation: Boolean(control.href) || submit, op: "click" };
+        // a javascript: or mailto: href acts on the page and is not waited for as a navigation (its target is never recorded either)
+        return { executed: true, control, typedOk: false, navigation: isHttpHref(control.href) || submit, op: "click" };
       }
       case "SELECT": {
         const target = d.select;
