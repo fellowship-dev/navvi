@@ -52,9 +52,13 @@ export interface ChooserUsage {
   outputTokens: number;
   /** Wall time spent waiting on the chooser, retries included. */
   waitMs: number;
-  /** Cost at list price in USD. */
+  /** Cost at list price in USD; 0 on a subscription. */
   costUsd: number;
   zeroDataRetention: ZeroDataRetentionState;
+  /** Who pays: metered API calls (the default) or an installed CLI on the user's subscription. */
+  billing?: "api" | "subscription";
+  /** What the CLI itself reported (Claude Code's `total_cost_usd`); informational on a subscription. */
+  reportedCostUsd?: number;
 }
 
 export interface Chooser {

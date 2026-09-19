@@ -19,6 +19,8 @@ export const DEFAULT_QUESTIONS_DIR = join("storage", "questions");
 export const DEFAULT_AGENT_TIMEOUT_MS = 10 * 60 * 1_000;
 
 export type AgentMode = "stdio" | "file" | "unattended";
+/** The answer shape every reader is told, in the parked file and in a CLI prompt. */
+export const ANSWER_WITH = 'JSON {"answers":[{"id":"<question id>","index":<option index or null for none; booleans 1/0>,"text":"<text questions only>"}]}';
 
 export interface QuestionBatchFile {
   protocol: typeof PROTOCOL;
@@ -216,7 +218,7 @@ export class AgentChooser extends BaseChooser {
       token,
       createdAt: new Date().toISOString(),
       questions,
-      answerWith: 'JSON {"answers":[{"id":"<question id>","index":<option index or null for none; booleans 1/0>,"text":"<text questions only>"}]}',
+      answerWith: ANSWER_WITH,
       answered: [...this.answered.values()],
     };
     writeFileSync(file, JSON.stringify(payload, null, 2) + "\n");

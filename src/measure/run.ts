@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { Actor } from "apify";
 import { MemoryStorage } from "crawlee";
 import { CHOOSERS, isChooserId, type Chooser as ChooserId } from "../input/schema.js";
-import { createChooser, estimateTokens, RecordingChooser, type Answer, type Chooser, type ChooserUsage, type Question } from "../chooser/index.js";
+import { createChooser, estimateTokens, findOnPath, RecordingChooser, type Answer, type Chooser, type ChooserUsage, type Question } from "../chooser/index.js";
 import { renderTable, replaceSection, type MeasurementRow } from "./report.js";
 import { grade, isLiveSite, liveScenario, LIVE_SITES, RoutedRecordedChooser, SCENARIOS, type LiveSite, type Scenario } from "./scenarios.js";
 import { startFixtureServer } from "../../tests/server.js";
@@ -129,6 +129,10 @@ function buildChooser(name: ChooserId, scenario: Scenario, options: MeasureOptio
     case "model":
       if (!env.ANTHROPIC_API_KEY) return { skipped: "no key (set ANTHROPIC_API_KEY)" };
       return { chooser: record(createChooser({ chooser: "model", env })) };
+    case "claude":
+    case "codex":
+      if (!findOnPath(name, env)) return { skipped: `\`${name}\` is not installed` };
+      return { chooser: record(createChooser({ chooser: name, env })) };
   }
 }
 

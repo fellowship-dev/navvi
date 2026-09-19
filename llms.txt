@@ -7,7 +7,7 @@
 - [SKILL.md](SKILL.md): the agent skill. The one command, the no-key question protocol on stdio, the file-and-resume path (exit 3), input contract, output shape, exit codes and limits.
 - [README: Install and run](README.md#install-and-run): four lines from zero to data.
 - [README: What you get](README.md#what-you-get): records, the scraper JSON you can commit, the zero-model second run.
-- [README: Choosers](README.md#choosers): agent (no key), jev, model, and what each needs.
+- [README: Choosers](README.md#choosers): claude and codex (an installed, signed-in CLI on your subscription), jev, model, agent (no key), and what each needs.
 - [README: Exit codes](README.md#exit-codes): what each status means and what to do next.
 - [README: Limits](README.md#limits): drift versus redesign, captchas, logins and secrets.
 

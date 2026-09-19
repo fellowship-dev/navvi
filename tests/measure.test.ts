@@ -130,8 +130,8 @@ describe("report", () => {
 });
 
 describe("cli", () => {
-  it("an unknown chooser fails with a clear error listing agent, jev, model", () => {
-    expect(() => parseArgs(["--choosers", "agent,claude"])).toThrow(/unknown chooser "claude".*agent, jev, model/);
+  it("an unknown chooser fails with a clear error listing every chooser", () => {
+    expect(() => parseArgs(["--choosers", "agent,gpt"])).toThrow(/unknown chooser "gpt".*agent, jev, model, claude, codex/);
     expect(parseArgs([]).choosers).toEqual(["agent"]);
     expect(parseArgs(["--choosers", "jev,model", "--live", "hackernews", "--out", "x.md"])).toMatchObject({ choosers: ["jev", "model"], live: "hackernews", out: "x.md" });
     expect(() => parseArgs(["--live", "example.com"])).toThrow(/python\.org|hackernews/);

@@ -29,9 +29,17 @@ npx navvi "<what to extract or do>" <url...> [--out data.json|data.csv]
 
 Optional structure when the prompt is not enough: `--mode list|record --fields a,b,c --goal "<navigation>" --from-url <list.json> --max-pages N --follow-details`. `npx navvi --help` lists every flag.
 
-## No Key: You Answer the Questions (default)
+## Who Answers the Questions
 
-Without an API key navvi uses `--chooser agent`: you are the model. It never asks you for a selector or code; it asks you to pick among options it enumerated from the page. Run the command with stdin open and watch stdout for batches:
+Navvi never asks a model for a selector or code; it asks it to pick among options it enumerated from the page. Without `--chooser`, the first of these that applies is used and the choice is printed on stderr (`chooser: claude (Claude Code is installed and signed in; using your subscription)`):
+
+1. **Claude Code or Codex installed and signed in** (`claude` or `codex` on PATH): navvi runs it for each batch on your subscription. Nothing to configure; `NAVVI_CLAUDE_MODEL` (default `haiku`) and `NAVVI_CODEX_MODEL` pick the model. An installed CLI that is not signed in is skipped, and the reason names the sign-in command (`claude`, `codex login`).
+2. **A key**: `AI_GATEWAY_API_KEY` or `TYPESAFE_API_KEY` selects `--chooser jev` (fastest, cheapest, unattended healing in cron or CI); `ANTHROPIC_API_KEY` selects `--chooser model`. A key wins over an installed CLI.
+3. **Otherwise `--chooser agent`**: you are the model and answer the questions yourself, as below.
+
+## No Key, No CLI: You Answer the Questions
+
+With `--chooser agent` run the command with stdin open and watch stdout for batches:
 
 ```
 ---NAVVI-QUESTIONS---
@@ -49,11 +57,12 @@ Answer each batch on stdin with one JSON line, then keep reading; the records pr
 
 If you cannot keep stdin open (a tool that runs a command to completion), add `--agent-mode file`. Navvi writes the batch to `<storage>/questions/<token>.json` (`storage/questions/` by default, or under `--storage <dir>`), prints the path and the token on stderr, and exits **3** with nothing on stdout. Read the file, write an answers file in the shape it names, and rerun the **same command and flags** with `--answers answers.json --resume <token>`. A run can park more than once (a listing asks for the item group first, then the fields): each park prints a **new** token, so always resume with the latest one. Answers you already gave ride along in the parked file, so each answers file needs only the new batch. `--out` is written only when the run finishes. Answer a next-page question honestly; `--max-pages` still caps the crawl.
 
-## With a Key: Unattended
+## Unattended
 
-- `--chooser jev` (fast, unattended healing): `AI_GATEWAY_API_KEY` (Vercel AI Gateway) or `TYPESAFE_API_KEY`
+- `--chooser claude` or `--chooser codex`: the installed CLI answers on your subscription; needs no key, only a signed-in `claude` or `codex`
+- `--chooser jev` (fastest, unattended healing): `AI_GATEWAY_API_KEY` (Vercel AI Gateway) or `TYPESAFE_API_KEY`
 - `--chooser model` (any AI SDK model): `ANTHROPIC_API_KEY`
-- With a key set, that chooser becomes the default; `--chooser agent` still needs none
+- `--chooser agent` still needs none; a run that cannot answer parks and exits 3
 
 ## Input Contract
 
