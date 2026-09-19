@@ -1,0 +1,10 @@
+{
+  "id": "prompt-fa1f01bb33c2",
+  "kind": "text",
+  "index": null,
+  "text": "{\"mode\":\"list\",\"description\":\"Orders of the signed-in account\",\"fields\":[],\"goal\":\"Log in with the account and open the orders export\",\"profile\":\"local\",\"secretsExpected\":[\"username\",\"password\"]}",
+  "inputTokens": 420,
+  "outputTokens": 60,
+  "chooser": "model",
+  "prompt": "Log in with my account and export my orders"
+}

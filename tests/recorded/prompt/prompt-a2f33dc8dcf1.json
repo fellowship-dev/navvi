@@ -1,0 +1,10 @@
+{
+  "id": "prompt-a2f33dc8dcf1",
+  "kind": "text",
+  "index": null,
+  "text": "{\"mode\":\"record\",\"description\":\"Precio de oferta de cada producto\",\"fields\":[{\"name\":\"Precio Oferta\"}]}",
+  "inputTokens": 420,
+  "outputTokens": 60,
+  "chooser": "model",
+  "prompt": "Para cada producto dame el Precio Oferta"
+}
