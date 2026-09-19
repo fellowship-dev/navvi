@@ -96,11 +96,13 @@ export function toEvaluationQuestion(q: Question): EvaluationQuestionMapping {
   }
 }
 
-/** Criteria keys are the option texts when unique and not `none`; otherwise index-prefixed slugs. */
+/**
+ * Criteria keys are short (`option_0`, `option_1`, ...); the option text is the
+ * criterion's description. TypeSafe reads the description, and a long option
+ * text as the key made the choice harder to answer in live runs.
+ */
 function optionKeys(options: string[]): string[] {
-  const plain = options.every((o) => o.length > 0 && o !== NONE_OPTION) && new Set(options).size === options.length;
-  if (plain) return options;
-  return options.map((option, i) => `${i}_${option.replace(/[^A-Za-z0-9_.-]+/g, "_").slice(0, 40) || "option"}`);
+  return options.map((_o, i) => `option_${i}`);
 }
 
 export class JevChooser extends BaseChooser {

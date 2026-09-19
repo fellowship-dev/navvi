@@ -1,8 +1,9 @@
 {
   "id": "heal.laboratory",
   "kind": "choice",
-  "index": 2,
+  "index": 0,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "note": "main/article/div/p/span = Bagó"
 }

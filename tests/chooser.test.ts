@@ -549,7 +549,7 @@ describe("jev chooser (KTD2)", () => {
         JSON.stringify({
           model: "jev-1.13.0",
           answers: {
-            group: { type: "choice", choice: "li.p", probabilities: { "li.x": 0.05, "li.p": 0.9, "div.q": 0.05, none: 0 }, confidence: 0.9 },
+            group: { type: "choice", choice: "option_1", probabilities: { option_0: 0.05, option_1: 0.9, option_2: 0.05, none: 0 }, confidence: 0.9 },
             visible: { type: "noul", noul: 0.93 },
             quality: { type: "score", score: 1.75, probabilities: { "0": 0.05, "1": 0.15, "2": 0.8 }, confidence: 0.8 },
           },

@@ -122,8 +122,45 @@ function leafToCandidate(leaf: LeafCandidate): FieldCandidate {
   return candidate;
 }
 
+/** At most this many candidates are offered per healed field; small sets are what a chooser answers well (KTD5). */
+export const HEAL_CANDIDATE_CAP = 12;
+
+function stem(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Orders a page's candidates for one broken field so the chooser sees a short,
+ * relevant list: a value equal to an earlier sample first, then a label or
+ * path that shares a word stem with the field name, then a matching value
+ * shape, then document order. Capped at HEAL_CANDIDATE_CAP.
+ */
+export function rankHealCandidates(candidates: readonly FieldCandidate[], ctx: { field: string; shape: Shape; samples: readonly string[] }): FieldCandidate[] {
+  const fieldStem = stem(ctx.field).slice(0, 4);
+  const sampleSet = new Set(ctx.samples.map((v) => stem(v)));
+  const score = (c: FieldCandidate): number => {
+    let n = 0;
+    if (sampleSet.has(stem(c.values[0] ?? ""))) n += 8;
+    const words = stem(c.path).split(" ");
+    if (fieldStem.length >= 3 && words.some((w) => w.length >= 3 && (w.startsWith(fieldStem) || fieldStem.startsWith(w.slice(0, 4))))) n += 4;
+    if (ctx.shape !== "text" && c.shape === ctx.shape) n += 2;
+    if (ctx.shape === "text" && c.shape === "text") n += 1;
+    return n;
+  };
+  return candidates
+    .map((c, order) => ({ c, order, score: score(c) }))
+    .sort((a, b) => b.score - a.score || a.order - b.order)
+    .slice(0, HEAL_CANDIDATE_CAP)
+    .map(({ c }) => c);
+}
+
 function memoryKey(field: string, candidates: readonly FieldCandidate[]): string {
-  return `${field}|${candidates.map((c) => c.key).join("\n")}`;
+  return `${field}|${candidates.map((c) => c.key).sort().join("\n")}`;
 }
 
 function fieldState(scraper: CompiledScraper, fields: readonly string[], url: string): string {
@@ -140,16 +177,21 @@ async function healFields(ctx: HealContext, fields: readonly string[], memory: S
   const url = page.url();
   const { leaves } = await getCandidates(page, candidateScope(scraper));
   const offered = new Map<string, FieldCandidate[]>();
+  const freshByField = new Map<string, FieldCandidate[]>();
   const questions: Question[] = [];
   const state = fieldState(scraper, fields, url);
   for (const name of fields) {
     const field = scraper.fields[name];
     if (!field) continue;
     const known = new Set(field.alternatives.map((a) => candidateKey(a.selector, a.attr)));
-    const candidates = leaves.filter((leaf) => !known.has(candidateKey(leaf.selector, leaf.attr))).map(leafToCandidate);
-    if (candidates.length === 0 || memory.has(memoryKey(name, candidates))) continue;
-    offered.set(name, candidates);
     const samples = field.alternatives[0]?.fingerprint.samples.slice(0, 2) ?? [];
+    const shape = field.alternatives[0]?.fingerprint.shape ?? "text";
+    const fresh = leaves.filter((leaf) => !known.has(candidateKey(leaf.selector, leaf.attr))).map(leafToCandidate);
+    const candidates = rankHealCandidates(fresh, { field: name, shape, samples });
+    // The none-memory keys on every fresh leaf, so pages with the same structure share one answer whatever the cap keeps.
+    if (candidates.length === 0 || memory.has(memoryKey(name, fresh))) continue;
+    offered.set(name, candidates);
+    freshByField.set(name, fresh);
     questions.push({ id: fieldHealQuestionId(name), kind: "choice", premise: premises.healField(name, samples), options: candidates.map(candidateLabel), state });
   }
   if (questions.length === 0) {
@@ -163,7 +205,7 @@ async function healFields(ctx: HealContext, fields: readonly string[], memory: S
     const answer = byId.get(fieldHealQuestionId(name));
     const chosen = answer && answer.index !== null ? candidates[answer.index] : undefined;
     if (!chosen) {
-      memory.add(memoryKey(name, candidates));
+      memory.add(memoryKey(name, freshByField.get(name) ?? candidates));
       continue;
     }
     healed = appendFieldAlternative(healed, name, toAlternative(chosen, [url]));
