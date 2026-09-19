@@ -5,6 +5,7 @@ import { NeedsHumanError } from "./billing/budget.js";
 import { runCrawl, type CrawlDeps } from "./replay/crawler.js";
 
 import type { Status } from "./scraper/schema.js";
+import type { HealingEvent, UnmappedCandidate } from "./replay/heal.js";
 
 export type { Status };
 
@@ -14,8 +15,8 @@ export interface RunSummary {
   pages: number;
   templates: number;
   cacheHit: boolean;
-  healingEvents: unknown[];
-  unmappedCandidates: unknown[];
+  healingEvents: HealingEvent[];
+  unmappedCandidates: UnmappedCandidate[];
   fieldsNotFound: string[];
   chooser: { name: string; questions: number; inputTokens: number; waitMs: number; costUsd: number } | null;
   input: RunInput | null;
