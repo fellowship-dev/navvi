@@ -10,7 +10,7 @@ answers the compile questions itself.
 
 ![Navvi demo](docs/demo.gif)
 
-The same site, three runs: compile on v1, heal on v2 when the markup changes, replay v1 with zero questions. Video: [docs/demo.mp4](docs/demo.mp4) — reproduce it with `npm run demo`.
+The same site, three runs: compile, heal when the markup changes, replay the original with zero questions. Video: [docs/demo.mp4](docs/demo.mp4) — reproduce it with `npm run demo`.
 
 ## Install and run
 
