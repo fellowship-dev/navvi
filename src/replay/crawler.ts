@@ -1,18 +1,691 @@
-import type { RunInput } from "../input/schema.js";
+import { randomUUID } from "node:crypto";
+import { Actor } from "apify";
+import { PlaywrightCrawler, ProxyConfiguration, type Configuration, type Dataset, type KeyValueStore, type PlaywrightCrawlingContext } from "crawlee";
+import type { BrowserContext, Page } from "playwright";
+import { buildCrawleeLaunchContext, restoreProfileCookies, saveProfileCookies } from "../browser/launch.js";
+import { isAllowedRequestUrl, registrableDomain } from "../browser/policy.js";
+import { createChooser, NavviError, NeedsHumanError, type Chooser } from "../chooser/index.js";
+import { compile, type CompileResult } from "../compile/index.js";
+import { isAllowedUrl, type Profile, type RunInput } from "../input/schema.js";
 import type { RunSummary } from "../main.js";
+import { dismissConsent, runPreSteps, type Notifier } from "../prestep/index.js";
+import { extractPage, fingerprintMatches, type ItemExtraction } from "../scraper/extract.js";
+import { cacheKey, validateScraper, type CompiledScraper, type Status, type TraceStep } from "../scraper/schema.js";
+import { ScraperStore, ScraperStoreError } from "../scraper/store.js";
+import { findPlaceholders, MissingSecretError, resolveSecrets, type CommandRunner, type Secret } from "../secrets/resolve.js";
+import { groupByTemplate, pickSampleUrls } from "../template/index.js";
+import { entryModeFor, replayTrace, type ReplayPolicy, type StepFailureAction } from "./entry.js";
 
-/** Crawler shell placeholder; U8 replaces this with the PlaywrightCrawler. */
-export async function runCrawl(input: RunInput): Promise<RunSummary> {
-  return {
-    status: "no_items_found",
+/**
+ * The crawler shell (U8, KTD4): one PlaywrightCrawler owns the browser for
+ * every phase. A `compile` request runs the pre-steps, the optional
+ * navigator, the compiler and stores the scraper; `record` and `list`
+ * requests replay on selectors and, in trace mode, on the recorded trace once
+ * per session. The route guard (R26) and the click policy (R24/R25) run on
+ * every page. Healing (U13) and navigation (U7) enter through hooks.
+ */
+
+export const REQUEST_HANDLER_TIMEOUT_SECS = 180;
+export const LIST_SOURCE_EXTENSIONS = [".txt", ".json", ".csv"] as const;
+
+export type RequestLabel = "compile" | "list" | "record";
+
+/** What the crawler needs from `Actor`; the static class and an instance both satisfy it. */
+export interface CrawlActor {
+  openKeyValueStore(storeIdOrName?: string | null): Promise<KeyValueStore>;
+  openDataset(datasetIdOrName?: string | null): Promise<Dataset>;
+  isAtHome(): boolean;
+  readonly config: Configuration;
+  createProxyConfiguration?(options?: { proxyUrls?: string[] }): Promise<ProxyConfiguration | undefined>;
+}
+
+export interface NavigateContext {
+  chooser: Chooser;
+  profile: Profile;
+  startUrls: readonly string[];
+  allowedDomains: readonly string[];
+  allowMutations: readonly string[];
+  /** Resolved secrets; the navigator types them only through secret steps. */
+  secrets: ReadonlyMap<string, Secret>;
+  description?: string | undefined;
+  fields: readonly string[];
+}
+
+export type NavigateOutcome = { ok: true; steps: TraceStep[] } | { ok: false; status: Status; reason: string };
+
+/** U7: drives the page from the start URL to the target using the chooser; returns the recorded steps. */
+export type NavigatorHook = (page: Page, goal: string, ctx: NavigateContext) => Promise<NavigateOutcome>;
+
+export type HealFailure = { kind: "fields"; fields: string[] } | { kind: "step"; stepIndex: number; reason: string };
+
+export interface HealContext {
+  page: Page;
+  scraper: CompiledScraper;
+  chooser: Chooser;
+  failure: HealFailure;
+}
+
+export type HealOutcome = { healed: true; scraper: CompiledScraper; event: unknown } | { healed: false; reason: string };
+
+/** U13: repairs a scraper after drift; the crawler stores the result and re-extracts. */
+export type HealerHook = (ctx: HealContext) => Promise<HealOutcome>;
+
+/** U13: moves the listing to its next page in-page; resolves false when there is none. */
+export type PaginateHook = (page: Page, scraper: CompiledScraper, pageIndex: number) => Promise<boolean>;
+
+export interface CrawlDeps {
+  chooser?: Chooser | undefined;
+  actor?: CrawlActor | undefined;
+  store?: ScraperStore | undefined;
+  navigator?: NavigatorHook | undefined;
+  healer?: HealerHook | undefined;
+  paginate?: PaginateHook | undefined;
+  notify?: Notifier | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
+  /** Root for `profiles/<domain>/<profile>`; defaults to ./storage. */
+  storageDir?: string | undefined;
+  runCommand?: CommandRunner | undefined;
+  /** A person is present for bot-challenge handoffs (R41). Defaults to `input.headed`. */
+  attended?: boolean | undefined;
+  maxConcurrency?: number | undefined;
+  fetchText?: ((url: string) => Promise<{ contentType: string; body: string }>) | undefined;
+}
+
+// ---------------------------------------------------------------- policy
+
+/**
+ * R26 as the run's request guard. An allowlisted private host is allowed only
+ * on the ports the run's URLs use, so a fixture host on one port never opens
+ * the same machine's other services.
+ */
+export function makeRequestGuard(allowPrivateHosts: readonly string[], urls: readonly string[]): (url: string) => boolean {
+  const allowedOrigins = new Set<string>();
+  for (const raw of urls) {
+    try {
+      const url = new URL(raw);
+      if (allowPrivateHosts.includes(url.hostname)) allowedOrigins.add(url.origin);
+    } catch {
+      // not a URL; the schema already refused it
+    }
+  }
+  return (raw) => {
+    if (!isAllowedRequestUrl(raw, allowPrivateHosts)) return false;
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      return false;
+    }
+    if (!allowPrivateHosts.includes(url.hostname)) return true;
+    return allowedOrigins.has(url.origin);
+  };
+}
+
+// ---------------------------------------------------------------- list sources (R34)
+
+async function defaultFetchText(url: string): Promise<{ contentType: string; body: string }> {
+  const response = await fetch(url, { redirect: "manual" });
+  if (!response.ok) throw new Error(`list source ${url} answered ${response.status}`);
+  return { contentType: response.headers.get("content-type") ?? "", body: await response.text() };
+}
+
+function parseListSource(contentType: string, body: string): string[] | null {
+  const type = contentType.toLowerCase();
+  if (type.includes("json")) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return null;
+    }
+    const list = Array.isArray(parsed) ? parsed : typeof parsed === "object" && parsed !== null && Array.isArray((parsed as { urls?: unknown }).urls) ? (parsed as { urls: unknown[] }).urls : null;
+    if (!list) return null;
+    return list
+      .map((entry) => (typeof entry === "string" ? entry : typeof entry === "object" && entry !== null ? (entry as { url?: unknown }).url : undefined))
+      .filter((u): u is string => typeof u === "string");
+  }
+  if (type.includes("text/plain") || type.includes("text/csv")) {
+    return body
+      .split(/\r?\n/)
+      .map((line) => line.split(",")[0]!.trim())
+      .filter((line) => line.length > 0 && !line.startsWith("#"));
+  }
+  return null;
+}
+
+function looksLikeListSource(url: string): boolean {
+  try {
+    const path = new URL(url).pathname.toLowerCase();
+    return LIST_SOURCE_EXTENSIONS.some((ext) => path.endsWith(ext));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * R34: a start URL whose path ends in .txt/.json/.csv is fetched outside the
+ * browser; when it answers JSON or plain text it is replaced by the URLs it
+ * lists (a page answering HTML stays a start URL). Every URL is
+ * policy-checked; refused ones are dropped.
+ */
+export async function loadListSources(
+  startUrls: readonly string[],
+  allowPrivateHosts: readonly string[],
+  fetchText: (url: string) => Promise<{ contentType: string; body: string }> = defaultFetchText,
+): Promise<string[]> {
+  const out: string[] = [];
+  const push = (url: string) => {
+    if (isAllowedUrl(url, allowPrivateHosts) && !out.includes(url)) out.push(url);
+  };
+  for (const url of startUrls) {
+    if (!looksLikeListSource(url) || !isAllowedUrl(url, allowPrivateHosts)) {
+      push(url);
+      continue;
+    }
+    let listed: string[] | null = null;
+    try {
+      const { contentType, body } = await fetchText(url);
+      listed = parseListSource(contentType, body);
+    } catch {
+      listed = null;
+    }
+    if (listed === null) push(url);
+    else for (const entry of listed) push(entry);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- run state
+
+interface TemplatePlan {
+  templateKey: string;
+  cacheKey: string;
+  urls: string[];
+  scraper: CompiledScraper | null;
+  cacheHit: boolean;
+}
+
+interface Stop {
+  status: Status;
+  message: string;
+  needsHuman?: { token: string | undefined; questionsFile: string | undefined } | undefined;
+}
+
+interface RunState {
+  stop: Stop | null;
+  items: number;
+  pages: number;
+  unhealed: number;
+  failedItems: number;
+  traceReplays: number;
+  blockedRequests: number;
+  requests: Record<RequestLabel, number>;
+  healingEvents: unknown[];
+  fieldsNotFound: Set<string>;
+  replayedSessions: Set<string>;
+  guardedContexts: WeakSet<BrowserContext>;
+}
+
+interface CompileUserData {
+  label: "compile";
+  templateKey: string;
+  sampleUrls: string[];
+}
+
+interface ReplayUserData {
+  label: "list" | "record";
+  templateKey: string;
+}
+
+type UserData = CompileUserData | ReplayUserData;
+
+function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePlan[], chooser: Chooser | null): RunSummary {
+  const usage = chooser?.usage();
+  const status: Status = state.stop
+    ? state.stop.status
+    : state.items > 0 && !(state.unhealed > 0 && state.failedItems >= state.items)
+      ? "succeeded"
+      : state.unhealed > 0
+        ? "drift"
+        : "no_items_found";
+  const summary: RunSummary = {
+    status,
+    items: state.items,
+    pages: state.pages,
+    templates: plans.length,
+    cacheHit: plans.length > 0 && plans.every((p) => p.cacheHit),
+    healingEvents: state.healingEvents,
+    unmappedCandidates: [],
+    fieldsNotFound: [...state.fieldsNotFound].sort(),
+    chooser: usage ? { name: usage.chooser, questions: usage.questions, inputTokens: usage.inputTokens, waitMs: usage.waitMs, costUsd: usage.costUsd } : null,
+    input: redactInput(input),
+    requests: { ...state.requests },
+    traceReplays: state.traceReplays,
+    blockedRequests: state.blockedRequests,
+    unhealed: state.unhealed,
+  };
+  if (state.stop) {
+    summary.message = state.stop.message;
+    if (state.stop.needsHuman) summary.needsHuman = state.stop.needsHuman;
+  }
+  return summary;
+}
+
+function stopWith(state: RunState, crawler: PlaywrightCrawler, stop: Stop): void {
+  if (state.stop) return;
+  state.stop = stop;
+  crawler.stop(`navvi: ${stop.status}: ${stop.message}`);
+}
+
+function stopFromError(state: RunState, crawler: PlaywrightCrawler, error: unknown): boolean {
+  if (error instanceof NeedsHumanError) {
+    stopWith(state, crawler, { status: "needs_human", message: error.message, needsHuman: { token: error.token, questionsFile: error.questionsFile } });
+    return true;
+  }
+  if (error instanceof NavviError && error.status !== "configuration_error") {
+    stopWith(state, crawler, { status: error.status, message: error.message });
+    return true;
+  }
+  if (error instanceof ScraperStoreError || error instanceof MissingSecretError) {
+    stopWith(state, crawler, { status: error.status, message: error.message });
+    return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------- the run
+
+export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<RunSummary> {
+  const env = deps.env ?? process.env;
+  const actor: CrawlActor = deps.actor ?? Actor;
+  const chooser = deps.chooser ?? createChooser({ chooser: input.chooser, env });
+  const fields = (input.fields ?? []).map((f) => f.name);
+  const mode = input.mode ?? "list";
+  const state: RunState = {
+    stop: null,
     items: 0,
     pages: 0,
-    templates: 0,
-    cacheHit: false,
+    unhealed: 0,
+    failedItems: 0,
+    traceReplays: 0,
+    blockedRequests: 0,
+    requests: { compile: 0, list: 0, record: 0 },
     healingEvents: [],
-    unmappedCandidates: [],
-    fieldsNotFound: [],
-    chooser: null,
-    input,
+    fieldsNotFound: new Set(),
+    replayedSessions: new Set(),
+    guardedContexts: new WeakSet(),
   };
+  const plans: TemplatePlan[] = [];
+  const fail = (status: Status, message: string): RunSummary => {
+    state.stop = { status, message };
+    return summaryOf(input, state, plans, chooser);
+  };
+
+  // R34: list sources, then the policy on every URL.
+  const urls = await loadListSources(input.startUrls ?? [], input.allowPrivateHosts, deps.fetchText);
+  if (urls.length === 0) return fail("no_items_found", "no allowed start URL");
+  const guard = makeRequestGuard(input.allowPrivateHosts, urls);
+
+  // Cache lookup per template (R5, R38) before any browser work.
+  const store = deps.store ?? (await ScraperStore.open({ actor }));
+  const grouped = groupByTemplate(urls);
+  try {
+    for (const [templateKey, templateUrls] of grouped) {
+      const key = cacheKey(templateKey, { goal: input.goal, description: input.description, fields, profile: input.profile });
+      const loaded = await store.load({
+        cacheKey: key,
+        profile: input.profile,
+        scriptId: grouped.size === 1 ? input.scriptId : undefined,
+        forceRecompile: input.forceRecompile,
+      });
+      plans.push({ templateKey, cacheKey: key, urls: templateUrls, scraper: loaded.scraper, cacheHit: loaded.cacheHit });
+    }
+  } catch (error) {
+    if (error instanceof ScraperStoreError) return fail(error.status, error.message);
+    throw error;
+  }
+
+  // R39: every secret resolves before the browser opens.
+  const placeholders = findPlaceholders([input.goal, input.description, input.prompt, ...plans.map((p) => p.scraper)]);
+  for (const name of Object.keys(input.secrets)) if (!placeholders.includes(name)) placeholders.push(name);
+  let secrets: Map<string, Secret>;
+  try {
+    secrets = await resolveSecrets(placeholders, {
+      input: input.secrets,
+      env,
+      runCommand: deps.runCommand,
+      apify: actor.isAtHome() ? async (name) => readApifySecret(actor, name) : undefined,
+    });
+  } catch (error) {
+    if (error instanceof MissingSecretError) return fail(error.status, error.message);
+    throw error;
+  }
+
+  const policy: ReplayPolicy = {
+    profile: input.profile,
+    startUrls: urls,
+    allowedDomains: input.allowedDomains,
+    allowMutations: input.allowMutations,
+    isAllowedRequest: guard,
+  };
+  const dataset = await actor.openDataset();
+  const runId = randomUUID().slice(0, 8);
+  const anyTrace = plans.some((p) => p.scraper && entryModeFor(p.scraper) === "trace");
+  const singleSession = mode === "list" && (anyTrace || plans.some((p) => !p.scraper));
+
+  // R40: one persistent profile per registrable domain and profile name.
+  const firstHost = hostOf(urls[0]!);
+  const launch = await buildCrawleeLaunchContext({
+    browser: input.browser ?? "chromium",
+    headed: input.headed,
+    profileDomain: firstHost ? registrableDomain(firstHost) : undefined,
+    profileName: input.profile,
+    storageDir: deps.storageDir,
+    freshProfile: input.freshProfile,
+    proxyUrl: input.proxy?.proxyUrls?.[0],
+  });
+  const proxyConfiguration = input.proxy?.useApifyProxy && actor.createProxyConfiguration ? await actor.createProxyConfiguration() : undefined;
+
+  const profileDir = launch.userDataDir;
+  const guardContext = async (context: BrowserContext): Promise<void> => {
+    if (state.guardedContexts.has(context)) return;
+    state.guardedContexts.add(context);
+    await context.route("**/*", (route) => {
+      if (guard(route.request().url())) return route.continue();
+      state.blockedRequests += 1;
+      return route.abort("blockedbyclient");
+    });
+    if (profileDir) await restoreProfileCookies(profileDir, context);
+  };
+
+  const requestFor = (label: RequestLabel, url: string, userData: UserData): { url: string; uniqueKey: string; label: string; userData: UserData; noRetry?: boolean } => {
+    state.requests[label] += 1;
+    const request = { url, uniqueKey: `${runId}:${label}:${url}`, label, userData };
+    return label === "compile" ? { ...request, noRetry: true } : request;
+  };
+
+  const replayRequests = (plan: TemplatePlan, scraper: CompiledScraper) => {
+    const userData: ReplayUserData = { label: scraper.mode === "record" ? "record" : "list", templateKey: plan.templateKey };
+    const targets = scraper.mode === "record" ? plan.urls.slice(0, input.maxItems) : plan.urls.slice(0, input.maxPages);
+    return targets.map((url) => requestFor(userData.label, url, userData));
+  };
+
+  const crawler = new PlaywrightCrawler(
+    {
+      launchContext: launch.launchContext,
+      browserPoolOptions: launch.browserPoolOptions,
+      headless: !input.headed,
+      proxyConfiguration,
+      maxConcurrency: deps.maxConcurrency ?? (singleSession ? 1 : 4),
+      maxRequestRetries: 1,
+      requestHandlerTimeoutSecs: REQUEST_HANDLER_TIMEOUT_SECS,
+      navigationTimeoutSecs: 60,
+      useSessionPool: true,
+      persistCookiesPerSession: false,
+      sessionPoolOptions: { maxPoolSize: singleSession ? 1 : 4 },
+      preNavigationHooks: [async ({ page }) => guardContext(page.context())],
+      requestHandler: async (ctx) => {
+        if (state.stop) return;
+        const data = ctx.request.userData as UserData;
+        try {
+          if (data.label === "compile") await handleCompile(ctx, data);
+          else if (data.label === "record") await handleRecord(ctx, data);
+          else await handleList(ctx, data);
+        } catch (error) {
+          if (!stopFromError(state, crawler, error)) throw error;
+        } finally {
+          if (profileDir) await saveProfileCookies(profileDir, ctx.page.context());
+        }
+      },
+      failedRequestHandler: async ({ request }, error) => {
+        ctxLog(`request ${request.url} failed: ${error.message}`);
+      },
+    },
+    actor.config,
+  );
+
+  const sessionKey = (ctx: PlaywrightCrawlingContext): string => ctx.session?.id ?? "default";
+  const planFor = (templateKey: string): TemplatePlan => {
+    const plan = plans.find((p) => p.templateKey === templateKey);
+    if (!plan) throw new Error(`unknown template ${templateKey}`);
+    return plan;
+  };
+
+  async function handleCompile(ctx: PlaywrightCrawlingContext, data: CompileUserData): Promise<void> {
+    const { page, request, response } = ctx;
+    const plan = planFor(data.templateKey);
+    const pre = await runPreSteps(page, {
+      goal: input.goal,
+      description: input.description,
+      prompt: input.prompt,
+      profile: input.profile,
+      attended: deps.attended ?? input.headed,
+      hasSecrets: secrets.size > 0,
+      notify: deps.notify,
+      response: { status: response?.status() },
+      env,
+    });
+    if (pre.status !== null) {
+      stopWith(state, crawler, { status: pre.status, message: pre.reason });
+      return;
+    }
+    const trace: TraceStep[] = [...pre.steps];
+    if (input.goal && deps.navigator) {
+      const nav = await deps.navigator(page, input.goal, {
+        chooser,
+        profile: input.profile,
+        startUrls: urls,
+        allowedDomains: input.allowedDomains,
+        allowMutations: input.allowMutations,
+        secrets,
+        description: input.description,
+        fields,
+      });
+      if (!nav.ok) {
+        stopWith(state, crawler, { status: nav.status, message: nav.reason });
+        return;
+      }
+      trace.push(...nav.steps);
+    }
+
+    const extra: Page[] = [];
+    let result: CompileResult;
+    try {
+      if (mode === "record") {
+        for (const url of data.sampleUrls.slice(1)) {
+          const sample = await page.context().newPage();
+          extra.push(sample);
+          await sample.goto(url, { waitUntil: "domcontentloaded" });
+          await dismissConsent(sample).catch(() => undefined);
+        }
+      }
+      result = await compile({
+        mode,
+        pages: [page, ...extra],
+        fields: input.fields ?? [],
+        description: input.description,
+        templateKey: plan.templateKey,
+        cacheKey: plan.cacheKey,
+        profile: input.profile,
+        chooser,
+        chooserId: input.chooser,
+        startUrls: urls,
+        allowedDomains: input.allowedDomains,
+        followDetailPages: input.followDetailPages,
+        context: page.context(),
+      });
+    } finally {
+      for (const p of extra) await p.close().catch(() => undefined);
+    }
+    for (const name of result.fieldsNotFound) state.fieldsNotFound.add(name);
+    if (!result.ok) {
+      ctxLog(`template ${plan.templateKey}: ${result.status}`);
+      return;
+    }
+    const compiled = result.scraper;
+    const entry = trace.length > 0 && compiled.entry.mode === "trace" ? { mode: "trace" as const, url: request.url } : compiled.entry;
+    const scraper = validateScraper({ ...compiled, trace, entry });
+    await store.put(scraper);
+    plan.scraper = scraper;
+    if (entryModeFor(scraper) === "trace") {
+      // The session already stands on the listing: this is the one replay of the session (R14).
+      state.replayedSessions.add(sessionKey(ctx));
+      await listPages(ctx, plan);
+      return;
+    }
+    await crawler.addRequests(replayRequests(plan, scraper));
+  }
+
+  function checkFields(scraper: CompiledScraper, item: ItemExtraction): string[] {
+    const failed: string[] = [];
+    for (const [name, field] of Object.entries(scraper.fields)) {
+      const by = item.resolvedBy[name];
+      const alt = by === null || by === undefined ? undefined : field.alternatives[by];
+      if (!alt || !fingerprintMatches(item.values[name], alt.fingerprint)) {
+        failed.push(name);
+        item.values[name] = null;
+      }
+    }
+    return failed;
+  }
+
+  async function heal(ctx: PlaywrightCrawlingContext, plan: TemplatePlan, failure: HealFailure): Promise<CompiledScraper | null> {
+    if (!deps.healer || !plan.scraper) return null;
+    const outcome = await deps.healer({ page: ctx.page, scraper: plan.scraper, chooser, failure });
+    if (!outcome.healed) return null;
+    state.healingEvents.push(outcome.event);
+    await store.put(outcome.scraper);
+    plan.scraper = outcome.scraper;
+    return outcome.scraper;
+  }
+
+  async function pushItems(ctx: PlaywrightCrawlingContext, plan: TemplatePlan, scraper: CompiledScraper, sourceUrl: string): Promise<void> {
+    let extraction = await extractPage(ctx.page, scraper, { sourceUrl, fields });
+    let items = extraction.items;
+    let failedNames = new Set<string>();
+    for (const item of items) for (const name of checkFields(scraper, item)) failedNames.add(name);
+    const allFailed = items.length === 0 || items.every((item) => Object.keys(scraper.fields).some((n) => item.values[n] === null));
+    if (allFailed && Object.keys(scraper.fields).length > 0) {
+      const healed = await heal(ctx, plan, { kind: "fields", fields: [...failedNames] });
+      if (healed) {
+        extraction = await extractPage(ctx.page, healed, { sourceUrl, fields });
+        items = extraction.items;
+        failedNames = new Set();
+        for (const item of items) for (const name of checkFields(healed, item)) failedNames.add(name);
+      } else {
+        state.unhealed += 1;
+      }
+    }
+    if (scraper.mode === "record" && items.length === 0) items = [extraction];
+    const room = Math.max(0, input.maxItems - state.items);
+    const rows = items.slice(0, room);
+    for (const item of rows) {
+      if (Object.keys(scraper.fields).some((n) => item.values[n] === null)) state.failedItems += 1;
+    }
+    if (rows.length > 0) await dataset.pushData(rows.map((item) => ({ ...item.values, _source: sourceUrl })));
+    state.items += rows.length;
+    state.pages += 1;
+  }
+
+  async function handleRecord(ctx: PlaywrightCrawlingContext, data: ReplayUserData): Promise<void> {
+    const plan = planFor(data.templateKey);
+    if (!plan.scraper || state.items >= input.maxItems) return;
+    await dismissConsent(ctx.page).catch(() => undefined);
+    await pushItems(ctx, plan, plan.scraper, ctx.request.url);
+  }
+
+  async function handleList(ctx: PlaywrightCrawlingContext, data: ReplayUserData): Promise<void> {
+    const plan = planFor(data.templateKey);
+    const scraper = plan.scraper;
+    if (!scraper || state.items >= input.maxItems) return;
+    const { page } = ctx;
+    await dismissConsent(page).catch(() => undefined);
+
+    if (entryModeFor(scraper) === "trace") {
+      const key = sessionKey(ctx);
+      if (!state.replayedSessions.has(key)) {
+        state.replayedSessions.add(key);
+        state.traceReplays += 1;
+        if (page.url() !== scraper.entry.url) await page.goto(scraper.entry.url, { waitUntil: "domcontentloaded" });
+        const onStepFailed = async (stepIndex: number, failedPage: Page, reason: string): Promise<StepFailureAction> => {
+          const healed = await heal(ctx, plan, { kind: "step", stepIndex, reason });
+          if (healed) return "retry";
+          if (input.goal && deps.navigator) {
+            const nav = await deps.navigator(failedPage, input.goal, {
+              chooser,
+              profile: input.profile,
+              startUrls: urls,
+              allowedDomains: input.allowedDomains,
+              allowMutations: input.allowMutations,
+              secrets,
+              description: input.description,
+              fields,
+            });
+            if (nav.ok) {
+              const renavigated = validateScraper({ ...plan.scraper!, trace: nav.steps });
+              await store.put(renavigated);
+              plan.scraper = renavigated;
+              return "done";
+            }
+          }
+          return "fail";
+        };
+        const replay = await replayTrace(page, scraper, { secrets, policy, onStepFailed });
+        if (!replay.ok) {
+          stopWith(state, crawler, { status: replay.status, message: `trace step ${replay.stepIndex}: ${replay.reason}` });
+          return;
+        }
+      }
+    }
+
+    await listPages(ctx, plan);
+  }
+
+  /** Extracts the listing the page stands on, then follows the paginate hook (U13; default: one page). */
+  async function listPages(ctx: PlaywrightCrawlingContext, plan: TemplatePlan): Promise<void> {
+    let pageIndex = 0;
+    for (;;) {
+      const scraper = plan.scraper;
+      if (!scraper) return;
+      await pushItems(ctx, plan, scraper, ctx.page.url());
+      pageIndex += 1;
+      if (state.items >= input.maxItems || pageIndex >= input.maxPages) return;
+      const moved = deps.paginate ? await deps.paginate(ctx.page, scraper, pageIndex) : false;
+      if (!moved) return;
+    }
+  }
+
+  // Initial requests: compile on a miss, replay on a hit.
+  const initial = plans.flatMap((plan) => {
+    if (plan.scraper) return replayRequests(plan, plan.scraper);
+    const sampleUrls = pickSampleUrls(plan.urls, mode === "record" ? 3 : 1);
+    return [requestFor("compile", sampleUrls[0]!, { label: "compile", templateKey: plan.templateKey, sampleUrls })];
+  });
+
+  await crawler.run(initial);
+  return summaryOf(input, state, plans, chooser);
+}
+
+/** The summary echoes the input with every secret value masked (R39). */
+function redactInput(input: RunInput): RunInput {
+  return { ...input, secrets: Object.fromEntries(Object.keys(input.secrets).map((name) => [name, "[secret]"])) };
+}
+
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
+}
+
+/** On the platform a secret may also be a `SECRET_<NAME>` record in the run's default store. */
+async function readApifySecret(actor: CrawlActor, name: string): Promise<string | null> {
+  const store = await actor.openKeyValueStore();
+  const value = await store.getValue<unknown>(`SECRET_${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`);
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function ctxLog(message: string): void {
+  process.stderr.write(`navvi: ${message}\n`);
 }
