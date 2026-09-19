@@ -20,7 +20,7 @@ export const EVALUATE_SHIM = "globalThis.__name = globalThis.__name || ((fn) => 
 const SNAPSHOT_SOURCE =
   EVALUATE_SHIM +
   "\n" +
-  readFileSync(new URL("./snapshot.inject.js", import.meta.url), "utf8").replace(/\n\s*export\s*\{\s*\};?\s*$/, "\n");
+  readFileSync(new URL("./snapshot.inject.js", import.meta.url), "utf8").replace(/\n\s*export\s*\{\s*\};?\s*(?:\n\/\/# sourceMappingURL=\S*)?\s*$/, "\n");
 
 /** Defines the `__name` shim in the current document; safe to call repeatedly. */
 export async function ensureEvaluateShim(page: Page): Promise<void> {
