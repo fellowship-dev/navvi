@@ -1,4 +1,5 @@
 import { Actor, type KeyValueStore } from "apify";
+import { NavviError } from "../billing/budget.js";
 import type { Profile } from "../input/schema.js";
 import { type CompiledScraper, type Status, validateScraper } from "./schema.js";
 
@@ -16,10 +17,11 @@ export interface ActorLike {
   openKeyValueStore(storeIdOrName?: string | null): Promise<KeyValueStore>;
 }
 
-export class ScraperStoreError extends Error {
-  constructor(message: string, readonly status: Status) {
-    super(message);
-    this.name = "ScraperStoreError";
+export class ScraperStoreError extends NavviError {
+  /** Always a run status: the store never refuses configuration. */
+  declare readonly status: Status;
+  constructor(message: string, status: Status) {
+    super(status, message);
   }
 }
 

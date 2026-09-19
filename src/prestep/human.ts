@@ -1,6 +1,7 @@
 import type { Page } from "playwright";
 import type { TraceStep } from "../scraper/schema.js";
 import { urlPattern } from "../template/key.js";
+import { sleep } from "../util/text.js";
 
 /**
  * Human handoff (R41, KTD20). Locally, on an attended run, a challenge the
@@ -13,10 +14,15 @@ import { urlPattern } from "../template/key.js";
 
 export type Notifier = (message: string) => Promise<void>;
 
-/** Default notifier: one line on stderr. The CLI wires Telegram in its place. */
-export const consoleNotifier: Notifier = async (message) => {
-  process.stderr.write(`${message}\n`);
-};
+/** A notifier that writes one line per message to `stderr`, after `prefix`. */
+export function streamNotifier(stderr: NodeJS.WritableStream, prefix = ""): Notifier {
+  return async (message) => {
+    stderr.write(`${prefix}${message}\n`);
+  };
+}
+
+/** Default notifier: one line on the process stderr. The CLI wires Telegram in its place. */
+export const consoleNotifier: Notifier = streamNotifier(process.stderr);
 
 export interface HumanHandoffOptions {
   attended: boolean;
@@ -32,8 +38,6 @@ export interface HumanHandoffOptions {
 export type HumanHandoffResult =
   | { resolved: true; step: TraceStep }
   | { resolved: false; reason: "unattended" | "apify" | "human timeout"; waitedMs: number };
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 function safePattern(url: string): string {
   try {

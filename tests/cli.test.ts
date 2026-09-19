@@ -10,9 +10,10 @@ import { parseArgs } from "../src/cli/args.js";
 import { telegramNotifier } from "../src/cli/notify.js";
 import { toCsv } from "../src/cli/output.js";
 import { QUESTIONS_END, QUESTIONS_START } from "../src/chooser/agent.js";
-import type { Answer, Question } from "../src/chooser/chooser.js";
+import { BudgetExhaustedError } from "../src/billing/budget.js";
+import type { Answer, Chooser, Question } from "../src/chooser/chooser.js";
 import type { CrawlDeps } from "../src/replay/crawler.js";
-import type { RunSummary } from "../src/main.js";
+import { run as runNavvi, type RunSummary } from "../src/main.js";
 import { startFixtureServer, type FixtureServer } from "./server.js";
 
 const REPO = resolve(import.meta.dirname, "..");
@@ -230,25 +231,41 @@ describe("agent chooser over stdio", () => {
     expect(io.stderr.text).toMatch(/items\s*:?\s*12/);
   }, 60_000);
 
-  it("a prompt without --mode/--fields is parsed through one text question before the run", async () => {
+  it("a prompt without --mode/--fields is passed through to run(), which parses it through one text question before the crawl", async () => {
     const structured = JSON.stringify({ mode: "record", description: "pharmacy product", fields: [{ name: "name" }, { name: "price" }] });
     const agent = scriptedAgent({ "prompt-": structured });
     const seen: unknown[] = [];
-    const runSpy: RunFn = async (raw) => {
+    const summaries: RunSummary[] = [];
+    // The real run() with the CLI's chooser, which stops the crawl at its first question so only the prompt question reaches the agent.
+    const runSpy: RunFn = async (raw, deps) => {
       seen.push(raw);
-      return summary({ status: "no_items_found", message: "spy" });
+      const inner = deps!.chooser!;
+      let batches = 0;
+      const chooser: Chooser = {
+        name: inner.name,
+        ask: (batch) => (batches++ === 0 ? inner.ask(batch) : Promise.reject(new BudgetExhaustedError("chooserInputTokens", 0))),
+        usage: () => inner.usage(),
+      };
+      const result = await runNavvi(raw, { ...deps, chooser });
+      summaries.push(result);
+      return result;
     };
     const io = makeIo({ stdin: agent.stdin, stdout: agent.stdout, run: runSpy });
     const code = await main(["name and price of each product", "--allow-private-host", "127.0.0.1", "--browser", "chromium", "--agent-mode", "stdio", "--storage", storageFor("prompt"), ...productUrls().slice(0, 2)], io);
-    expect(code).toBe(1);
+    expect(code).toBe(4);
     expect(agent.batches.flat().map((q) => q.kind)).toEqual(["text"]);
     expect(seen).toHaveLength(1);
-    const input = seen[0] as { mode: string; fields: Array<{ name: string }>; prompt: string; startUrls: string[] };
+    const raw = seen[0] as { mode?: string; fields?: unknown; prompt: string; startUrls: string[] };
+    expect(raw.mode).toBeUndefined();
+    expect(raw.fields).toBeUndefined();
+    expect(raw.prompt).toBe("name and price of each product");
+    expect(raw.startUrls).toHaveLength(2);
+    expect(io.stderr.text).toMatch(/status\s*:?\s*budget_exhausted/);
+    const input = summaries[0]!.input!;
     expect(input.mode).toBe("record");
-    expect(input.fields.map((f) => f.name)).toEqual(["name", "price"]);
+    expect(input.fields?.map((f) => f.name)).toEqual(["name", "price"]);
     expect(input.prompt).toBe("name and price of each product");
-    expect(input.startUrls).toHaveLength(2);
-  }, 30_000);
+  }, 60_000);
 });
 
 describe("file-and-resume (exit 3)", () => {

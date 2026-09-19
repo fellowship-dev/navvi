@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { credentialMessage, findCredential } from "./credentials.js";
 
 /** Structured run input. `prompt` alone is accepted and parsed later (U16). */
 
@@ -98,10 +99,19 @@ export const InputSchema = z
     if (input.profile === "store" && Object.keys(input.secrets).length > 0) {
       ctx.addIssue({ code: "custom", path: ["secrets"], message: "the store profile takes no secrets; use profile: local" });
     }
+    // R27: a credential literal is refused at validation, before any model call.
+    const credential = findCredential(input);
+    if (credential) {
+      ctx.addIssue({ code: "custom", path: [credential.where], message: credentialMessage(credential.kind, credential.where) });
+    }
   });
 
 export type RunInput = z.infer<typeof InputSchema>;
 export type Chooser = (typeof CHOOSERS)[number];
+
+export function isChooserId(name: string): name is Chooser {
+  return (CHOOSERS as readonly string[]).includes(name);
+}
 export type Profile = (typeof PROFILES)[number];
 export type BrowserName = (typeof BROWSERS)[number];
 export type Mode = (typeof MODES)[number];

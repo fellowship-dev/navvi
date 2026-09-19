@@ -1,7 +1,7 @@
 import type { Page } from "playwright";
 import { waitForSettle } from "../browser/guards.js";
 import type { Profile } from "../input/schema.js";
-import { CredentialInPromptError, looksLikeCredential } from "../input/prompt.js";
+import { credentialMessage, findCredential } from "../input/credentials.js";
 import type { Status, TraceStep } from "../scraper/schema.js";
 import { classifyBlocked, type BlockedStatus } from "./blocked.js";
 import { dismissConsent } from "./consent.js";
@@ -17,9 +17,9 @@ import { clickTurnstile } from "./turnstile.js";
  *
  * Decisions where the plan was open:
  * - A credential in the goal, description or prompt returns the outcome
- *   (`blocked_login_required`) rather than throwing; the reason is the
- *   `CredentialInPromptError` message, so callers that prefer the error can
- *   rebuild it from `kind` and `where`.
+ *   (`blocked_login_required`) rather than throwing; `InputSchema` already
+ *   refuses it at validation, so this is a second line for callers that
+ *   build the options by hand. The reason is the shared R27 message.
  * - A first run whose human handoff times out ends `blocked_bot_detection`
  *   with reason "human timeout ...". `needs_human` is reserved for a replay
  *   that reaches a recorded human step and for chooser question batches.
@@ -60,16 +60,8 @@ const click = (role: string, name: string): TraceStep => ({ op: "click", alterna
 
 /** R27: the first credential literal among the run's texts, as an outcome, or null. */
 function credentialOutcome(opts: PreStepOptions): PreStepOutcome | null {
-  for (const [where, text] of [
-    ["prompt", opts.prompt],
-    ["goal", opts.goal],
-    ["description", opts.description],
-  ] as const) {
-    if (!text) continue;
-    const kind = looksLikeCredential(text);
-    if (kind) return { status: "blocked_login_required", steps: [], reason: new CredentialInPromptError(kind, where).message };
-  }
-  return null;
+  const found = findCredential(opts);
+  return found ? { status: "blocked_login_required", steps: [], reason: credentialMessage(found.kind, found.where) } : null;
 }
 
 function blockedReason(status: BlockedStatus, detail?: string): string {

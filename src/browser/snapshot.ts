@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import type { Page } from "playwright";
+import type { BrowserContext, Page } from "playwright";
 import type { Profile } from "../input/schema.js";
 import type { Shape } from "../scraper/schema.js";
 
@@ -11,20 +11,31 @@ import type { Shape } from "../scraper/schema.js";
  */
 
 /**
- * Source of the in-page script. tsc appends `export {};` to the compiled copy
- * under `dist/`, which is not valid inside `page.evaluate`, so it is stripped
- * at load time. The `__name` shim keeps functions serialized by esbuild-based
- * runners (tsx sets `keepNames`) working inside the page.
+ * The `__name` shim keeps functions serialized by esbuild-based runners (tsx
+ * sets `keepNames`) working inside the page.
  */
 export const EVALUATE_SHIM = "globalThis.__name = globalThis.__name || ((fn) => fn);";
-const SNAPSHOT_SOURCE =
-  EVALUATE_SHIM +
-  "\n" +
-  readFileSync(new URL("./snapshot.inject.js", import.meta.url), "utf8").replace(/\n\s*export\s*\{\s*\};?\s*(?:\n\/\/# sourceMappingURL=\S*)?\s*$/, "\n");
+
+/**
+ * Shim plus the in-page script, ready for `context.addInitScript` or
+ * `page.evaluate`. The script sits next to this module both in `src/` and in
+ * `dist/` (`scripts/copy-assets.mjs` copies it verbatim; tsc never compiles it).
+ */
+export const SNAPSHOT_INIT_SCRIPT = EVALUATE_SHIM + "\n" + readFileSync(new URL("./snapshot.inject.js", import.meta.url), "utf8");
+const SNAPSHOT_SOURCE = SNAPSHOT_INIT_SCRIPT;
 
 /** Defines the `__name` shim in the current document; safe to call repeatedly. */
 export async function ensureEvaluateShim(page: Page): Promise<void> {
   await page.evaluate(EVALUATE_SHIM);
+}
+
+/**
+ * Installs the shim and the snapshot script in every document the context
+ * opens, so `ensureSnapshotScript` finds it present and skips the injection.
+ * `launch()` calls this; TODO: the crawler should call installSnapshot(context) in its guardContext hook (src/replay/crawler.ts, owned elsewhere).
+ */
+export async function installSnapshot(context: BrowserContext): Promise<void> {
+  await context.addInitScript(SNAPSHOT_INIT_SCRIPT);
 }
 
 /** Chooser state budget (KTD5): the largest fixture must serialize under this. */
@@ -153,11 +164,17 @@ declare global {
   }
 }
 
-/** Injects snapshot.inject.js once per document; navigation clears it, so every call checks. */
+/** One round trip: defines the shim and reports whether the snapshot script is already in this document. */
+const PROBE = "(" + EVALUATE_SHIM.replace(/;$/, ",") + " typeof window.__navvi === 'object' && window.__navvi !== null)";
+
+/**
+ * Fallback for contexts without `installSnapshot`: injects snapshot.inject.js
+ * once per document (navigation clears it, so every call probes). Costs one
+ * round trip when present, two when not.
+ */
 export async function ensureSnapshotScript(page: Page): Promise<void> {
-  const present = await page.evaluate("typeof window.__navvi === 'object' && window.__navvi !== null");
+  const present = await page.evaluate(PROBE);
   if (!present) await page.evaluate(SNAPSHOT_SOURCE);
-  else await ensureEvaluateShim(page);
 }
 
 export async function getControls(page: Page, opts: ControlOptions): Promise<SnapshotControl[]> {

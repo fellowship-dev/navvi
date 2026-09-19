@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { fstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { NeedsHumanError } from "../billing/budget.js";
-import { BaseChooser, type Answer, type BackendResult, type BaseChooserOptions, type ChooserName, type Price, type Question } from "./chooser.js";
+import { BaseChooser, validateAnswers, type Answer, type BackendResult, type BaseChooserOptions, type ChooserName, type Price, type Question } from "./chooser.js";
 
 /**
  * R45 / KTD17: the host coding agent answers over stdio. The CLI prints one
@@ -38,7 +38,6 @@ export interface AgentChooserOptions extends BaseChooserOptions {
   timeoutMs?: number;
   /** Preloaded answers (`--answers <file>`), consumed before any I/O. */
   answers?: Answer[];
-  resumeToken?: string;
   mode?: "stdio" | "file";
   env?: NodeJS.ProcessEnv;
 }
@@ -99,13 +98,13 @@ export class AgentChooser extends BaseChooser {
   protected readonly failureStatus = "needs_human" as const;
   protected readonly price: Price = { inputPerMillion: 0, outputPerMillion: 0 };
   readonly mode: AgentMode;
-  readonly resumeToken: string | undefined;
 
   private readonly stdin: NodeJS.ReadableStream | null;
   private readonly stdout: NodeJS.WritableStream;
   private readonly questionsDir: string;
   private readonly timeoutMs: number;
-  private readonly preloaded: Map<string, Answer>;
+  /** Every answer known so far: preloaded from `--answers`, plus each one that arrived over stdio. A park carries them all. */
+  private readonly answered: Map<string, Answer>;
 
   constructor(options: AgentChooserOptions = {}) {
     super({ ...options, maxAttempts: 1 });
@@ -115,15 +114,14 @@ export class AgentChooser extends BaseChooser {
     this.questionsDir = options.questionsDir ?? env.NAVVI_QUESTIONS_DIR ?? DEFAULT_QUESTIONS_DIR;
     this.timeoutMs = options.timeoutMs ?? Number(env.NAVVI_AGENT_TIMEOUT_MS ?? DEFAULT_AGENT_TIMEOUT_MS);
     this.mode = options.mode ?? detectMode(this.stdin, env);
-    this.resumeToken = options.resumeToken;
-    this.preloaded = new Map((options.answers ?? []).map((a) => [a.id, a]));
+    this.answered = new Map((options.answers ?? []).map((a) => [a.id, a]));
   }
 
   protected async callBackend(batch: Question[]): Promise<BackendResult> {
     const answers: unknown[] = [];
     const pending: Question[] = [];
     for (const q of batch) {
-      const known = this.preloaded.get(q.id);
+      const known = this.answered.get(q.id);
       if (known) {
         answers.push(known);
       } else {
@@ -135,6 +133,8 @@ export class AgentChooser extends BaseChooser {
       throw this.park(pending, this.mode === "unattended" ? "unattended run: no process can answer" : "stdin cannot deliver answers");
     }
     const replies = await this.roundTrip(pending, this.stdin);
+    // Only valid replies are kept: an invalid one must reach stdio again on the base class's retry.
+    for (const reply of validateAnswers(pending, replies).valid) this.answered.set(reply.id, reply);
     return { answers: [...answers, ...replies] };
   }
 
@@ -158,7 +158,7 @@ export class AgentChooser extends BaseChooser {
       createdAt: new Date().toISOString(),
       questions,
       answerWith: 'JSON {"answers":[{"id":"<question id>","index":<option index or null for none; booleans 1/0>,"text":"<text questions only>"}]}',
-      answered: [...this.preloaded.values()],
+      answered: [...this.answered.values()],
     };
     writeFileSync(file, JSON.stringify(payload, null, 2) + "\n");
     return file;

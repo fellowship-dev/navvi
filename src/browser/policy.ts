@@ -1,4 +1,5 @@
 import { isAllowedUrl, type Profile } from "../input/schema.js";
+import { normalize } from "../util/text.js";
 
 /**
  * Browser policy (R24, R25, R26, R38, KTD14). One pure filter,
@@ -54,7 +55,8 @@ export function registrableDomain(host: string): string {
   return SECOND_LEVEL_SUFFIXES.has(lastTwo) ? labels.slice(-3).join(".") : lastTwo;
 }
 
-function hostOf(url: string): string | null {
+/** Lower-case host of an http(s) URL; null for any other scheme or an unparsable URL. */
+export function hostOf(url: string): string | null {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
@@ -116,10 +118,6 @@ const PERSONAL_PATTERNS = [
   ...PAYMENT_PATTERNS,
   /ssn/i, /passport/i, /\bdob\b/i, /birth/i, /bday/i, /phone/i, /\btel\b/i, /tel-/i, /telefono/i, /rut/i, /dni/i, /email/i,
 ];
-
-function normalize(text: string): string {
-  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
-}
 
 const NORMALIZED_DENY = DENY_LIST.map((term) => ({ term, pattern: new RegExp(`(^|[^\\p{L}\\p{N}])${normalize(term)}([^\\p{L}\\p{N}]|$)`, "u") }));
 

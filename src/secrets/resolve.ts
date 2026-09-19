@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { inspect } from "node:util";
+import { NavviError } from "../billing/budget.js";
 import type { CompiledScraper } from "../scraper/schema.js";
-import type { Status } from "../scraper/schema.js";
 
 /**
  * Secrets (R39). A scraper only ever carries the placeholder `{{secret:name}}`;
@@ -15,7 +15,23 @@ import type { Status } from "../scraper/schema.js";
 export const SECRET_PLACEHOLDER = /\{\{secret:([a-zA-Z_][a-zA-Z0-9_-]*)\}\}/g;
 export const KEYCHAIN_SERVICE = "navvi";
 
-const MASK = "[secret]";
+/** How a secret value renders anywhere it might be printed. */
+export const MASK = "[secret]";
+
+/** Values shorter than this are not masked: splitting text on them would mangle it more than protect it. */
+const MIN_MASKED_LENGTH = 3;
+
+/**
+ * `text` with every secret value replaced by `mask(name)`, `[secret:name]` by
+ * default. Values under three characters are left alone.
+ */
+export function maskSecrets(text: string, secrets: Iterable<readonly [name: string, value: string]>, mask: (name: string) => string = (name) => `[secret:${name}]`): string {
+  let out = text;
+  for (const [name, value] of secrets) {
+    if (value.length >= MIN_MASKED_LENGTH) out = out.split(value).join(mask(name));
+  }
+  return out;
+}
 
 export class Secret {
   readonly #value: string;
@@ -37,12 +53,14 @@ export class Secret {
   }
 }
 
-export class MissingSecretError extends Error {
-  readonly status: Status = "blocked_login_required";
+export class MissingSecretError extends NavviError {
+  declare readonly status: "blocked_login_required";
   readonly placeholder: string;
   constructor(name: string, tried: readonly string[]) {
-    super(`secret {{secret:${name}}} is not available; tried ${tried.join(", ")}. Provide it as input.secrets.${name}, ${secretEnvName(name)} or a keychain item (service ${KEYCHAIN_SERVICE}, account ${name})`);
-    this.name = "MissingSecretError";
+    super(
+      "blocked_login_required",
+      `secret {{secret:${name}}} is not available; tried ${tried.join(", ")}. Provide it as input.secrets.${name}, ${secretEnvName(name)} or a keychain item (service ${KEYCHAIN_SERVICE}, account ${name})`,
+    );
     this.placeholder = name;
   }
 }

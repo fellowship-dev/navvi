@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Actor } from "apify";
 import { MemoryStorage } from "crawlee";
-import { CHOOSERS, type Chooser as ChooserId } from "../input/schema.js";
+import { CHOOSERS, isChooserId, type Chooser as ChooserId } from "../input/schema.js";
 import { createChooser, estimateTokens, RecordingChooser, type Answer, type Chooser, type ChooserUsage, type Question } from "../chooser/index.js";
 import { renderTable, replaceSection, type MeasurementRow } from "./report.js";
 import { grade, isLiveSite, liveScenario, LIVE_SITES, RoutedRecordedChooser, SCENARIOS, type LiveSite, type Scenario } from "./scenarios.js";
@@ -43,10 +43,6 @@ export interface MeasureOptions {
 }
 
 const USAGE = `usage: npm run measure -- [--choosers agent,jev,model] [--live python.org|hackernews] [--offline] [--agent-live] [--out docs/measurements.md]`;
-
-function isChooserId(name: string): name is ChooserId {
-  return (CHOOSERS as readonly string[]).includes(name);
-}
 
 /** Parses the CLI flags; unknown choosers and sites fail with the accepted names. */
 export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): MeasureOptions {
@@ -136,8 +132,29 @@ function buildChooser(name: ChooserId, scenario: Scenario, options: MeasureOptio
   }
 }
 
+type RowOutcome = { status: "ok" | "failed"; cells: MeasurementRow["cells"]; healingEvents: number } | { status: "skipped"; skipped: string };
+
+/** One table row: what the chooser cost (from its usage and the meter) plus how the scenario went. */
+function rowFor(chooser: ChooserId, scenario: Scenario, metered: MeteredChooser | null, totalMs: number, outcome: RowOutcome): MeasurementRow {
+  const usage = metered?.usage();
+  const row: MeasurementRow = {
+    chooser,
+    scenario: scenario.id,
+    questions: usage?.questions ?? 0,
+    inputTokens: usage ? (usage.inputTokens > 0 ? usage.inputTokens : metered!.estimatedInputTokens) : 0,
+    chooserWaitMs: Math.round(usage?.waitMs ?? 0),
+    totalMs: Math.round(totalMs),
+    costUsd: usage?.costUsd ?? 0,
+    cells: outcome.status === "skipped" ? { correct: 0, expected: 0 } : outcome.cells,
+    healingEvents: outcome.status === "skipped" ? 0 : outcome.healingEvents,
+    status: outcome.status,
+  };
+  if (outcome.status === "skipped") row.skipped = outcome.skipped;
+  return row;
+}
+
 function skippedRow(chooser: ChooserId, scenario: Scenario, reason: string): MeasurementRow {
-  return { chooser, scenario: scenario.id, questions: 0, inputTokens: 0, chooserWaitMs: 0, totalMs: 0, costUsd: 0, fieldsCorrect: 0, cells: { correct: 0, expected: 0 }, healingEvents: 0, status: "skipped", skipped: reason };
+  return rowFor(chooser, scenario, null, 0, { status: "skipped", skipped: reason });
 }
 
 async function probeNetwork(site: LiveSite): Promise<string | null> {
@@ -187,37 +204,11 @@ export async function runMeasurements(options: MeasureOptions): Promise<Measurem
           const outcome = await scenario.run({ server, chooser: built.chooser, actor, storageDir, env: options.env });
           const totalMs = performance.now() - started;
           const result = grade(scenario, outcome, server.baseUrl);
-          const usage = built.chooser.usage();
-          row = {
-            chooser: chooserName,
-            scenario: scenario.id,
-            questions: usage.questions,
-            inputTokens: usage.inputTokens > 0 ? usage.inputTokens : built.chooser.estimatedInputTokens,
-            chooserWaitMs: Math.round(usage.waitMs),
-            totalMs: Math.round(totalMs),
-            costUsd: usage.costUsd,
-            fieldsCorrect: result.fieldsCorrect,
-            cells: result.cells,
-            healingEvents: result.healingEvents,
-            status: result.pass ? "ok" : "failed",
-          };
+          row = rowFor(chooserName, scenario, built.chooser, totalMs, { status: result.pass ? "ok" : "failed", cells: result.cells, healingEvents: result.healingEvents });
           log(`${chooserName}/${scenario.id}: ${row.status}${result.reason ? ` (${result.reason})` : ""}: ${row.questions} questions, ${row.inputTokens} tokens, chooser ${row.chooserWaitMs} ms, total ${row.totalMs} ms, $${row.costUsd.toFixed(6)}, ${result.cells.correct}/${result.cells.expected} cells, ${row.healingEvents} healing`);
         } catch (error) {
           const totalMs = performance.now() - started;
-          const usage = built.chooser.usage();
-          row = {
-            chooser: chooserName,
-            scenario: scenario.id,
-            questions: usage.questions,
-            inputTokens: usage.inputTokens > 0 ? usage.inputTokens : built.chooser.estimatedInputTokens,
-            chooserWaitMs: Math.round(usage.waitMs),
-            totalMs: Math.round(totalMs),
-            costUsd: usage.costUsd,
-            fieldsCorrect: 0,
-            cells: { correct: 0, expected: scenario.expectedRows * scenario.fields.length },
-            healingEvents: 0,
-            status: "failed",
-          };
+          row = rowFor(chooserName, scenario, built.chooser, totalMs, { status: "failed", cells: { correct: 0, expected: scenario.expectedRows * scenario.fields.length }, healingEvents: 0 });
           log(`${chooserName}/${scenario.id}: failed: ${error instanceof Error ? error.message : String(error)}`);
         }
         rows.push(row);

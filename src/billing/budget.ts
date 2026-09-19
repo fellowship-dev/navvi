@@ -1,24 +1,25 @@
 import { LIMITS } from "../input/schema.js";
+import type { Status } from "../scraper/schema.js";
 
 /**
  * R28: per-run chooser budget and the typed errors that end a run.
- * Status codes match the R6 status union; U3 owns the full union.
+ * Status codes match the R6 status union (src/scraper/schema.ts).
  */
 
 export type BudgetLimits = {
   chooserInputTokens: number;
   textHelperCalls: number;
-  healingEvents: number;
 };
 
 export type BudgetResource = keyof BudgetLimits;
 
-export type FailureStatus = "budget_exhausted" | "model_unavailable" | "needs_human" | "configuration_error";
+/** Every status a run can end with, plus the one for a run that never starts. */
+export type RunStatus = Status | "configuration_error";
 
 /** Base class for every error that carries a run status. */
 export class NavviError extends Error {
-  readonly status: FailureStatus;
-  constructor(status: FailureStatus, message: string, options?: { cause?: unknown }) {
+  readonly status: RunStatus;
+  constructor(status: RunStatus, message: string, options?: { cause?: unknown }) {
     super(message, options);
     this.name = new.target.name;
     this.status = status;
@@ -54,25 +55,16 @@ export class NeedsHumanError extends NavviError {
   }
 }
 
-export type BudgetSnapshot = {
-  inputTokens: number;
-  textCalls: number;
-  healingEvents: number;
-  limits: BudgetLimits;
-};
-
 /** Counters for one run. Every charge over the limit throws `BudgetExhaustedError`. */
 export class Budget {
   readonly limits: BudgetLimits;
   private inputTokens = 0;
   private textCalls = 0;
-  private healingEvents = 0;
 
   constructor(limits: Partial<BudgetLimits> = {}) {
     this.limits = {
       chooserInputTokens: limits.chooserInputTokens ?? LIMITS.chooserInputTokens,
       textHelperCalls: limits.textHelperCalls ?? LIMITS.textHelperCalls,
-      healingEvents: limits.healingEvents ?? LIMITS.healingEvents,
     };
   }
 
@@ -93,21 +85,5 @@ export class Budget {
       throw new BudgetExhaustedError("textHelperCalls", this.limits.textHelperCalls);
     }
     this.textCalls += 1;
-  }
-
-  chargeHealingEvent(): void {
-    if (this.healingEvents + 1 > this.limits.healingEvents) {
-      throw new BudgetExhaustedError("healingEvents", this.limits.healingEvents);
-    }
-    this.healingEvents += 1;
-  }
-
-  snapshot(): BudgetSnapshot {
-    return {
-      inputTokens: this.inputTokens,
-      textCalls: this.textCalls,
-      healingEvents: this.healingEvents,
-      limits: { ...this.limits },
-    };
   }
 }
