@@ -3,17 +3,9 @@ import { ZodError } from "zod";
 import { parseInput, defaultChooser, defaultBrowser, type RunInput } from "./input/schema.js";
 import { runCrawl } from "./replay/crawler.js";
 
-export type Status =
-  | "succeeded"
-  | "no_items_found"
-  | "blocked_bot_detection"
-  | "blocked_login_required"
-  | "blocked_no_progress"
-  | "drift"
-  | "charge_limit"
-  | "budget_exhausted"
-  | "model_unavailable"
-  | "needs_human";
+import type { Status } from "./scraper/schema.js";
+
+export type { Status };
 
 export interface RunSummary {
   status: Status;
