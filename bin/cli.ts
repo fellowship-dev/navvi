@@ -9,8 +9,8 @@ import type { RunStatus } from "../src/billing/budget.js";
 import { parseArgs, usage, type CliArgs } from "../src/cli/args.js";
 import { NotifyConfigurationError, createNotifier } from "../src/cli/notify.js";
 import { formatRows, type OutputFormat, type Row } from "../src/cli/output.js";
-import { createChooser, loadAnswersFile, mergeAnswers, missingCredentialsMessage, NavviError, NeedsHumanError, readQuestionsFile, type Chooser, type StoredAnswer } from "../src/chooser/index.js";
-import { defaultBrowser, defaultChooser } from "../src/input/schema.js";
+import { createChooser, findOnPath, HARNESS_LABEL, loadAnswersFile, mergeAnswers, missingCredentialsMessage, NavviError, NeedsHumanError, readQuestionsFile, resolveDefaultChooser, type Chooser, type StoredAnswer } from "../src/chooser/index.js";
+import { defaultBrowser, type Chooser as ChooserId } from "../src/input/schema.js";
 import { run as runNavvi, type RunSummary } from "../src/main.js";
 import type { Notifier } from "../src/prestep/human.js";
 import type { CrawlActor, CrawlDeps } from "../src/replay/crawler.js";
@@ -164,7 +164,7 @@ function defaultSecretPrompt(io: CliIo): (name: string) => Promise<string | null
 // ---------------------------------------------------------------- input
 
 /** The raw run input: run() validates it and parses a prompt-only input through the chooser (KTD11). */
-function rawInput(args: CliArgs, io: CliIo, secrets: Record<string, string>): Record<string, unknown> {
+function rawInput(args: CliArgs, io: CliIo, secrets: Record<string, string>, chooser: ChooserId): Record<string, unknown> {
   const hasSecrets = Object.keys(secrets).length > 0;
   const structured = Boolean(args.mode && args.fields && args.fields.length > 0);
   const base: Record<string, unknown> = {
@@ -176,7 +176,7 @@ function rawInput(args: CliArgs, io: CliIo, secrets: Record<string, string>): Re
     headed: args.headed,
     forceRecompile: args.forceRecompile,
     secrets,
-    chooser: args.chooser ?? defaultChooser(io.env),
+    chooser,
     browser: args.browser ?? defaultBrowser(io.env),
   };
   if (args.prompt) base.prompt = args.prompt;
@@ -309,13 +309,15 @@ export async function main(argv: readonly string[], io: CliIo): Promise<number> 
   }
 }
 
-function chooserFor(args: CliArgs, io: CliIo, storageDir: string): Chooser {
-  const name = args.chooser ?? defaultChooser(io.env);
+function chooserFor(name: ChooserId, args: CliArgs, io: CliIo, storageDir: string): Chooser {
   if (name === "jev" && !io.env.AI_GATEWAY_API_KEY && !io.env.TYPESAFE_API_KEY) {
     throw new CliError(`${missingCredentialsMessage("jev")} On the command line that is \`--chooser agent\`.`);
   }
   if (name === "model" && !io.env.ANTHROPIC_API_KEY) {
     throw new CliError(`${missingCredentialsMessage("model")} On the command line that is \`--chooser agent\`.`);
+  }
+  if ((name === "claude" || name === "codex") && !findOnPath(name, io.env)) {
+    throw new CliError(`${HARNESS_LABEL[name]} is not installed (\`${name}\` not found on PATH). Install it and sign in, set an API key, or use \`--chooser agent\`.`);
   }
   const questionsDir = join(storageDir, "questions");
   let answers: StoredAnswer[] | undefined;
@@ -348,6 +350,13 @@ function chooserFor(args: CliArgs, io: CliIo, storageDir: string): Chooser {
   });
 }
 
+/** Without --chooser: a key, else the first signed-in CLI (Claude Code, then Codex), else the agent; the choice and its reason go to stderr. */
+async function announceChooser(io: CliIo, quiet: boolean): Promise<ChooserId> {
+  const resolved = await resolveDefaultChooser(io.env);
+  if (!quiet) io.stderr.write(`chooser: ${resolved.name} (${resolved.reason})\n`);
+  return resolved.name;
+}
+
 async function execute(args: CliArgs, io: CliIo): Promise<number> {
   const storageDir = resolve(io.cwd, args.storage);
   let notify: Notifier;
@@ -358,9 +367,11 @@ async function execute(args: CliArgs, io: CliIo): Promise<number> {
     throw error;
   }
   const secrets = await collectSecrets(args, io);
-  const chooser = chooserFor(args, io, storageDir);
   if (!args.prompt && !(args.mode && args.fields && args.fields.length > 0)) throw new CliError("give a prompt, or both --mode and --fields.");
-  const input = rawInput(args, io, secrets);
+  // Resolved once here and passed in the input: run() never re-resolves differently.
+  const name = args.chooser ?? (await announceChooser(io, args.quiet));
+  const chooser = chooserFor(name, args, io, storageDir);
+  const input = rawInput(args, io, secrets, name);
 
   const storage = await openStorage(storageDir);
   const deps: CrawlDeps = { chooser, actor: storage.actor, notify, attended: args.headed, storageDir, env: io.env };

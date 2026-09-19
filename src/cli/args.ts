@@ -275,8 +275,10 @@ Output
   --quiet                   No summary block on stderr.
 
 Chooser (who answers the compile questions)
-  --chooser agent|jev|model agent: the host coding agent over stdio, no key (default without a key).
-                            jev: AI_GATEWAY_API_KEY or TYPESAFE_API_KEY. model: ANTHROPIC_API_KEY.
+  --chooser <name>          Default: jev with AI_GATEWAY_API_KEY or TYPESAFE_API_KEY; model with ANTHROPIC_API_KEY;
+                            else claude or codex when that CLI is installed and signed in (your subscription); else agent.
+                            claude: Claude Code (NAVVI_CLAUDE_MODEL, default haiku).  codex: Codex (NAVVI_CODEX_MODEL).
+                            agent: the host coding agent over stdio, no key.
   --agent-mode stdio|file   stdio: batches on stdout between ${"---NAVVI-QUESTIONS---"} and ${"---END---"}, answers on stdin.
                             file: write storage/questions/<token>.json and exit 3.
   --answers <file>          Answer batch JSON for a parked run.   --resume <token>  Its token.

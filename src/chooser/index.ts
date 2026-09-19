@@ -1,20 +1,22 @@
-import { defaultChooser, type Chooser as ChooserId } from "../input/schema.js";
+import { defaultChooser, hasChooserKey, type AvailableClis, type Chooser as ChooserId } from "../input/schema.js";
 import { Budget } from "../billing/budget.js";
 import { AgentChooser, type AgentChooserOptions } from "./agent.js";
+import { CliChooser, HARNESS_LABEL, SIGN_IN_COMMAND, probeCli, type CliChooserOptions, type CliHarness, type CliProbe } from "./cli.js";
 import { JevChooser, type JevChooserOptions } from "./jev.js";
 import { ModelChooser, type ModelChooserOptions } from "./model.js";
 import type { Chooser } from "./chooser.js";
 
 export * from "./chooser.js";
 export * from "./questions.js";
-export { AgentChooser, loadAnswersFile, mergeAnswers, questionKey, readQuestionsFile, QUESTIONS_START, QUESTIONS_END, PROTOCOL, type AgentChooserOptions, type AgentMode, type QuestionBatchFile, type StoredAnswer } from "./agent.js";
+export { AgentChooser, ANSWER_WITH, loadAnswersFile, mergeAnswers, questionKey, readQuestionsFile, QUESTIONS_START, QUESTIONS_END, PROTOCOL, type AgentChooserOptions, type AgentMode, type QuestionBatchFile, type StoredAnswer } from "./agent.js";
+export { CliChooser, CLI_TIMEOUT_MS, DEFAULT_CLAUDE_MODEL, HARNESS_LABEL, SIGN_IN_COMMAND, extractJsonObject, findOnPath, probeCli, processRunner, readClaudeEnvelope, readCodexEvents, renderPrompt, resetProbeCache, type CliChooserOptions, type CliHarness, type CliProbe, type CliRunner, type CliRunResult } from "./cli.js";
 export { JevChooser, TypeSafeEvaluationModel, JEV_PRICE_PER_MILLION_INPUT_USD, JEV_MAX_STATE_TOKENS, JEV_GATEWAY_MODEL_ID, missingCredentialsMessage, type JevChooserOptions, type JevProvider } from "./jev.js";
 export { ModelChooser, MODEL_PRICES, DEFAULT_MODEL_ID, DEFAULT_MODEL_STATE_CHARS, priceFor, type ModelChooserOptions } from "./model.js";
 export { RecordedChooser, RecordingChooser, DEFAULT_RECORDED_DIR, type RecordedChooserOptions, type RecordingChooserOptions, type RecordedAnswerFile } from "./recorded.js";
 export { Budget, BudgetExhaustedError, ModelUnavailableError, NeedsHumanError, NavviError } from "../billing/budget.js";
 
 export interface CreateChooserOptions {
-  /** R37: who answers. Defaults to `defaultChooser(env)` (KTD17: agent without a key). */
+  /** R37: who answers. Defaults to `defaultChooser(env)` (KTD17: agent without a key or a signed-in CLI). */
   chooser?: ChooserId;
   env?: NodeJS.ProcessEnv;
   budget?: Budget;
@@ -23,6 +25,8 @@ export interface CreateChooserOptions {
   agent?: Omit<AgentChooserOptions, "budget" | "env">;
   jev?: Omit<JevChooserOptions, "budget" | "env" | "apiKey">;
   model?: Omit<ModelChooserOptions, "budget" | "env" | "apiKey">;
+  /** Options shared by the claude and codex choosers (runner, timeout, model). */
+  cli?: Omit<CliChooserOptions, "budget" | "env">;
 }
 
 /** One factory for the run: the selected backend, sharing one budget. */
@@ -39,5 +43,49 @@ export function createChooser(options: CreateChooserOptions = {}): Chooser {
     }
     case "model":
       return new ModelChooser({ ...options.model, apiKey: options.apiKey, budget, env });
+    case "claude":
+    case "codex":
+      return new CliChooser(name, { ...options.cli, budget, env });
   }
+}
+
+export interface ResolvedChooser {
+  name: ChooserId;
+  /** One line for stderr: why this chooser. */
+  reason: string;
+  probes: Partial<Record<CliHarness, CliProbe>>;
+}
+
+const HARNESS_ORDER: CliHarness[] = ["claude", "codex"];
+
+/**
+ * The default chooser with its reason. Keys decide without probing; without
+ * a key each CLI is probed in order (Claude Code first) and the first one
+ * signed in wins. An installed but signed-out CLI never wins; its sign-in
+ * command is part of the reason when the run falls through to the agent.
+ */
+export async function resolveDefaultChooser(env: NodeJS.ProcessEnv = process.env, probe: (harness: CliHarness) => Promise<CliProbe> = (h) => probeCli(h, { env })): Promise<ResolvedChooser> {
+  if (hasChooserKey(env)) {
+    const name = defaultChooser(env);
+    const key = env.AI_GATEWAY_API_KEY ? "AI_GATEWAY_API_KEY" : env.TYPESAFE_API_KEY ? "TYPESAFE_API_KEY" : "ANTHROPIC_API_KEY";
+    return { name, reason: `${key} is set`, probes: {} };
+  }
+  const probes: Partial<Record<CliHarness, CliProbe>> = {};
+  const available: AvailableClis = {};
+  const notes: string[] = [];
+  for (const harness of HARNESS_ORDER) {
+    const result = await probe(harness);
+    probes[harness] = result;
+    if (result.installed && result.signedIn === true) {
+      available[harness] = true;
+      break;
+    }
+    if (result.installed) notes.push(`${HARNESS_LABEL[harness]} is installed but not signed in (run \`${SIGN_IN_COMMAND[harness]}\`)`);
+  }
+  const name = defaultChooser(env, available);
+  if (name === "claude" || name === "codex") {
+    return { name, reason: `${HARNESS_LABEL[name]} is installed and signed in; using your subscription`, probes };
+  }
+  const why = notes.length > 0 ? notes.join("; ") : "no API key and no signed-in Claude Code or Codex";
+  return { name, reason: `${why}; you answer the questions`, probes };
 }

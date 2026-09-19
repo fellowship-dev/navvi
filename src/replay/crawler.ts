@@ -225,6 +225,8 @@ interface Stop {
 
 interface RunState {
   stop: Stop | null;
+  /** A configuration error raised inside a request handler (a chooser that is not signed in): the crawl stops and the error is rethrown after it. */
+  fatal: NavviError | null;
   items: number;
   pages: number;
   unhealed: number;
@@ -300,6 +302,12 @@ function stopFromError(state: RunState, crawler: PlaywrightCrawler, error: unkno
     stopWith(state, crawler, { status: "needs_human", message: error.message, needsHuman: { token: error.token, questionsFile: error.questionsFile } });
     return true;
   }
+  if (error instanceof NavviError && error.status === "configuration_error") {
+    // Not a run status: Crawlee would retry and swallow it, so stop now and rethrow once the crawler has ended.
+    state.fatal ??= error;
+    stopWith(state, crawler, { status: "no_items_found", message: error.message });
+    return true;
+  }
   if (error instanceof NavviError && error.status !== "configuration_error") {
     stopWith(state, crawler, { status: error.status, message: error.message });
     return true;
@@ -322,6 +330,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   const mode = input.mode ?? "list";
   const state: RunState = {
     stop: null,
+    fatal: null,
     items: 0,
     pages: 0,
     unhealed: 0,
@@ -837,6 +846,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   });
 
   await crawler.run(initial);
+  if (state.fatal) throw state.fatal;
   return summaryOf(input, state, plans, chooser);
 }
 

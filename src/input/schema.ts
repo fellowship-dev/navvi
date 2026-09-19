@@ -3,7 +3,7 @@ import { credentialMessage, findCredential } from "./credentials.js";
 
 /** Structured run input. `prompt` alone is accepted and parsed later (U16). */
 
-export const CHOOSERS = ["agent", "jev", "model"] as const;
+export const CHOOSERS = ["agent", "jev", "model", "claude", "codex"] as const;
 export const PROFILES = ["store", "local"] as const;
 export const BROWSERS = ["camoufox", "chromium"] as const;
 export const MODES = ["list", "record"] as const;
@@ -120,11 +120,28 @@ export function parseInput(raw: unknown): RunInput {
   return InputSchema.parse(raw);
 }
 
-/** R37 / KTD17: the agent chooser is the default when no key is present. */
-export function defaultChooser(env: NodeJS.ProcessEnv = process.env): Chooser {
+/** Which installed coding CLIs are signed in, as probed by `resolveDefaultChooser`. */
+export interface AvailableClis {
+  claude?: boolean;
+  codex?: boolean;
+}
+
+/**
+ * R37 / KTD17: a key wins (jev, then model); without one, a signed-in
+ * Claude Code, then Codex, answers on the subscription; else the agent
+ * chooser. `available` comes from `probeCli`; unknown means not available.
+ */
+export function defaultChooser(env: NodeJS.ProcessEnv = process.env, available: AvailableClis = {}): Chooser {
   if (env.AI_GATEWAY_API_KEY || env.TYPESAFE_API_KEY) return "jev";
   if (env.ANTHROPIC_API_KEY) return "model";
+  if (available.claude) return "claude";
+  if (available.codex) return "codex";
   return "agent";
+}
+
+/** True when a key selects the chooser and no CLI probe is needed. */
+export function hasChooserKey(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(env.AI_GATEWAY_API_KEY || env.TYPESAFE_API_KEY || env.ANTHROPIC_API_KEY);
 }
 
 /** R43: Camoufox locally, Chromium on Apify. */

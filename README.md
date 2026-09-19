@@ -5,8 +5,9 @@
 Navvi is a self-healing scraper compiler. Say what you want from a site,
 give it the URLs, and it compiles a scraper you keep: the second run makes
 zero model calls, and when the site drifts it heals the broken field or step
-instead of failing. No API key needed when a coding agent runs it: the agent
-answers the compile questions itself.
+instead of failing. No API key needed: if Claude Code or Codex is installed
+and signed in, navvi uses it on your subscription; otherwise the coding agent
+running the command answers the compile questions itself.
 
 ![Navvi demo](docs/demo.gif)
 
@@ -43,13 +44,23 @@ use Playwright's Chromium instead. Agents: read [`SKILL.md`](SKILL.md) first;
 ## Choosers
 
 Navvi never lets a model write a selector or a script. It enumerates the
-candidates itself and asks a *chooser* to pick. Three choosers, one contract:
+candidates itself and asks a *chooser* to pick. Five choosers, one contract:
 
 | `--chooser` | Who answers | Needs | Best for |
 | --- | --- | --- | --- |
-| `agent` (default without a key) | The coding agent running the command, over stdio | Nothing | Claude Code, Codex, any tool that can keep stdin open or rerun with `--answers --resume` |
-| `jev` | Jev by TypeSafe, through Vercel AI Gateway or direct | `AI_GATEWAY_API_KEY` or `TYPESAFE_API_KEY` | Speed and unattended healing in cron or CI |
+| `claude` | Claude Code (`claude -p`) on your subscription | `claude` installed and signed in | Out of the box, no key |
+| `codex` | Codex (`codex exec`) on your subscription | `codex` installed and signed in | Out of the box, no key |
+| `jev` | Jev by TypeSafe, through Vercel AI Gateway or direct | `AI_GATEWAY_API_KEY` or `TYPESAFE_API_KEY` | Speed, cost and unattended healing in cron or CI |
 | `model` | Any AI SDK model | `ANTHROPIC_API_KEY` | A key you already have |
+| `agent` | The coding agent running the command, over stdio | Nothing | Any tool that can keep stdin open or rerun with `--answers --resume` |
+
+Without `--chooser` the order is: a key (`jev`, then `model`); else Claude
+Code, then Codex, when installed and signed in (an installed CLI that is not
+signed in never wins; the run says so and names `claude` or `codex login`);
+else `agent`. The choice and its reason print on stderr unless `--quiet`.
+`NAVVI_CLAUDE_MODEL` (default `haiku`) and `NAVVI_CODEX_MODEL` pick the CLI
+model. CLI usage reports `$0.0000` with billing `subscription`; Claude Code's
+own cost figure is kept as `reportedCostUsd` in the usage.
 
 With the agent chooser, the CLI prints each question batch on stdout between
 `---NAVVI-QUESTIONS---` and `---END---` and reads one JSON answer line from
@@ -82,7 +93,7 @@ coming; the compiled scraper format is the same in both.
 | --- | --- | --- |
 | 0 | `succeeded` | Records written |
 | 1 | `no_items_found`, `drift`, `blocked_bot_detection`, `blocked_login_required`, `blocked_no_progress` | The run stopped short; stderr says why |
-| 2 | configuration or validation error | Bad flags, missing key (the message names `AI_GATEWAY_API_KEY` / `TYPESAFE_API_KEY` / `ANTHROPIC_API_KEY` and reminds you `--chooser agent` needs none), a private host without `--allow-private-host` |
+| 2 | configuration or validation error | Bad flags, missing key (the message names `AI_GATEWAY_API_KEY` / `TYPESAFE_API_KEY` / `ANTHROPIC_API_KEY` and reminds you `--chooser agent` needs none), a CLI chooser that is not signed in (`claude`, `codex login`), a private host without `--allow-private-host` |
 | 3 | `needs_human` | Questions parked in `storage/questions/<token>.json`; answer and `--resume` |
 | 4 | `budget_exhausted`, `model_unavailable`, `charge_limit` | Retry later, raise the cap, or switch chooser |
 
