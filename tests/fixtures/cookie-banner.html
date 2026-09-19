@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Articles</title><style>.xk-privacy-shield{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;display:flex;align-items:flex-end;justify-content:center}.xk-privacy-card{background:#fff;padding:1.5rem;width:100%;max-width:600px}</style></head>
+<body>
+<h1>Articles</h1>
+<ul class="articles">
+  <li class="article"><a href="/fixtures/articles/1.html">Article 1: Ten tips</a><span class="author">by author0</span></li>
+  <li class="article"><a href="/fixtures/articles/2.html">Article 2: Why now</a><span class="author">by author1</span></li>
+  <li class="article"><a href="/fixtures/articles/3.html">Article 3: The long road</a><span class="author">by author2</span></li>
+  <li class="article"><a href="/fixtures/articles/4.html">Article 4: Notes on scale</a><span class="author">by author3</span></li>
+  <li class="article"><a href="/fixtures/articles/5.html">Article 5: A field guide</a><span class="author">by author4</span></li>
+  <li class="article"><a href="/fixtures/articles/6.html">Article 6: Lessons learned</a><span class="author">by author5</span></li>
+  <li class="article"><a href="/fixtures/articles/7.html">Article 7: Ten tips</a><span class="author">by author6</span></li>
+  <li class="article"><a href="/fixtures/articles/8.html">Article 8: Why now</a><span class="author">by author7</span></li>
+  <li class="article"><a href="/fixtures/articles/9.html">Article 9: The long road</a><span class="author">by author8</span></li>
+  <li class="article"><a href="/fixtures/articles/10.html">Article 10: Notes on scale</a><span class="author">by author9</span></li>
+  <li class="article"><a href="/fixtures/articles/11.html">Article 11: A field guide</a><span class="author">by author10</span></li>
+  <li class="article"><a href="/fixtures/articles/12.html">Article 12: Lessons learned</a><span class="author">by author11</span></li>
+</ul>
+<button id="load-more" type="button">Load more</button>
+<div class="xk-privacy-shield" data-xk="shield">
+  <div class="xk-privacy-card" role="dialog" aria-label="Privacy choices">
+    <p>We value your privacy. Choose how this site may use cookies.</p>
+    <button id="xk-accept" type="button">Accept all</button>
+    <button id="xk-manage" type="button">Manage choices</button>
+  </div>
+</div>
+<script>
+document.getElementById("xk-accept").addEventListener("click", () => document.querySelector(".xk-privacy-shield").remove());
+document.getElementById("xk-manage").addEventListener("click", () => alert("manage"));
+</script>
+</body>
+</html>
