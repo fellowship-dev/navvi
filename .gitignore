@@ -1,4 +1,7 @@
 node_modules/
 dist/
-storage/
+storage/*
+!storage/README.md
 .env
+*.log
+tests/recorded/**/*.tmp

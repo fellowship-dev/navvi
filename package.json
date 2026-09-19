@@ -1,0 +1,49 @@
+{
+  "name": "navvi",
+  "version": "3.0.0",
+  "description": "Self-healing scraper compiler. Prompt in, data out, and the second run costs nothing.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "navvi": "dist/bin/cli.js"
+  },
+  "files": [
+    "dist",
+    "SKILL.md",
+    "llms.txt",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:live": "NAVVI_LIVE=1 vitest run tests/live.test.ts",
+    "scrape": "tsx src/main.ts",
+    "demo": "tsx scripts/demo.ts",
+    "measure": "tsx src/measure/run.ts",
+    "postinstall": "node scripts/postinstall.mjs"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "4.0.58",
+    "@ai-sdk/gateway": "4.0.87",
+    "ai": "7.0.107",
+    "apify": "3.7.2",
+    "camoufox-js": "0.12.0",
+    "crawlee": "3.18.1",
+    "playwright": "1.60.0",
+    "zod": "^4.1.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "5.0.1"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
