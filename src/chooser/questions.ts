@@ -41,6 +41,14 @@ export const premises = {
 
   /** Text helper: parse a free prompt into the structured input (KTD11, U16). */
   promptParse: (): string => "Parse the prompt into the structured run input as JSON matching the schema. Use only what the prompt states.",
+
+  /** Compile, list mode: which repeated group holds one record per item for the described records and fields. */
+  listGroupChoice: (description: string, fields: readonly string[]): string =>
+    `Which candidate group holds one ${description} per item, with the ${fields.join(", ")} values? Pick none when no candidate does.`,
+
+  /** Compile, list mode: which per-item link leads to the record's own detail page. */
+  detailLinkChoice: (description: string): string =>
+    `Which per-item link leads from a ${description} to its own detail page? Pick none when the records have no detail page.`,
 } as const;
 
 export type PremiseName = keyof typeof premises;
