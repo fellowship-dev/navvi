@@ -1,0 +1,9 @@
+{
+  "id": "field.comments",
+  "kind": "choice",
+  "index": 15,
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "chooser": "agent",
+  "note": "answered live by Fry on 2026-09-19 against https://news.ycombinator.com/"
+}

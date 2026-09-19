@@ -1,0 +1,9 @@
+{
+  "id": "field.company",
+  "kind": "choice",
+  "index": 0,
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "chooser": "agent",
+  "note": "answered live by a fresh agent on 2026-09-19 against https://www.python.org/jobs/"
+}
