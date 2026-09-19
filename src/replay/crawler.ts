@@ -299,6 +299,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   const env = deps.env ?? process.env;
   const actor: CrawlActor = deps.actor ?? Actor;
   const chooser = deps.chooser ?? createChooser({ chooser: input.chooser, env });
+  const navigator: NavigatorHook | undefined = deps.navigator ?? (await import("./navigator.js")).defaultNavigator;
   const fields = (input.fields ?? []).map((f) => f.name);
   const mode = input.mode ?? "list";
   const state: RunState = {
@@ -470,8 +471,8 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       return;
     }
     const trace: TraceStep[] = [...pre.steps];
-    if (input.goal && deps.navigator) {
-      const nav = await deps.navigator(page, input.goal, {
+    if (input.goal && navigator) {
+      const nav = await navigator(page, input.goal, {
         chooser,
         profile: input.profile,
         startUrls: urls,
@@ -610,8 +611,8 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
         const onStepFailed = async (stepIndex: number, failedPage: Page, reason: string): Promise<StepFailureAction> => {
           const healed = await heal(ctx, plan, { kind: "step", stepIndex, reason });
           if (healed) return "retry";
-          if (input.goal && deps.navigator) {
-            const nav = await deps.navigator(failedPage, input.goal, {
+          if (input.goal && navigator) {
+            const nav = await navigator(failedPage, input.goal, {
               chooser,
               profile: input.profile,
               startUrls: urls,
