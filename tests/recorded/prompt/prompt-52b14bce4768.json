@@ -1,0 +1,10 @@
+{
+  "id": "prompt-52b14bce4768",
+  "kind": "text",
+  "index": null,
+  "text": "{\"mode\":\"list\",\"description\":\"Job posts on the listing\",\"fields\":[{\"name\":\"title\"},{\"name\":\"company\"},{\"name\":\"link\",\"description\":\"link to the job post\"}],\"paginate\":true}",
+  "inputTokens": 420,
+  "outputTokens": 60,
+  "chooser": "model",
+  "prompt": "All job posts on this page with title, company and link, follow next page"
+}
