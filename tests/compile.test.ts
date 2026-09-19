@@ -12,11 +12,12 @@ import {
   compile,
   nextLinkCandidates,
   probeEntry,
+  toAlternative,
   type CompileOptions,
   type CompileResult,
   type FieldCandidate,
 } from "../src/compile/index.js";
-import { extractPage, validateScraper, type CompiledScraper } from "../src/scraper/index.js";
+import { extractPage, fingerprintMatches, validateScraper, type CompiledScraper } from "../src/scraper/index.js";
 import { startFixtureServer, type FixtureServer } from "./server.js";
 
 let server: FixtureServer;
@@ -395,6 +396,25 @@ describe("pure helpers", () => {
     ];
     expect(nextLinkCandidates(links, [base], []).map((l) => l.id)).toEqual(["k1"]);
     expect(nextLinkCandidates(links, [base], ["partner.example"]).map((l) => l.id)).toEqual(["k1", "k4"]);
+  });
+
+  it("an attribute leaf's fingerprint shape comes from its sample values, not the attribute name (KTD6)", () => {
+    const base = "http://127.0.0.1:8080/fixtures/python-jobs.html";
+    const year: FieldCandidate = { key: "time@datetime", path: "main/time", selector: "time", attr: "datetime", values: ["2026"], shape: "date" };
+    const alt = toAlternative(year, [base]);
+    expect(alt.fingerprint.shape).toBe("int");
+    expect(alt.fingerprint.samples).toEqual(["2026"]);
+    expect(fingerprintMatches("2026", alt.fingerprint)).toBe(true);
+
+    const iso: FieldCandidate = { ...year, values: ["2026-09-19"] };
+    expect(toAlternative(iso, [base]).fingerprint.shape).toBe("date");
+
+    const link: FieldCandidate = { key: "a@href", path: "main/a", selector: "a", attr: "href", values: ["/jobs/100.html"], shape: "url" };
+    expect(toAlternative(link, [base]).fingerprint).toEqual({ samples: ["http://127.0.0.1:8080/jobs/100.html"], shape: "url" });
+
+    // a src whose every sample is a data: URI keeps the attribute's shape: replay yields null for it (R4), never a wrong-shaped match
+    const data: FieldCandidate = { key: "img@src", path: "main/img", selector: "img", attr: "src", values: ["data:image/png;base64,AAAA"], shape: "url" };
+    expect(toAlternative(data, [base]).fingerprint).toEqual({ samples: [], shape: "url" });
   });
 
   it("a compiled scraper document round-trips through validateScraper", () => {

@@ -4,7 +4,7 @@ import { launch, type LaunchedBrowser } from "../src/browser/launch.js";
 import type { Answer, Chooser, Question } from "../src/chooser/chooser.js";
 import { RecordedChooser } from "../src/chooser/recorded.js";
 import { navigate, type NavigateOptions, type NavigateResult, type Navigator } from "../src/navigate/index.js";
-import { captureExpectation, secretNameFor, uniqueName, urlPatternFor, type Landmark } from "../src/navigate/trace.js";
+import { captureExpectation, matchesUrlPattern, recordStep, secretNameFor, uniqueName, urlPatternFor, type Landmark } from "../src/navigate/trace.js";
 import type { SnapshotControl } from "../src/browser/snapshot.js";
 import { TraceStepSchema } from "../src/scraper/schema.js";
 import { startFixtureServer, type FixtureServer } from "./server.js";
@@ -377,6 +377,33 @@ describe("navigate: trace helpers (R12, R42)", () => {
     expect(captureExpectation(before, before, "http://x/a", "http://x/a")).toBeUndefined();
     const dialog: Landmark[] = [...after, { role: "dialog", name: "Sign in" }];
     expect(captureExpectation(before, dialog, "http://x/a", "http://x/a")).toEqual({ role: "dialog", name: "Sign in" });
+  });
+
+  it("a recorded URL pattern matches the URL it came from at replay, ignoring the query, and not another path (R42)", () => {
+    const results = "http://x:8080/fixtures/results.html?q=python";
+    const pattern = urlPatternFor(results);
+    expect(pattern).toBe("http://x:8080/fixtures/results.html*");
+    expect(matchesUrlPattern(results, pattern)).toBe(true);
+    expect(matchesUrlPattern("http://x:8080/fixtures/results.html?q=rust&page=2", pattern)).toBe(true);
+    expect(matchesUrlPattern("http://x:8080/fixtures/results.html", pattern)).toBe(true);
+    expect(matchesUrlPattern("http://x:8080/fixtures/python-jobs.html", pattern)).toBe(false);
+    expect(matchesUrlPattern("http://x:8080/fixtures/search-form.html?next=results.html", pattern)).toBe(false);
+    expect(matchesUrlPattern("http://other:8080/fixtures/results.html", pattern)).toBe(false);
+    // the template-key form is accepted too
+    expect(matchesUrlPattern("http://x:8080/orders/1001", "/orders/{n}")).toBe(true);
+    expect(matchesUrlPattern("http://x:8080/orders/1001", "x:8080/orders/{n}")).toBe(true);
+    expect(matchesUrlPattern("http://x:8080/orders/abc", "/orders/{n}")).toBe(false);
+    expect(matchesUrlPattern("http://x:8080/orders", "/orders/{n}")).toBe(false);
+    expect(matchesUrlPattern("not a url", pattern)).toBe(false);
+  });
+
+  it("a non-http href (javascript:, mailto:, tel:) is never recorded as a step target", () => {
+    const js = recordStep({ op: "click", control: control({ role: "link", name: "Toggle", tag: "a", href: "javascript:void(0)" }) });
+    expect(js.target).toBeUndefined();
+    const mail = recordStep({ op: "click", control: control({ role: "link", name: "Write", tag: "a", href: "mailto:x@y.z" }) });
+    expect(mail.target).toBeUndefined();
+    const http = recordStep({ op: "click", control: control({ role: "link", name: "Jobs", tag: "a", href: "http://x/jobs" }) });
+    expect(http.target).toEqual({ href: "http://x/jobs" });
   });
 
   it("names secrets from the control, never from the model, and marks exact names", () => {

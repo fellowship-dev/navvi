@@ -3,10 +3,10 @@ import { waitForSettle } from "../browser/guards.js";
 import { allowedControl, isOnAllowedDomain, type Control } from "../browser/policy.js";
 import type { AriaRole } from "../browser/snapshot.js";
 import type { Profile } from "../input/schema.js";
+import { isHttpHref, matchesUrlPattern } from "../navigate/trace.js";
 import { resolveUrl } from "../scraper/extract.js";
 import type { CompiledScraper, LocatorAlternative, Status, StepExpect, TraceStep } from "../scraper/schema.js";
 import type { Secret } from "../secrets/resolve.js";
-import { urlPattern } from "../template/key.js";
 
 /**
  * Entry modes and trace replay (R14, R24, R25, KTD14). A compiled list
@@ -130,16 +130,7 @@ const absolute = (url: string, base: string): string => resolveUrl(url, base) ??
 function matchesExpect(page: Page, expect: StepExpect, timeout: number): Promise<unknown> {
   if ("urlPattern" in expect) {
     const wanted = expect.urlPattern;
-    return page.waitForURL(
-      (url) => {
-        try {
-          return url.href.includes(wanted) || urlPattern([url.href]) === wanted;
-        } catch {
-          return false;
-        }
-      },
-      { timeout },
-    );
+    return page.waitForURL((url) => matchesUrlPattern(url.href, wanted), { timeout });
   }
   return page.getByRole(expect.role as AriaRole, { name: expect.name }).first().waitFor({ state: "visible", timeout });
 }
@@ -157,7 +148,28 @@ interface ReplayState {
   typedSecret: boolean;
 }
 
-/** R24 / R25 / KTD14 at replay: the recorded target and the live control both pass, else the click is refused. */
+const TEXT_INPUT_TYPES: ReadonlySet<string> = new Set(["text", "email", "tel", "search", "url"]);
+const TEXT_ROLES: ReadonlySet<string> = new Set(["textbox", "searchbox", "combobox"]);
+
+/**
+ * R24: the `password` secret (the name `secretNameFor` gives every password
+ * input at compile) goes only into a password input; any other secret (a
+ * username, an account code) into a text-like control: a text, email, tel,
+ * search or url input, a textarea, or a textbox-role editor.
+ */
+function secretFitsControl(name: string, live: LiveControl, role: string | undefined): boolean {
+  if (name === "password") return live.type === "password";
+  if (live.tag === "input") return live.type === undefined || TEXT_INPUT_TYPES.has(live.type);
+  if (live.tag === "textarea") return true;
+  return role !== undefined && TEXT_ROLES.has(role);
+}
+
+/**
+ * R24 / R25 / KTD14 at replay: the recorded target and the live control both
+ * pass, else the click is refused. Only http(s) targets face the domain and
+ * request policy: a `javascript:` or `mailto:` href acts on the page and
+ * leaves the name-based control policy to judge the click.
+ */
 function checkClickPolicy(step: TraceStep, live: LiveControl, page: Page, policy: ReplayPolicy, state: ReplayState): void {
   const alt = step.alternatives[0];
   const targets: string[] = [];
@@ -165,7 +177,7 @@ function checkClickPolicy(step: TraceStep, live: LiveControl, page: Page, policy
   if (step.target?.form) targets.push(absolute(step.target.form.action, page.url()));
   if (live.href) targets.push(live.href);
   if (live.form?.action) targets.push(live.form.action);
-  for (const url of targets) {
+  for (const url of targets.filter(isHttpHref)) {
     if (!isOnAllowedDomain(url, policy.startUrls, policy.allowedDomains)) {
       throw new RefusedError(`click target ${url} is off the allowed domains (R25)`);
     }
@@ -200,9 +212,14 @@ async function runStep(page: Page, step: TraceStep, options: ReplayTraceOptions,
         const secret = options.secrets.get(step.secret);
         if (!secret) throw new RefusedError(`secret {{secret:${step.secret}}} was not resolved`);
         const live = await readLiveControl(locator);
-        if (live.type !== "password") throw new RefusedError(`secret {{secret:${step.secret}}} may only be typed into a password input (R24)`);
+        if (!secretFitsControl(step.secret, live, step.alternatives[0]?.role)) {
+          const fit = step.secret === "password" ? "a password input" : "a text-like input";
+          throw new RefusedError(`secret {{secret:${step.secret}}} may only be typed into ${fit} (R24)`);
+        }
         await locator.fill(secret.reveal(), { timeout: STEP_TIMEOUT_MS });
-        state.typedSecret = true;
+        // the form policy asks whether a password was typed; a username secret is typed text to it
+        if (step.secret === "password") state.typedSecret = true;
+        else state.typedText = true;
       } else {
         await locator.fill(step.text ?? "", { timeout: STEP_TIMEOUT_MS });
         state.typedText = true;

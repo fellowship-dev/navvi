@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Actor } from "apify";
 import { MemoryStorage } from "crawlee";
-import { chromium } from "playwright";
+import { chromium, type BrowserContext, type Page } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildCrawleeLaunchContext, profileDir } from "../src/browser/launch.js";
 import type { Answer, Chooser, ChooserUsage, Question } from "../src/chooser/chooser.js";
@@ -250,9 +250,10 @@ describe("crawler runs", () => {
     expect(summary.items).toBe(13);
   }, 60_000);
 
-  it("trace mode replays the trace once per session and paginates in-page", async () => {
+  it("trace mode replays the trace once per session and start URL, and paginates in-page", async () => {
     const actor = makeActor();
-    const startUrls = [`${server.baseUrl}/fixtures/search-form.html`, `${server.baseUrl}/fixtures/results.html?q=python`];
+    // two start URLs of one template, both the search form: each gets its own replay (R14)
+    const startUrls = [`${server.baseUrl}/fixtures/search-form.html`, `${server.baseUrl}/fixtures/search-form.html?src=2`];
     const key = keyFor(startUrls, { fields: ["title", "company"], profile: "store" });
     const trace: TraceStep[] = [
       { op: "type", text: "python", alternatives: [{ role: "searchbox", name: "Search jobs", exact: true }] },
@@ -280,13 +281,49 @@ describe("crawler runs", () => {
     const summary = await runCrawl(input({ startUrls, mode: "list", fields: F("title", "company") }), makeDeps(actor, chooser));
     expect(summary.status).toBe("succeeded");
     expect(summary.cacheHit).toBe(true);
-    expect(summary.traceReplays).toBe(1);
+    expect(summary.traceReplays).toBe(2);
     expect(summary.requests).toEqual({ compile: 0, list: 2, record: 0 });
     expect(summary.pages).toBe(2);
     expect(summary.items).toBe(12);
     const items = await datasetItems(actor);
     expect(items.filter((i) => i._source === `${server.baseUrl}/fixtures/results.html?q=python`)).toHaveLength(12);
     expect(items[0]).toMatchObject({ title: "python role 1", company: "Company 1" });
+    expect(items[6]).toMatchObject({ title: "python role 1", company: "Company 1" });
+  }, 40_000);
+
+  it("direct entry after a goal: the list request opens the compiled entry URL (the navigated listing), not the start URL", async () => {
+    const actor = makeActor();
+    const startUrls = [`${server.baseUrl}/fixtures/search-form.html`];
+    const listing = `${server.baseUrl}/fixtures/results.html?q=python`;
+    const goal = "search for python jobs";
+    const key = keyFor(startUrls, { goal, fields: ["title", "company"], profile: "store" });
+    const store = await ScraperStore.open({ actor });
+    await store.put(
+      seeded({
+        ...key,
+        entry: { mode: "direct", url: listing },
+        trace: [
+          { op: "type", text: "python", alternatives: [{ role: "searchbox", name: "Search jobs", exact: true }] },
+          { op: "click", alternatives: [{ role: "button", name: "Search", exact: true }], target: { form: { method: "get", action: "/fixtures/results.html" } } },
+        ],
+        item: { anchorSelector: "ul.results > li.result", span: 1 },
+        fields: {
+          title: { alternatives: [{ selector: "a", fingerprint: { samples: ["python role 1"], shape: "text" } }] },
+          company: { alternatives: [{ selector: "span.company", fingerprint: { samples: ["Company 1"], shape: "text" } }] },
+        },
+      }),
+    );
+    const chooser = new RecordedChooser({ fixture: "crawler/empty" });
+    const summary = await runCrawl(input({ startUrls, goal, mode: "list", fields: F("title", "company") }), makeDeps(actor, chooser));
+    expect(summary.status).toBe("succeeded");
+    expect(summary.cacheHit).toBe(true);
+    expect(summary.traceReplays).toBe(0);
+    expect(summary.requests).toEqual({ compile: 0, list: 1, record: 0 });
+    expect(summary.items).toBe(6);
+    const items = await datasetItems(actor);
+    expect(items.map((i) => i._source)).toEqual(Array<string>(6).fill(listing));
+    expect(items[0]).toMatchObject({ title: "python role 1", company: "Company 1" });
+    expect(chooser.usage().questions).toBe(0);
   }, 40_000);
 
   it("AE11: a cached click whose recorded href is off-domain is refused and the run ends blocked_no_progress", async () => {
@@ -335,6 +372,91 @@ describe("crawler runs", () => {
       await helper.close();
     }
   }, 40_000);
+
+  it("two requests that open concurrently on one context both navigate behind the route guard (R26)", async () => {
+    const blockedImg = `<img src="http://127.0.0.1:9/x.png" alt="">`;
+    const helper = await startHelperServer({
+      "/tools-1.html": { type: "text/html; charset=utf-8", body: `<!doctype html><title>One</title><h1>Internal tools one</h1>${blockedImg}` },
+      "/tools-2.html": { type: "text/html; charset=utf-8", body: `<!doctype html><title>Two</title><h1>Internal tools two</h1>${blockedImg}` },
+    });
+    // the prototypes every crawler page and context share, for the spies below
+    const probe = await chromium.launch();
+    const probeContext = await probe.newContext();
+    const contextProto = Object.getPrototypeOf(probeContext) as BrowserContext;
+    const pageProto = Object.getPrototypeOf(await probeContext.newPage()) as Page;
+    await probe.close();
+    const guarded = new WeakSet<BrowserContext>();
+    const gotos: Array<{ url: string; guarded: boolean }> = [];
+    const originalRoute = contextProto.route;
+    const routeSpy = vi.spyOn(contextProto, "route").mockImplementation(async function (this: BrowserContext, ...args: Parameters<BrowserContext["route"]>) {
+      // a slow guard install: the second request must wait for it instead of navigating past it
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await originalRoute.apply(this, args);
+      guarded.add(this);
+    });
+    const originalGoto = pageProto.goto;
+    const gotoSpy = vi.spyOn(pageProto, "goto").mockImplementation(function (this: Page, ...args: Parameters<Page["goto"]>) {
+      gotos.push({ url: args[0], guarded: guarded.has(this.context()) });
+      return originalGoto.apply(this, args);
+    });
+    try {
+      const actor = makeActor();
+      const startUrls = [`${helper.baseUrl}/tools-1.html`, `${helper.baseUrl}/tools-2.html`];
+      const key = keyFor(startUrls, { fields: ["heading"], profile: "store" });
+      const store = await ScraperStore.open({ actor });
+      await store.put(
+        seeded({
+          ...key,
+          mode: "record",
+          entry: { mode: "direct", url: startUrls[0]! },
+          fields: { heading: { alternatives: [{ selector: "h1", fingerprint: { samples: ["Internal tools"], shape: "text" } }] } },
+        }),
+      );
+      const summary = await runCrawl(
+        input({ startUrls, mode: "record", fields: F("heading") }),
+        makeDeps(actor, new RecordedChooser({ fixture: "crawler/empty" }), { maxConcurrency: 2, minConcurrency: 2 }),
+      );
+      expect(summary.status).toBe("succeeded");
+      expect(summary.items).toBe(2);
+      const crawled = gotos.filter((g) => g.url.startsWith(helper.baseUrl));
+      expect(crawled).toHaveLength(2);
+      expect(crawled.filter((g) => g.guarded)).toHaveLength(2);
+      expect(summary.blockedRequests).toBe(2);
+    } finally {
+      routeSpy.mockRestore();
+      gotoSpy.mockRestore();
+      await helper.close();
+    }
+  }, 60_000);
+
+  it("the summary's echoed input masks the credentials of a proxy URL as well as the secrets (R39)", async () => {
+    const actor = makeActor();
+    const store = await ScraperStore.open({ actor });
+    const loginUrls = [`${server.baseUrl}/login/`];
+    const key = keyFor(loginUrls, { fields: ["order"], profile: "local" });
+    await store.put(
+      seeded({
+        ...key,
+        profile: "local",
+        entry: { mode: "trace", url: loginUrls[0]! },
+        trace: [{ op: "type", secret: "password", alternatives: [{ role: "textbox", name: "Password", exact: true }] }],
+        item: { anchorSelector: "li.order", span: 1 },
+        fields: { order: { alternatives: [{ selector: "a", fingerprint: { samples: ["Order #1001"], shape: "text" } }] } },
+      }),
+    );
+    const proxyUrls = ["http://proxy-user:hunter2-proxy@127.0.0.1:1", "http://127.0.0.1:2"];
+    const summary = await runCrawl(
+      input({ startUrls: loginUrls, mode: "list", fields: F("order"), profile: "local", proxy: { proxyUrls } }),
+      makeDeps(actor, new RecordedChooser({ fixture: "crawler/empty" }), { storageDir: mkdtempSync(join(dir, "proxy-")), env: {} }),
+    );
+    expect(summary.status).toBe("blocked_login_required");
+    expect(summary.input?.proxy?.proxyUrls).toHaveLength(2);
+    expect(summary.input?.proxy?.proxyUrls?.[0]).not.toContain("hunter2-proxy");
+    expect(summary.input?.proxy?.proxyUrls?.[0]).not.toContain("proxy-user");
+    expect(summary.input?.proxy?.proxyUrls?.[0]).toMatch(/^http:\/\/.*127\.0\.0\.1:1\/?$/);
+    expect(summary.input?.proxy?.proxyUrls?.[1]).toBe("http://127.0.0.1:2");
+    expect(JSON.stringify(summary)).not.toContain("hunter2-proxy");
+  });
 
   it("a login trace under local keeps its cookie in the profile for the next run, and freshProfile discards it", async () => {
     const actor = makeActor();

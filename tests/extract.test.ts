@@ -177,6 +177,37 @@ describe("extractPage", () => {
     });
   });
 
+  it("a drifted first alternative whose value has the wrong shape does not shadow a later alternative that fits the fingerprint (R17)", async () => {
+    const doc = scraper({
+      fields: {
+        price: {
+          alternatives: [
+            { selector: "span.precio", fingerprint: { samples: ["$ 1.990"], shape: "money" } },
+            { selector: "span.precio-nuevo", fingerprint: { samples: ["$ 2.490"], shape: "money" } },
+          ],
+        },
+        name: {
+          alternatives: [
+            { selector: "h1", fingerprint: { samples: ["x"], shape: "text" } },
+            { selector: "h2", fingerprint: { samples: ["y"], shape: "text" } },
+          ],
+        },
+      },
+    });
+    await withPage("/fixtures/search-form.html", async (page) => {
+      await page.setContent(`<h1>Producto</h1><h2>Otro</h2><span class="precio">Consultar</span><span class="precio-nuevo">$ 12.990</span>`);
+      const out = await extractPage(page, doc, { sourceUrl: page.url() });
+      expect(out.values).toEqual({ price: "$ 12.990", name: "Producto" });
+      expect(out.resolvedBy).toEqual({ price: 1, name: 0 });
+      expect(fingerprintMatches(out.values.price, doc.fields.price!.alternatives[out.resolvedBy.price!]!.fingerprint)).toBe(true);
+      // when no alternative fits the shape, the first non-empty value is still reported (the caller decides)
+      await page.setContent(`<span class="precio">Consultar</span><span class="precio-nuevo">Agotado</span>`);
+      const none = await extractPage(page, doc, { sourceUrl: page.url() });
+      expect(none.values.price).toBe("Consultar");
+      expect(none.resolvedBy.price).toBe(0);
+    });
+  });
+
   it("list mode with no anchors returns no items and null-filled top-level values", async () => {
     const doc = scraper({
       mode: "list",

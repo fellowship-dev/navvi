@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { InputSchema, isAllowedUrl, defaultChooser, defaultBrowser } from "../src/input/schema.js";
-import { run } from "../src/main.js";
+import { InvalidInputError, run } from "../src/main.js";
+import type { Chooser } from "../src/chooser/chooser.js";
 
 describe("input schema", () => {
   it("rejects an empty input naming the missing fields", () => {
@@ -63,5 +64,18 @@ describe("defaults", () => {
 describe("run", () => {
   it("throws a validation error naming the missing field", async () => {
     await expect(run({})).rejects.toThrow(/startUrls/);
+  });
+
+  it("maps a prompt-derived input that fails validation to InvalidInputError", async () => {
+    const structured = JSON.stringify({ mode: "record", description: "orders", fields: [{ name: "id" }], goal: "sign in with token: abc123" });
+    const chooser: Chooser = {
+      name: "agent",
+      ask: async (batch) => batch.map((q) => ({ id: q.id, index: null, text: structured })),
+      usage: () => ({ chooser: "agent", questions: 0, textQuestions: 0, batches: 0, inputTokens: 0, outputTokens: 0, waitMs: 0, costUsd: 0, zeroDataRetention: "not_applicable" }),
+    };
+    const err = await run({ prompt: "list my orders", startUrls: ["https://example.org/orders"] }, { chooser }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(InvalidInputError);
+    expect((err as InvalidInputError).status).toBe("configuration_error");
+    expect((err as InvalidInputError).message).toMatch(/goal/);
   });
 });

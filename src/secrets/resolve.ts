@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { inspect } from "node:util";
 import { NavviError } from "../billing/budget.js";
 import type { CompiledScraper } from "../scraper/schema.js";
+import type { RunInput } from "../input/schema.js";
 
 /**
  * Secrets (R39). A scraper only ever carries the placeholder `{{secret:name}}`;
@@ -29,6 +30,32 @@ export function maskSecrets(text: string, secrets: Iterable<readonly [name: stri
   let out = text;
   for (const [name, value] of secrets) {
     if (value.length >= MIN_MASKED_LENGTH) out = out.split(value).join(mask(name));
+  }
+  return out;
+}
+
+/** `url` with any userinfo password (and username) replaced by the mask; a string that is not a URL is returned unchanged. */
+export function maskUrlCredentials(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    // Not parseable: strip anything that looks like `scheme://user:pass@` by hand.
+    return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/i, `$1${MASK}@`);
+  }
+  if (!parsed.username && !parsed.password) return url;
+  // Rebuilt by hand: the URL setters would percent-encode the mask's brackets.
+  return `${parsed.protocol}//${MASK}@${parsed.host}${parsed.pathname}${parsed.search}${parsed.hash}`;
+}
+
+/**
+ * The run input as it may be echoed in a summary or log (R39): every secret
+ * value masked and every proxy URL stripped of its userinfo credentials.
+ */
+export function redactRunInput<T extends Pick<RunInput, "secrets" | "proxy">>(input: T): T {
+  const out: T = { ...input, secrets: Object.fromEntries(Object.keys(input.secrets).map((name) => [name, MASK])) };
+  if (input.proxy?.proxyUrls) {
+    out.proxy = { ...input.proxy, proxyUrls: input.proxy.proxyUrls.map(maskUrlCredentials) };
   }
   return out;
 }

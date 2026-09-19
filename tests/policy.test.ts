@@ -106,6 +106,14 @@ describe("model text (R24)", () => {
     expect(isModelTextAllowed(search, "4111 1111 1111 1111")).toBe(false);
     expect(isModelTextAllowed(search, "python jobs")).toBe(true);
   });
+  it("lets dates, compact date stamps and order numbers through while still rejecting phone numbers", () => {
+    for (const text of ["2026-09-19", "20260919", "ORD-12345678", "order 987654321", "2026-09-19T10:30:00"]) {
+      expect(isModelTextAllowed(search, text), text).toBe(true);
+    }
+    for (const text of ["+56 9 1234 5678", "(02) 2345 6789", "912 345 678", "+1 (415) 555-0123", "0800-123-456"]) {
+      expect(isModelTextAllowed(search, text), text).toBe(false);
+    }
+  });
   it("never types model text into personal-data fields", () => {
     expect(isModelTextAllowed({ ...search, autocomplete: "email" }, "python jobs")).toBe(false);
     expect(isModelTextAllowed({ ...search, nameAttr: "phone_number" }, "python jobs")).toBe(false);

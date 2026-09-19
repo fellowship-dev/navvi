@@ -5,7 +5,7 @@ import { promptToInput } from "./input/prompt.js";
 import { NavviError, NeedsHumanError } from "./billing/budget.js";
 import { createChooser } from "./chooser/index.js";
 import { runCrawl, type CrawlDeps } from "./replay/crawler.js";
-import { MASK } from "./secrets/resolve.js";
+import { redactRunInput } from "./secrets/resolve.js";
 
 import type { Status } from "./scraper/schema.js";
 import type { HealingEvent, UnmappedCandidate } from "./replay/heal.js";
@@ -63,7 +63,7 @@ export function summaryFor(status: Status, input: RunInput | null, message: stri
     unmappedCandidates: [],
     fieldsNotFound: [],
     chooser: null,
-    input: input && { ...input, secrets: Object.fromEntries(Object.keys(input.secrets).map((name) => [name, MASK])) },
+    input: input && redactRunInput(input),
     requests: { compile: 0, list: 0, record: 0 },
     traceReplays: 0,
     blockedRequests: 0,
@@ -98,6 +98,8 @@ export async function run(raw: unknown, deps: CrawlDeps = {}): Promise<RunSummar
       if (error instanceof NeedsHumanError) {
         return { ...summaryFor("needs_human", input, error.message), needsHuman: { token: error.token, questionsFile: error.questionsFile } };
       }
+      // The prompt-derived input is validated like the raw one: a failure is a configuration error, not a crash.
+      if (error instanceof ZodError) throw new InvalidInputError(error);
       throw error;
     }
   }
