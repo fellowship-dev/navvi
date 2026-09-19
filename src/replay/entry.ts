@@ -1,7 +1,9 @@
 import type { Locator, Page } from "playwright";
 import { waitForSettle } from "../browser/guards.js";
 import { allowedControl, isOnAllowedDomain, type Control } from "../browser/policy.js";
+import type { AriaRole } from "../browser/snapshot.js";
 import type { Profile } from "../input/schema.js";
+import { resolveUrl } from "../scraper/extract.js";
 import type { CompiledScraper, LocatorAlternative, Status, StepExpect, TraceStep } from "../scraper/schema.js";
 import type { Secret } from "../secrets/resolve.js";
 import { urlPattern } from "../template/key.js";
@@ -33,27 +35,27 @@ export interface ReplayPolicy {
 }
 
 /**
- * What to do after a step failed: `retry` runs the same step once more,
- * `done` ends the replay as successful (navigation reached the target by
- * other means), `fail` ends it with `blocked_no_progress`.
+ * What to do after a step failed: `retry` runs the step once more (the given
+ * `step`, a healed copy, replaces the captured one), `done` ends the replay as
+ * successful (navigation reached the target by other means), `fail` ends it
+ * with `blocked_no_progress`.
  */
-export type StepFailureAction = "retry" | "done" | "fail";
+export type StepFailureAction = { action: "retry"; step?: TraceStep | undefined } | { action: "done" } | { action: "fail" };
 
 export interface ReplayTraceOptions {
   secrets: ReadonlyMap<string, Secret>;
   policy: ReplayPolicy;
   onStepFailed?: ((stepIndex: number, page: Page, reason: string) => Promise<StepFailureAction>) | undefined;
-  /** Locator resolution and action timeout per step. Default 10 s. */
-  stepTimeoutMs?: number | undefined;
-  /** How long an `expect` waits. Default 10 s. */
-  expectTimeoutMs?: number | undefined;
 }
+
+/** Locator resolution and action timeout per step. */
+const STEP_TIMEOUT_MS = 10_000;
+/** How long an `expect` waits. */
+const EXPECT_TIMEOUT_MS = 10_000;
 
 export type ReplayTraceResult =
   | { ok: true; steps: number }
   | { ok: false; status: Status; stepIndex: number; reason: string };
-
-type Role = Parameters<Page["getByRole"]>[0];
 
 class StepError extends Error {}
 /** A policy refusal: never retried, never healed. */
@@ -65,16 +67,36 @@ function describe(step: TraceStep): string {
   return alt ? `${step.op} ${alt.role} "${alt.name}"` : step.op;
 }
 
-async function resolveLocator(page: Page, alternatives: readonly LocatorAlternative[], timeoutMs: number): Promise<Locator> {
+/**
+ * The first alternative that resolves to a visible control, polled until
+ * `timeoutMs` runs out (0: one pass); null when none does.
+ */
+export async function resolveLocator(page: Page, alternatives: readonly LocatorAlternative[], timeoutMs: number): Promise<Locator | null> {
   const deadline = Date.now() + timeoutMs;
-  do {
+  for (;;) {
     for (const alt of alternatives) {
-      const locator = page.getByRole(alt.role as Role, { name: alt.name, exact: alt.exact }).first();
+      const locator = page.getByRole(alt.role as AriaRole, { name: alt.name, exact: alt.exact }).first();
       if ((await locator.count().catch(() => 0)) > 0 && (await locator.isVisible().catch(() => false))) return locator;
     }
+    if (Date.now() >= deadline) return null;
     await page.waitForTimeout(150);
-  } while (Date.now() < deadline);
-  throw new StepError(`no visible control matched ${alternatives.map((a) => `${a.role} "${a.name}"`).join(" / ")}`);
+  }
+}
+
+async function requireLocator(page: Page, alternatives: readonly LocatorAlternative[]): Promise<Locator> {
+  const locator = await resolveLocator(page, alternatives, STEP_TIMEOUT_MS);
+  if (!locator) throw new StepError(`no visible control matched ${alternatives.map((a) => `${a.role} "${a.name}"`).join(" / ")}`);
+  return locator;
+}
+
+/** Scrolls to the bottom and fires a scroll event too: a viewport taller than the page never scrolls, yet its loader still listens. */
+export async function scrollToBottom(page: Page): Promise<void> {
+  await page
+    .evaluate(() => {
+      window.scrollTo(0, document.documentElement.scrollHeight);
+      window.dispatchEvent(new Event("scroll"));
+    })
+    .catch(() => undefined);
 }
 
 interface LiveControl {
@@ -102,15 +124,10 @@ function readLiveControl(locator: Locator): Promise<LiveControl> {
   });
 }
 
-function absolute(url: string, base: string): string {
-  try {
-    return new URL(url, base).href;
-  } catch {
-    return url;
-  }
-}
+/** A recorded target made absolute against the page; a value no URL parser accepts is checked as written. */
+const absolute = (url: string, base: string): string => resolveUrl(url, base) ?? url;
 
-function matchesExpect(page: Page, expect: StepExpect): Promise<void> | Promise<unknown> {
+function matchesExpect(page: Page, expect: StepExpect, timeout: number): Promise<unknown> {
   if ("urlPattern" in expect) {
     const wanted = expect.urlPattern;
     return page.waitForURL(
@@ -121,24 +138,17 @@ function matchesExpect(page: Page, expect: StepExpect): Promise<void> | Promise<
           return false;
         }
       },
-      { timeout: 0 },
+      { timeout },
     );
   }
-  return page.getByRole(expect.role as Role, { name: expect.name }).first().waitFor({ state: "visible", timeout: 0 });
+  return page.getByRole(expect.role as AriaRole, { name: expect.name }).first().waitFor({ state: "visible", timeout });
 }
 
-async function checkExpect(page: Page, expect: StepExpect, timeoutMs: number): Promise<void> {
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new StepError(`expectation not met within ${timeoutMs}ms: ${JSON.stringify(expect)}`)), timeoutMs);
-  });
+async function checkExpect(page: Page, expect: StepExpect): Promise<void> {
   try {
-    await Promise.race([matchesExpect(page, expect), timeout]);
+    await matchesExpect(page, expect, EXPECT_TIMEOUT_MS);
   } catch (error) {
-    if (error instanceof StepError) throw error;
     throw new StepError(`expectation failed: ${JSON.stringify(expect)}: ${error instanceof Error ? error.message : String(error)}`);
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -174,43 +184,42 @@ function checkClickPolicy(step: TraceStep, live: LiveControl, page: Page, policy
 }
 
 async function runStep(page: Page, step: TraceStep, options: ReplayTraceOptions, state: ReplayState): Promise<void> {
-  const stepTimeout = options.stepTimeoutMs ?? 10_000;
   switch (step.op) {
     case "human":
       throw new HumanStepError("the recorded trace needs a person at this step");
     case "wait":
-      await waitForSettle(page, { maxMs: stepTimeout });
+      await waitForSettle(page, { maxMs: STEP_TIMEOUT_MS });
       return;
     case "scroll":
-      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-      await waitForSettle(page, { maxMs: stepTimeout });
+      await scrollToBottom(page);
+      await waitForSettle(page, { maxMs: STEP_TIMEOUT_MS });
       return;
     case "type": {
-      const locator = await resolveLocator(page, step.alternatives, stepTimeout);
+      const locator = await requireLocator(page, step.alternatives);
       if (step.secret !== undefined) {
         const secret = options.secrets.get(step.secret);
         if (!secret) throw new RefusedError(`secret {{secret:${step.secret}}} was not resolved`);
         const live = await readLiveControl(locator);
         if (live.type !== "password") throw new RefusedError(`secret {{secret:${step.secret}}} may only be typed into a password input (R24)`);
-        await locator.fill(secret.reveal(), { timeout: stepTimeout });
+        await locator.fill(secret.reveal(), { timeout: STEP_TIMEOUT_MS });
         state.typedSecret = true;
       } else {
-        await locator.fill(step.text ?? "", { timeout: stepTimeout });
+        await locator.fill(step.text ?? "", { timeout: STEP_TIMEOUT_MS });
         state.typedText = true;
       }
       return;
     }
     case "select": {
-      const locator = await resolveLocator(page, step.alternatives, stepTimeout);
-      await locator.selectOption(step.text ?? "", { timeout: stepTimeout });
+      const locator = await requireLocator(page, step.alternatives);
+      await locator.selectOption(step.text ?? "", { timeout: STEP_TIMEOUT_MS });
       return;
     }
     case "click": {
-      const locator = await resolveLocator(page, step.alternatives, stepTimeout);
+      const locator = await requireLocator(page, step.alternatives);
       const live = await readLiveControl(locator);
       checkClickPolicy(step, live, page, options.policy, state);
-      await locator.click({ timeout: stepTimeout });
-      await waitForSettle(page, { idleMs: 300, maxMs: Math.min(stepTimeout, 5_000) }).catch(() => undefined);
+      await locator.click({ timeout: STEP_TIMEOUT_MS });
+      await waitForSettle(page, { idleMs: 300, maxMs: Math.min(STEP_TIMEOUT_MS, 5_000) }).catch(() => undefined);
       return;
     }
   }
@@ -219,28 +228,29 @@ async function runStep(page: Page, step: TraceStep, options: ReplayTraceOptions,
 /**
  * Replays a compiled trace on `page`, which is already at the entry URL.
  * Policy refusals and human steps end the replay at once; other failures go
- * to `onStepFailed` (default: fail) and at most one retry per step.
+ * to `onStepFailed` (default: fail) and at most one retry per step, on the
+ * step the hook hands back (a healed one) or the captured one.
  */
 export async function replayTrace(page: Page, scraper: CompiledScraper, options: ReplayTraceOptions): Promise<ReplayTraceResult> {
   const state: ReplayState = { typedText: false, typedSecret: false };
-  const expectTimeout = options.expectTimeoutMs ?? 10_000;
   for (let index = 0; index < scraper.trace.length; index++) {
-    const step = scraper.trace[index]!;
+    let step = scraper.trace[index]!;
     let attempts = 0;
     for (;;) {
       attempts += 1;
       try {
         await runStep(page, step, options, state);
-        if (step.expect) await checkExpect(page, step.expect, expectTimeout);
+        if (step.expect) await checkExpect(page, step.expect);
         break;
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         if (error instanceof HumanStepError) return { ok: false, status: "needs_human", stepIndex: index, reason };
         if (error instanceof RefusedError) return { ok: false, status: "blocked_no_progress", stepIndex: index, reason };
         if (attempts >= 2) return { ok: false, status: "blocked_no_progress", stepIndex: index, reason: `step ${index} (${describe(step)}) failed twice: ${reason}` };
-        const action = options.onStepFailed ? await options.onStepFailed(index, page, reason) : "fail";
-        if (action === "done") return { ok: true, steps: index + 1 };
-        if (action === "fail") return { ok: false, status: "blocked_no_progress", stepIndex: index, reason: `step ${index} (${describe(step)}) failed: ${reason}` };
+        const next: StepFailureAction = options.onStepFailed ? await options.onStepFailed(index, page, reason) : { action: "fail" };
+        if (next.action === "done") return { ok: true, steps: index + 1 };
+        if (next.action === "fail") return { ok: false, status: "blocked_no_progress", stepIndex: index, reason: `step ${index} (${describe(step)}) failed: ${reason}` };
+        if (next.step) step = next.step;
       }
     }
   }

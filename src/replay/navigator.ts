@@ -16,6 +16,6 @@ export const defaultNavigator: NavigatorHook = async (page, goal, ctx) => {
   });
   if (result.status === "DONE") return { ok: true, steps: result.trace };
   const reason = result.reason ?? "navigation made no progress";
-  const status = /login|password|contraseña/i.test(reason) ? "blocked_login_required" : "blocked_no_progress";
+  const status = result.blockedBy === "login" ? "blocked_login_required" : "blocked_no_progress";
   return { ok: false, status, reason };
 };

@@ -57,6 +57,9 @@ export const SNAPSHOT_DENY_LIST: readonly string[] = (() => {
   return JSON.parse(match[1]) as string[];
 })();
 
+/** The role argument of `page.getByRole`, for locators built from recorded or snapshotted controls. */
+export type AriaRole = Parameters<Page["getByRole"]>[0];
+
 export interface SnapshotFormInfo {
   method: string;
   action: string;

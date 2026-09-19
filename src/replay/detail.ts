@@ -2,7 +2,7 @@ import type { BrowserContext, Page } from "playwright";
 import type { Answer, Chooser, Question } from "../chooser/chooser.js";
 import { compile, type CompileField } from "../compile/index.js";
 import type { Chooser as ChooserId, Profile } from "../input/schema.js";
-import { extractPage, type ItemExtraction } from "../scraper/extract.js";
+import { extractPage, isHttpUrl, type ItemExtraction } from "../scraper/extract.js";
 import { validateScraper, type CompiledScraper, type FieldAlternative } from "../scraper/schema.js";
 
 /**
@@ -41,13 +41,7 @@ export function hasDetailTemplate(scraper: CompiledScraper): boolean {
 export function detailLinkOf(scraper: CompiledScraper, item: ItemExtraction): string | null {
   if (!scraper.detail) return null;
   const value = item.values[scraper.detail.linkField];
-  if (typeof value !== "string") return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
-  } catch {
-    return null;
-  }
+  return typeof value === "string" && isHttpUrl(value) ? new URL(value).href : null;
 }
 
 /** The record scraper replay runs on a detail page: the detail fields, nothing else. */
@@ -107,7 +101,6 @@ export interface CompileDetailResult {
   /** Extraction of the sample pages by URL, so they are not fetched twice. */
   samples: Map<string, ItemExtraction>;
   fieldsNotFound: string[];
-  questions: number;
 }
 
 /** Compiles the detail template from up to three detail pages of the same context (R18). */
@@ -115,17 +108,22 @@ export async function compileDetail(options: CompileDetailOptions): Promise<Comp
   const { scraper } = options;
   if (!scraper.detail) throw new Error("compileDetail needs a scraper with a detail link");
   const links = [...new Set(options.links)].slice(0, DETAIL_SAMPLE_PAGES);
-  const pages: Page[] = [];
+  /** Every page opened, for cleanup; `pages` below keeps link order. */
+  const opened: Page[] = [];
   const samples = new Map<string, ItemExtraction>();
   const names = options.detailFields.map((f) => f.name);
   try {
-    for (const url of links) {
-      const page = await options.context.newPage();
-      pages.push(page);
-      await page.goto(url, { waitUntil: "domcontentloaded" }).catch(() => undefined);
-      if (options.prepare) await options.prepare(page).catch(() => undefined);
-    }
-    if (pages.length === 0) return { scraper, ok: false, pagesOpened: 0, samples, fieldsNotFound: names, questions: 0 };
+    // the sample pages are independent pages of one context: open them together
+    const pages = await Promise.all(
+      links.map(async (url) => {
+        const page = await options.context.newPage();
+        opened.push(page);
+        await page.goto(url, { waitUntil: "domcontentloaded" }).catch(() => undefined);
+        if (options.prepare) await options.prepare(page).catch(() => undefined);
+        return page;
+      }),
+    );
+    if (pages.length === 0) return { scraper, ok: false, pagesOpened: 0, samples, fieldsNotFound: names };
     const result = await compile({
       mode: "record",
       pages,
@@ -139,7 +137,7 @@ export async function compileDetail(options: CompileDetailOptions): Promise<Comp
       startUrls: options.startUrls,
       allowedDomains: options.allowedDomains,
     });
-    if (!result.ok) return { scraper, ok: false, pagesOpened: pages.length, samples, fieldsNotFound: result.fieldsNotFound, questions: result.questions };
+    if (!result.ok) return { scraper, ok: false, pagesOpened: pages.length, samples, fieldsNotFound: result.fieldsNotFound };
     const compiled = validateScraper({ ...scraper, detail: { linkField: scraper.detail.linkField, fields: result.scraper.fields } });
     const replay = detailScraper(compiled);
     if (replay) {
@@ -148,9 +146,9 @@ export async function compileDetail(options: CompileDetailOptions): Promise<Comp
         if (page) samples.set(url, await extractPage(page, replay, { sourceUrl: url, fields: names }));
       }
     }
-    return { scraper: compiled, ok: true, pagesOpened: pages.length, samples, fieldsNotFound: result.fieldsNotFound, questions: result.questions };
+    return { scraper: compiled, ok: true, pagesOpened: pages.length, samples, fieldsNotFound: result.fieldsNotFound };
   } finally {
-    for (const page of pages) await page.close().catch(() => undefined);
+    for (const page of opened) await page.close().catch(() => undefined);
   }
 }
 

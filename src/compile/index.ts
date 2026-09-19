@@ -1,5 +1,6 @@
 export {
   RETRY_MIN_GROUP_ITEMS,
+  askChunked,
   compile,
   probeEntry,
   type CompileNoItems,

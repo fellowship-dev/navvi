@@ -4,7 +4,7 @@ import { Actor } from "apify";
 import { PlaywrightCrawler, ProxyConfiguration, type Configuration, type Dataset, type KeyValueStore, type PlaywrightCrawlingContext } from "crawlee";
 import type { BrowserContext, Page } from "playwright";
 import { buildCrawleeLaunchContext, restoreProfileCookies, saveProfileCookies } from "../browser/launch.js";
-import { isAllowedRequestUrl, registrableDomain } from "../browser/policy.js";
+import { hostOf, isAllowedRequestUrl, registrableDomain } from "../browser/policy.js";
 import { createChooser, NavviError, NeedsHumanError, type Chooser } from "../chooser/index.js";
 import { compile, type CompileResult } from "../compile/index.js";
 import { LIMITS, isAllowedUrl, type Profile, type RunInput } from "../input/schema.js";
@@ -13,11 +13,12 @@ import { dismissConsent, runPreSteps, type Notifier } from "../prestep/index.js"
 import { extractPage, fingerprintMatches, type ItemExtraction } from "../scraper/extract.js";
 import { cacheKey, validateScraper, type CompiledScraper, type Status, type TraceStep } from "../scraper/schema.js";
 import { ScraperStore, ScraperStoreError } from "../scraper/store.js";
-import { findPlaceholders, MissingSecretError, resolveSecrets, type CommandRunner, type Secret } from "../secrets/resolve.js";
+import { findPlaceholders, MASK, MissingSecretError, resolveSecrets, type CommandRunner, type Secret } from "../secrets/resolve.js";
 import { groupByTemplate, pickSampleUrls } from "../template/index.js";
 import { compileDetail, DETAIL_LINK_FIELD, detailLinkOf, extractDetail, hasDetailTemplate, mergeDetail, withDetailLink } from "./detail.js";
 import { entryModeFor, replayTrace, type ReplayPolicy, type StepFailureAction } from "./entry.js";
 import { createHealer, findUnmappedCandidates, type HealingEvent, type UnmappedCandidate } from "./heal.js";
+import { defaultNavigator } from "./navigator.js";
 import { defaultPaginate } from "./paginate.js";
 
 /**
@@ -298,10 +299,6 @@ function stopFromError(state: RunState, crawler: PlaywrightCrawler, error: unkno
     stopWith(state, crawler, { status: error.status, message: error.message });
     return true;
   }
-  if (error instanceof ScraperStoreError || error instanceof MissingSecretError) {
-    stopWith(state, crawler, { status: error.status, message: error.message });
-    return true;
-  }
   return false;
 }
 
@@ -311,7 +308,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   const env = deps.env ?? process.env;
   const actor: CrawlActor = deps.actor ?? Actor;
   const chooser = deps.chooser ?? createChooser({ chooser: input.chooser, env });
-  const navigator: NavigatorHook | undefined = deps.navigator ?? (await import("./navigator.js")).defaultNavigator;
+  const navigator: NavigatorHook = deps.navigator ?? defaultNavigator;
   const healer: HealerHook = deps.healer ?? createHealer();
   const paginateHook: PaginateHook = deps.paginate ?? defaultPaginate;
   const fields = (input.fields ?? []).map((f) => f.name);
@@ -386,6 +383,16 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     allowedDomains: input.allowedDomains,
     allowMutations: input.allowMutations,
     isAllowedRequest: guard,
+  };
+  const navigateContext: NavigateContext = {
+    chooser,
+    profile: input.profile,
+    startUrls: urls,
+    allowedDomains: input.allowedDomains,
+    allowMutations: input.allowMutations,
+    secrets,
+    description: input.description,
+    fields,
   };
   const dataset = await actor.openDataset();
   const runId = randomUUID().slice(0, 8);
@@ -490,17 +497,8 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       return;
     }
     const trace: TraceStep[] = [...pre.steps];
-    if (input.goal && navigator) {
-      const nav = await navigator(page, input.goal, {
-        chooser,
-        profile: input.profile,
-        startUrls: urls,
-        allowedDomains: input.allowedDomains,
-        allowMutations: input.allowMutations,
-        secrets,
-        description: input.description,
-        fields,
-      });
+    if (input.goal) {
+      const nav = await navigator(page, input.goal, navigateContext);
       if (!nav.ok) {
         stopWith(state, crawler, { status: nav.status, message: nav.reason });
         return;
@@ -508,16 +506,22 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       trace.push(...nav.steps);
     }
 
-    const extra: Page[] = [];
+    /** Every sample page opened, for cleanup; `extra` below keeps sample order. */
+    const opened: Page[] = [];
     let result: CompileResult;
     try {
+      let extra: Page[] = [];
       if (mode === "record") {
-        for (const url of data.sampleUrls.slice(1)) {
-          const sample = await page.context().newPage();
-          extra.push(sample);
-          await sample.goto(url, { waitUntil: "domcontentloaded" });
-          await dismissConsent(sample).catch(() => undefined);
-        }
+        // the other samples are independent pages of one context: open them together
+        extra = await Promise.all(
+          data.sampleUrls.slice(1).map(async (url) => {
+            const sample = await page.context().newPage();
+            opened.push(sample);
+            await sample.goto(url, { waitUntil: "domcontentloaded" });
+            await dismissConsent(sample).catch(() => undefined);
+            return sample;
+          }),
+        );
       }
       result = await compile({
         mode,
@@ -535,7 +539,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
         context: page.context(),
       });
     } finally {
-      for (const p of extra) await p.close().catch(() => undefined);
+      for (const p of opened) await p.close().catch(() => undefined);
     }
     for (const name of result.fieldsNotFound) state.fieldsNotFound.add(name);
     if (!result.ok) {
@@ -761,32 +765,18 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
         if (page.url() !== scraper.entry.url) await page.goto(scraper.entry.url, { waitUntil: "domcontentloaded" });
         const onStepFailed = async (stepIndex: number, failedPage: Page, reason: string): Promise<StepFailureAction> => {
           const healed = await heal(ctx, plan, { kind: "step", stepIndex, reason });
-          if (healed) {
-            // replayTrace retries the step it captured before the heal: mirror the appended alternatives into it (R42)
-            const step = scraper.trace[stepIndex];
-            const healedStep = healed.trace[stepIndex];
-            if (step && healedStep) step.alternatives.splice(0, step.alternatives.length, ...healedStep.alternatives);
-            return "retry";
-          }
-          if (input.goal && navigator) {
-            const nav = await navigator(failedPage, input.goal, {
-              chooser,
-              profile: input.profile,
-              startUrls: urls,
-              allowedDomains: input.allowedDomains,
-              allowMutations: input.allowMutations,
-              secrets,
-              description: input.description,
-              fields,
-            });
+          // the retry runs the healed step, with its appended alternative (R42)
+          if (healed) return { action: "retry", step: healed.trace[stepIndex] };
+          if (input.goal) {
+            const nav = await navigator(failedPage, input.goal, navigateContext);
             if (nav.ok) {
               const renavigated = validateScraper({ ...plan.scraper!, trace: nav.steps });
               await store.put(renavigated);
               plan.scraper = renavigated;
-              return "done";
+              return { action: "done" };
             }
           }
-          return "fail";
+          return { action: "fail" };
         };
         const replay = await replayTrace(page, scraper, { secrets, policy, onStepFailed });
         if (!replay.ok) {
@@ -831,15 +821,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
 
 /** The summary echoes the input with every secret value masked (R39). */
 function redactInput(input: RunInput): RunInput {
-  return { ...input, secrets: Object.fromEntries(Object.keys(input.secrets).map((name) => [name, "[secret]"])) };
-}
-
-function hostOf(url: string): string | null {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return null;
-  }
+  return { ...input, secrets: Object.fromEntries(Object.keys(input.secrets).map((name) => [name, MASK])) };
 }
 
 /** On the platform a secret may also be a `SECRET_<NAME>` record in the run's default store. */

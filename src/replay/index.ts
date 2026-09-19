@@ -16,7 +16,17 @@ export {
   type PaginateHook,
   type RequestLabel,
 } from "./crawler.js";
-export { entryModeFor, replayTrace, type EntryMode, type ReplayPolicy, type ReplayTraceOptions, type ReplayTraceResult, type StepFailureAction } from "./entry.js";
+export {
+  entryModeFor,
+  replayTrace,
+  resolveLocator,
+  scrollToBottom,
+  type EntryMode,
+  type ReplayPolicy,
+  type ReplayTraceOptions,
+  type ReplayTraceResult,
+  type StepFailureAction,
+} from "./entry.js";
 export {
   DETAIL_LINK_FIELD,
   DETAIL_QUESTION_PREFIX,
@@ -37,7 +47,6 @@ export {
   HEAL_STEP_QUESTION_PREFIX,
   controlLabel,
   createHealer,
-  defaultHealer,
   fieldHealQuestionId,
   findUnmappedCandidates,
   fitsStep,
@@ -48,7 +57,6 @@ export {
   stepHealQuestionId,
   unmappedFrom,
   type FieldHealingEvent,
-  type HealerOptions,
   type HealingEvent,
   type StepHealingEvent,
   type UnmappedCandidate,
@@ -61,5 +69,4 @@ export {
   followNextLink,
   paginate,
   scrollForMore,
-  type PaginateOptions,
 } from "./paginate.js";

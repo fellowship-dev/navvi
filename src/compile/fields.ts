@@ -3,6 +3,7 @@ import type { Answer, Question } from "../chooser/chooser.js";
 import { premises } from "../chooser/questions.js";
 import { URL_ATTRS, commonShape, resolveUrl } from "../scraper/extract.js";
 import type { FieldAlternative, Shape } from "../scraper/schema.js";
+import { clip } from "../util/text.js";
 
 /**
  * Field fan-out (R7, R30, KTD5, KTD6). Candidates are the leaves that resolve
@@ -85,8 +86,6 @@ export async function intersectCandidates(samples: ReadonlyArray<readonly LeafCa
   });
   return out;
 }
-
-const clip = (s: string, max: number): string => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 
 /** `<path> = <value on sample 1> | <value on sample 2> | ...` */
 export function candidateLabel(candidate: FieldCandidate): string {

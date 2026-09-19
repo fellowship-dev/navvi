@@ -7,8 +7,19 @@ import type { NavigateOptions, NavigateResult } from "./agent.js";
  * in runs) without the crawler knowing about choosers.
  */
 
-export { navigate, DONE_THRESHOLD, NO_PROGRESS_LIMIT, MAX_REDECISIONS, OPERATIONS, type NavigateOptions, type NavigateResult, type NavigateStatus, type Operation } from "./agent.js";
-export { TextHelper, generateText, parseTextAnswer, policyControl, type TextHelperInput, type TextHelperResult } from "./textHelper.js";
+export {
+  navigate,
+  DONE_THRESHOLD,
+  NO_PROGRESS_LIMIT,
+  MAX_REDECISIONS,
+  OPERATIONS,
+  type BlockedBy,
+  type NavigateOptions,
+  type NavigateResult,
+  type NavigateStatus,
+  type Operation,
+} from "./agent.js";
+export { generateText, parseTextAnswer, policyControl, type TextHelperInput, type TextHelperResult } from "./textHelper.js";
 export { TraceRecorder, captureExpectation, readLandmarks, recordStep, secretNameFor, uniqueName, urlPatternFor, type Landmark, type RecordStepInput } from "./trace.js";
 
 /** Everything `navigate` needs besides the page and the goal. */

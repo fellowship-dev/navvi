@@ -1,8 +1,10 @@
-import type { Locator, Page } from "playwright";
-import { waitForSettle, type SettleOptions } from "../browser/guards.js";
+import type { Page } from "playwright";
+import { waitForSettle } from "../browser/guards.js";
 import { isOnAllowedDomain } from "../browser/policy.js";
-import type { CompiledScraper, LocatorAlternative } from "../scraper/schema.js";
+import { resolveUrl } from "../scraper/extract.js";
+import type { CompiledScraper } from "../scraper/schema.js";
 import type { PaginateHook } from "./crawler.js";
+import { resolveLocator, scrollToBottom } from "./entry.js";
 
 /**
  * In-page pagination (R15). A compiled next link is followed by its locator
@@ -17,14 +19,6 @@ export const MAX_SCROLL_ROUNDS = 10;
 export const SCROLL_GROWTH_TIMEOUT_MS = 2_000;
 /** How long a next-link click waits for the page to change. */
 export const NEXT_LINK_TIMEOUT_MS = 10_000;
-
-export interface PaginateOptions {
-  settle?: SettleOptions | undefined;
-  growthTimeoutMs?: number | undefined;
-  nextLinkTimeoutMs?: number | undefined;
-}
-
-type Role = Parameters<Page["getByRole"]>[0];
 
 /** Item count and a signature over the first rows' text, for growth and same-listing checks. */
 interface ItemState {
@@ -50,26 +44,16 @@ function readItems(page: Page, anchorSelector: string): Promise<ItemState> {
     .catch(() => ({ count: 0, signature: "" }));
 }
 
-/** Scrolls to the bottom and fires a scroll event too: a viewport taller than the page never scrolls, yet its loader still listens. */
-async function scrollToBottom(page: Page): Promise<void> {
-  await page
-    .evaluate(() => {
-      window.scrollTo(0, document.documentElement.scrollHeight);
-      window.dispatchEvent(new Event("scroll"));
-    })
-    .catch(() => undefined);
-}
-
 /** One scroll round: to the bottom, then wait for the container to grow. True when it grew. */
-export async function scrollForMore(page: Page, anchorSelector: string, options: PaginateOptions = {}): Promise<boolean> {
+export async function scrollForMore(page: Page, anchorSelector: string): Promise<boolean> {
   const before = await readItems(page, anchorSelector);
-  const deadline = Date.now() + (options.growthTimeoutMs ?? SCROLL_GROWTH_TIMEOUT_MS);
+  const deadline = Date.now() + SCROLL_GROWTH_TIMEOUT_MS;
   await scrollToBottom(page);
   while (Date.now() < deadline) {
     await page.waitForTimeout(100);
     const now = await readItems(page, anchorSelector);
     if (now.count > before.count) {
-      await waitForSettle(page, { idleMs: 300, maxMs: 2_000, ...options.settle });
+      await waitForSettle(page, { idleMs: 300, maxMs: 2_000 });
       return true;
     }
     // some feeds only load once the bottom is reached after layout
@@ -78,38 +62,25 @@ export async function scrollForMore(page: Page, anchorSelector: string, options:
   return false;
 }
 
-async function resolveNextLink(page: Page, alternatives: readonly LocatorAlternative[]): Promise<Locator | null> {
-  for (const alt of alternatives) {
-    const locator = page.getByRole(alt.role as Role, { name: alt.name, exact: alt.exact }).first();
-    if ((await locator.count().catch(() => 0)) > 0 && (await locator.isVisible().catch(() => false))) return locator;
-  }
-  return null;
-}
-
 /**
  * Follows the compiled next link once. False when no alternative resolves,
  * the target is off the page's domain (R25), or the listing did not change.
  */
-export async function followNextLink(page: Page, scraper: CompiledScraper, options: PaginateOptions = {}): Promise<boolean> {
+export async function followNextLink(page: Page, scraper: CompiledScraper): Promise<boolean> {
   const alternatives = scraper.pagination.locator ?? [];
   const anchorSelector = scraper.item?.anchorSelector ?? "";
-  const locator = await resolveNextLink(page, alternatives);
+  const locator = await resolveLocator(page, alternatives, 0);
   if (!locator) return false;
   const href = await locator.getAttribute("href").catch(() => null);
   const urlBefore = page.url();
   if (href) {
-    let target: string;
-    try {
-      target = new URL(href, urlBefore).href;
-    } catch {
-      return false;
-    }
-    if (!isOnAllowedDomain(target, [urlBefore, scraper.entry.url], [])) return false;
+    const target = resolveUrl(href, urlBefore);
+    if (!target || !isOnAllowedDomain(target, [urlBefore, scraper.entry.url], [])) return false;
   }
   const before = await readItems(page, anchorSelector);
-  await locator.click({ timeout: options.nextLinkTimeoutMs ?? NEXT_LINK_TIMEOUT_MS }).catch(() => undefined);
+  await locator.click({ timeout: NEXT_LINK_TIMEOUT_MS }).catch(() => undefined);
 
-  const deadline = Date.now() + (options.nextLinkTimeoutMs ?? NEXT_LINK_TIMEOUT_MS);
+  const deadline = Date.now() + NEXT_LINK_TIMEOUT_MS;
   let changed = false;
   while (Date.now() < deadline) {
     if (page.url() !== urlBefore) {
@@ -124,7 +95,7 @@ export async function followNextLink(page: Page, scraper: CompiledScraper, optio
     await page.waitForTimeout(100);
   }
   if (!changed) return false;
-  await waitForSettle(page, { idleMs: 300, maxMs: 5_000, ...options.settle });
+  await waitForSettle(page, { idleMs: 300, maxMs: 5_000 });
   const after = await readItems(page, anchorSelector);
   // the last page of many sites links to itself: the same non-empty listing is no new page
   if (after.signature !== "" && after.signature === before.signature) return false;
@@ -132,17 +103,17 @@ export async function followNextLink(page: Page, scraper: CompiledScraper, optio
 }
 
 /** Moves a list scraper to its next page. Record scrapers and `none` never paginate. */
-export async function paginate(page: Page, scraper: CompiledScraper, pageIndex: number, options: PaginateOptions = {}): Promise<boolean> {
+export async function paginate(page: Page, scraper: CompiledScraper, pageIndex: number): Promise<boolean> {
   if (scraper.mode !== "list" || !scraper.item) return false;
   switch (scraper.pagination.mode) {
     case "none":
       return false;
     case "scroll":
       if (pageIndex > MAX_SCROLL_ROUNDS) return false;
-      return scrollForMore(page, scraper.item.anchorSelector, options);
+      return scrollForMore(page, scraper.item.anchorSelector);
     case "next_link":
-      return followNextLink(page, scraper, options);
+      return followNextLink(page, scraper);
   }
 }
 
-export const defaultPaginate: PaginateHook = (page, scraper, pageIndex) => paginate(page, scraper, pageIndex);
+export const defaultPaginate: PaginateHook = paginate;

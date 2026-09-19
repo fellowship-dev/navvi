@@ -1,6 +1,7 @@
 import type { GroupCandidate } from "../browser/snapshot.js";
 import type { Question } from "../chooser/chooser.js";
 import { premises } from "../chooser/questions.js";
+import { clip, normalize } from "../util/text.js";
 
 /**
  * Group choice (R7, R8, R10): the chooser picks which code-enumerated repeated
@@ -12,9 +13,6 @@ export const GROUP_QUESTION_ID = "group";
 export const RETRY_SUFFIX = ".retry";
 
 const SAMPLE_CHARS = 140;
-
-const clip = (s: string, max: number): string => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
-const normalize = (s: string): string => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 
 export function groupLabel(group: GroupCandidate): string {
   const shape = group.anchorPlusRows ? `, ${group.anchorPlusRows.span} rows each` : "";

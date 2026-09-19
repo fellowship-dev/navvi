@@ -1,9 +1,10 @@
 import type { Page } from "playwright";
 import { DEFAULT_CAPS, getCandidates, getControls, type LeafCandidate, type SnapshotControl } from "../browser/snapshot.js";
-import type { Answer, Chooser, Question } from "../chooser/chooser.js";
+import type { Question } from "../chooser/chooser.js";
 import { premises } from "../chooser/questions.js";
-import { candidateKey, candidateLabel, chunkQuestions, toAlternative, type FieldCandidate } from "../compile/index.js";
+import { askChunked, candidateKey, candidateLabel, toAlternative, type FieldCandidate } from "../compile/index.js";
 import { appendFieldAlternative, appendStepAlternative, markHealed, type CompiledScraper, type LocatorAlternative, type Shape, type TraceStep } from "../scraper/schema.js";
+import { clip, isRecord } from "../util/text.js";
 import type { HealContext, HealOutcome, HealerHook } from "./crawler.js";
 
 /**
@@ -44,10 +45,6 @@ export interface StepHealingEvent {
 }
 
 export type HealingEvent = FieldHealingEvent | StepHealingEvent;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
 
 export function isFieldHealingEvent(event: unknown): event is FieldHealingEvent {
   return isRecord(event) && event.kind === "field" && Array.isArray(event.fields) && typeof event.at === "string";
@@ -138,12 +135,7 @@ function fieldState(scraper: CompiledScraper, fields: readonly string[], url: st
   return lines.join("\n");
 }
 
-export interface HealerOptions {
-  /** Remember `none` answers per field and candidate set, so the same drifted shape is not asked twice in a run. Default true. */
-  rememberNone?: boolean | undefined;
-}
-
-async function healFields(ctx: HealContext, fields: readonly string[], memory: Set<string> | null): Promise<HealOutcome> {
+async function healFields(ctx: HealContext, fields: readonly string[], memory: Set<string>): Promise<HealOutcome> {
   const { page, scraper, chooser } = ctx;
   const url = page.url();
   const { leaves } = await getCandidates(page, candidateScope(scraper));
@@ -155,7 +147,7 @@ async function healFields(ctx: HealContext, fields: readonly string[], memory: S
     if (!field) continue;
     const known = new Set(field.alternatives.map((a) => candidateKey(a.selector, a.attr)));
     const candidates = leaves.filter((leaf) => !known.has(candidateKey(leaf.selector, leaf.attr))).map(leafToCandidate);
-    if (candidates.length === 0 || memory?.has(memoryKey(name, candidates))) continue;
+    if (candidates.length === 0 || memory.has(memoryKey(name, candidates))) continue;
     offered.set(name, candidates);
     const samples = field.alternatives[0]?.fingerprint.samples.slice(0, 2) ?? [];
     questions.push({ id: fieldHealQuestionId(name), kind: "choice", premise: premises.healField(name, samples), options: candidates.map(candidateLabel), state });
@@ -163,8 +155,7 @@ async function healFields(ctx: HealContext, fields: readonly string[], memory: S
   if (questions.length === 0) {
     return { healed: false, reason: `no new candidate for ${fields.join(", ")} on ${url}`, unmapped: unmappedFrom(leaves, scraper) };
   }
-  const answers: Answer[] = [];
-  for (const chunk of chunkQuestions(questions)) answers.push(...(await chooser.ask(chunk)));
+  const answers = await askChunked(chooser, questions);
   const byId = new Map(answers.map((a) => [a.id, a]));
   let healed = scraper;
   const fixed: string[] = [];
@@ -172,7 +163,7 @@ async function healFields(ctx: HealContext, fields: readonly string[], memory: S
     const answer = byId.get(fieldHealQuestionId(name));
     const chosen = answer && answer.index !== null ? candidates[answer.index] : undefined;
     if (!chosen) {
-      memory?.add(memoryKey(name, candidates));
+      memory.add(memoryKey(name, candidates));
       continue;
     }
     healed = appendFieldAlternative(healed, name, toAlternative(chosen, [url]));
@@ -202,7 +193,7 @@ export function fitsStep(step: TraceStep, control: SnapshotControl): boolean {
   }
 }
 
-const q = (s: string, max: number): string => JSON.stringify(s.length > max ? `${s.slice(0, max - 1)}…` : s);
+const q = (s: string, max: number): string => JSON.stringify(clip(s, max));
 
 export function controlLabel(control: SnapshotControl): string {
   const bits = [control.role, q(control.name, 60)];
@@ -241,15 +232,12 @@ async function healStep(ctx: HealContext, stepIndex: number, reason: string): Pr
 
 // ---------------------------------------------------------------- the hook
 
-/** A healer for one run: remembers `none` answers so the same drifted shape is asked once. */
-export function createHealer(options: HealerOptions = {}): HealerHook {
-  const memory = options.rememberNone === false ? null : new Set<string>();
+/** A healer for one run: remembers `none` answers per offered question (field and candidate set), so the same drifted shape is asked once. */
+export function createHealer(): HealerHook {
+  const memory = new Set<string>();
   return async (ctx) => {
     const { failure } = ctx;
     if (failure.kind === "fields") return healFields(ctx, failure.fields, memory);
     return healStep(ctx, failure.stepIndex, failure.reason);
   };
 }
-
-/** The stateless default: every drifted page is asked. */
-export const defaultHealer: HealerHook = createHealer({ rememberNone: false });
