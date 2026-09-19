@@ -1,4 +1,4 @@
-import type { Notifier } from "../prestep/human.js";
+import { streamNotifier, type Notifier } from "../prestep/human.js";
 
 /**
  * U17 / R41: where the CLI announces a human handoff or a parked run.
@@ -23,9 +23,7 @@ export class NotifyConfigurationError extends Error {
 }
 
 export function consoleNotifier(io: Pick<NotifierIo, "stderr">): Notifier {
-  return async (message) => {
-    io.stderr.write(`navvi: ${message}\n`);
-  };
+  return streamNotifier(io.stderr, "navvi: ");
 }
 
 /** Throws `NotifyConfigurationError` when either variable is missing. Never logs the token. */

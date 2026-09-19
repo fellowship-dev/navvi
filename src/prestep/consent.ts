@@ -119,9 +119,10 @@ function findConsentControl(args: { rules: ConsentRule[]; namePattern: string; m
 
   const candidates = Array.from(document.querySelectorAll("button, a[href], [role=button], input[type=button], input[type=submit]"));
   for (const el of candidates) {
-    if (!isVisible(el)) continue;
+    // Name first: an attribute/text read is far cheaper than the computed-style checks.
     const name = nameOf(el);
     if (!namePattern.test(name)) continue;
+    if (!isVisible(el)) continue;
     if (!inOverlay(el)) continue;
     el.setAttribute(args.mark, "1");
     return { role: roleOf(el), name, vendor: "generic" };

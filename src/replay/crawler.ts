@@ -1,3 +1,4 @@
+import { installSnapshot } from "../browser/snapshot.js";
 import { createHash, randomUUID } from "node:crypto";
 import { Actor } from "apify";
 import { PlaywrightCrawler, ProxyConfiguration, type Configuration, type Dataset, type KeyValueStore, type PlaywrightCrawlingContext } from "crawlee";
@@ -408,6 +409,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   const guardContext = async (context: BrowserContext): Promise<void> => {
     if (state.guardedContexts.has(context)) return;
     state.guardedContexts.add(context);
+    await installSnapshot(context);
     await context.route("**/*", (route) => {
       if (guard(route.request().url())) return route.continue();
       state.blockedRequests += 1;

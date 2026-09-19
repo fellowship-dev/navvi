@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import type { PlaywrightCrawlerOptions } from "crawlee";
 import { chromium, type Browser, type BrowserContext, type LaunchOptions } from "playwright";
 import type { BrowserName } from "../input/schema.js";
+import { installSnapshot } from "./snapshot.js";
 
 export interface LaunchSpec {
   browser: BrowserName;
@@ -49,20 +50,24 @@ export async function launch(spec: LaunchSpec): Promise<LaunchedBrowser> {
     const options = (await launchOptions({ headless: !spec.headed, proxy: spec.proxyUrl, geoip: false })) as LaunchOptions;
     if (dir) {
       const context = await firefox.launchPersistentContext(dir, options);
+      await installSnapshot(context);
       return { browser: "camoufox", context, userAgentFamily: "firefox", close: () => context.close() };
     }
     const raw = await firefox.launch(options);
     const context = await raw.newContext();
+    await installSnapshot(context);
     return { browser: "camoufox", context, raw, userAgentFamily: "firefox", close: () => raw.close() };
   }
 
   const options: LaunchOptions = { headless: !spec.headed, proxy };
   if (dir) {
     const context = await chromium.launchPersistentContext(dir, options);
+    await installSnapshot(context);
     return { browser: "chromium", context, userAgentFamily: "chromium", close: () => context.close() };
   }
   const raw = await chromium.launch(options);
   const context = await raw.newContext();
+  await installSnapshot(context);
   return { browser: "chromium", context, raw, userAgentFamily: "chromium", close: () => raw.close() };
 }
 

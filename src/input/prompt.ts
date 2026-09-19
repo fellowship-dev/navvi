@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { NavviError } from "../billing/budget.js";
 import { TEXT_INPUT_CAP, type Chooser, type Question } from "../chooser/chooser.js";
+import { premises } from "../chooser/questions.js";
+import { isRecord } from "../util/text.js";
+import { credentialMessage, findCredential } from "./credentials.js";
 import { MODES, PROFILES, parseInput, type RunInput } from "./schema.js";
 
 /**
@@ -9,7 +13,8 @@ import { MODES, PROFILES, parseInput, type RunInput } from "./schema.js";
  * before use, and merged under whatever the caller set explicitly.
  *
  * R27: a prompt, goal or description carrying a credential literal is refused
- * before any model call. URLs come from the input, never from the prompt.
+ * before any model call (the detector is ./credentials.ts; `InputSchema`
+ * applies it too). URLs come from the input, never from the prompt.
  */
 
 /** The structured output the text question must produce. */
@@ -31,57 +36,12 @@ export type StructuredFromPrompt = z.infer<typeof StructuredFromPromptSchema>;
 /** JSON target handed to the chooser (ModelChooser quotes it in the request). */
 export const STRUCTURED_JSON_SCHEMA: unknown = z.toJSONSchema(StructuredFromPromptSchema);
 
-export const premises = {
-  /** Parse a free prompt into the structured run input (KTD11, U16). `errors` come from a rejected first attempt. */
-  promptToInput: (errors: readonly string[] = []): string => {
-    const base = [
-      "Parse the prompt into the structured run input as JSON matching the schema. Use only what the prompt states; never invent URLs.",
-      'Schema: {"mode":"list"|"record","description":string,"fields":[{"name":string,"description"?:string}],"goal"?:string,"profile"?:"store"|"local","followDetailPages"?:boolean,"paginate"?:boolean,"secretsExpected"?:string[]}.',
-      "mode: list when the prompt wants many rows from listing pages, record when it wants the values of each given page.",
-      "description: one sentence naming the records. fields: the values to extract, in prompt order, each with a short description when the prompt gives one.",
-      "goal: only when the prompt asks to navigate, log in or act before extracting. profile: local when the goal needs an account or secrets, else omit.",
-      "followDetailPages: true when fields live on linked detail pages. paginate: false when the prompt says this page only.",
-      "secretsExpected: the secret names a login or form will need (e.g. username, password); names only, never values.",
-      "Answer with the JSON object only.",
-    ];
-    if (errors.length > 0) base.push(`The previous answer was rejected: ${errors.join("; ")}. Fix every listed problem.`);
-    return base.join(" ");
-  },
-} as const;
-
-type CredentialKind = "password" | "token" | "api key" | "user:pass pair" | "token-looking string";
-
-const CREDENTIAL_LITERALS: ReadonlyArray<readonly [CredentialKind, RegExp]> = [
-  ["password", /(?<!\{\{)\b(password|contraseña|contrasena|passwd|pwd|clave)\s*[:=]\s*(?!\{\{secret:)\S+/iu],
-  ["api key", /(?<!\{\{)\b(api[ _-]?key)\s*[:=]\s*(?!\{\{secret:)\S+/iu],
-  ["token", /(?<!\{\{)\b(token|secret)\s*[:=]\s*(?!\{\{secret:)\S+/iu],
-  ["user:pass pair", /(?<![\w.:/-])[^\s:@/]+:[^\s:@/]+@[^\s@]+/u],
-  ["token-looking string", /\b(sk|ghp|gho|xox[abps]|vck|AKIA|pk|rk)[-_][A-Za-z0-9_-]{8,}\b/u],
-  ["token-looking string", /\b(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{20,}\b/u],
-];
-
-const URL_PATTERN = /https?:\/\/\S+/giu;
-
-/** R27: the kind of credential literal `text` carries, or null when it carries none. */
-export function looksLikeCredential(text: string): string | null {
-  const withoutUrls = text.replace(URL_PATTERN, " ");
-  for (const [kind, pattern] of CREDENTIAL_LITERALS) {
-    if (pattern.test(withoutUrls)) return kind;
-  }
-  return null;
-}
-
 /** R27: refused before any model call; the run status is `blocked_login_required`. */
-export class CredentialInPromptError extends Error {
-  readonly status = "blocked_login_required" as const;
+export class CredentialInPromptError extends NavviError {
   readonly kind: string;
   readonly where: string;
   constructor(kind: string, where: string) {
-    super(
-      `the ${where} carries a ${kind}; never put credentials in the prompt, goal or description. ` +
-        `Reference them as {{secret:name}} placeholders and pass the values in the secrets input with profile: local.`,
-    );
-    this.name = "CredentialInPromptError";
+    super("blocked_login_required", credentialMessage(kind, where));
     this.kind = kind;
     this.where = where;
   }
@@ -136,10 +96,6 @@ export function normalizeFieldName(name: string): string {
   return /^\d/.test(cleaned) ? `_${cleaned}` : cleaned;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /** Normalize model-provided field names before validation, keeping the original text as description. */
 function normalizeFields(raw: unknown): unknown {
   if (!isRecord(raw) || !Array.isArray(raw.fields)) return raw;
@@ -190,15 +146,8 @@ export interface PromptToInputResult {
  * validation errors appended to the premise, then fails with `PromptParseError`.
  */
 export async function promptToInput(prompt: string, base: Partial<RunInput>, chooser: Chooser): Promise<PromptToInputResult> {
-  for (const [where, text] of [
-    ["prompt", prompt],
-    ["goal", base.goal],
-    ["description", base.description],
-  ] as const) {
-    if (!text) continue;
-    const kind = looksLikeCredential(text);
-    if (kind) throw new CredentialInPromptError(kind, where);
-  }
+  const credential = findCredential({ prompt, goal: base.goal, description: base.description });
+  if (credential) throw new CredentialInPromptError(credential.kind, credential.where);
 
   let problems: string[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {

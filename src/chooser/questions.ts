@@ -7,40 +7,29 @@
 export const NONE_OPTION = "none";
 
 export const premises = {
-  /** Compile: which repeated group holds the records, for `field`. */
-  groupChoice: (field: string): string =>
-    `Which candidate group contains one record per row with the ${field} value? Pick none when no candidate does.`,
-
   /** Compile: which candidate selector yields the field's value across the samples. */
   fieldChoice: (field: string, description?: string): string =>
     `Which candidate holds the ${field}${description ? ` (${description})` : ""} value on every sample? Pick none when no candidate is right on all samples.`,
-
-  /** Compile: quality of a candidate's values across the samples, lowest level first. */
-  fieldQuality: (field: string): string => `How well do the sampled values match the ${field} field?`,
 
   /** List mode: which link or control leads to the next listing page. */
   nextLinkChoice: (): string =>
     "Which control leads to the next page of the same listing? Pick none when this is the last page or no control does.",
 
-  /** Navigation: which operation moves toward the goal from this page. */
-  navigationOperation: (goal: string): string =>
-    `Given the goal "${goal}", which operation is the next step from this page? Pick none when the goal is reached or no operation helps.`,
-
-  /** Navigation: which control the chosen operation applies to. */
-  navigationTarget: (operation: string, goal: string): string =>
-    `Which control should the ${operation} step use to move toward "${goal}"? Pick none when no control fits.`,
-
-  /** Pre-step: whether a visible prompt is a consent or cookie banner that may be dismissed. */
-  consentBoolean: (): string => "Is the visible prompt a consent or cookie banner that can be dismissed without signing in or paying?",
-
-  /** Healing: whether the page still shows the record the selector used to match. */
-  driftBoolean: (field: string): string => `Does this page still show a ${field} value that the compiled scraper should extract?`,
-
-  /** Text helper: typed text for a form control during navigation (KTD11). */
-  textHelper: (what: string): string => `Write the ${what} to type into the control. Answer with the text only.`,
-
-  /** Text helper: parse a free prompt into the structured input (KTD11, U16). */
-  promptParse: (): string => "Parse the prompt into the structured run input as JSON matching the schema. Use only what the prompt states.",
+  /** Prompt parsing (KTD11, U16): a free prompt into the structured run input. `errors` come from a rejected first attempt. */
+  promptToInput: (errors: readonly string[] = []): string => {
+    const base = [
+      "Parse the prompt into the structured run input as JSON matching the schema. Use only what the prompt states; never invent URLs.",
+      'Schema: {"mode":"list"|"record","description":string,"fields":[{"name":string,"description"?:string}],"goal"?:string,"profile"?:"store"|"local","followDetailPages"?:boolean,"paginate"?:boolean,"secretsExpected"?:string[]}.',
+      "mode: list when the prompt wants many rows from listing pages, record when it wants the values of each given page.",
+      "description: one sentence naming the records. fields: the values to extract, in prompt order, each with a short description when the prompt gives one.",
+      "goal: only when the prompt asks to navigate, log in or act before extracting. profile: local when the goal needs an account or secrets, else omit.",
+      "followDetailPages: true when fields live on linked detail pages. paginate: false when the prompt says this page only.",
+      "secretsExpected: the secret names a login or form will need (e.g. username, password); names only, never values.",
+      "Answer with the JSON object only.",
+    ];
+    if (errors.length > 0) base.push(`The previous answer was rejected: ${errors.join("; ")}. Fix every listed problem.`);
+    return base.join(" ");
+  },
 
   /** Compile, list mode: which repeated group holds one record per item for the described records and fields. */
   listGroupChoice: (description: string, fields: readonly string[]): string =>

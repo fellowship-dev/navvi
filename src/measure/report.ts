@@ -26,13 +26,16 @@ export interface MeasurementRow {
   totalMs: number;
   /** Cost at list price. */
   costUsd: number;
-  /** correct / expected cells, 0 when nothing was expected. */
-  fieldsCorrect: number;
   cells: { correct: number; expected: number };
   healingEvents: number;
   status: MeasurementStatus;
   /** Why the row was skipped (no key, no network, recorded-only chooser). */
   skipped?: string;
+}
+
+/** R44: correct over expected cells, 0 when nothing was expected. */
+export function fieldsCorrect(row: Pick<MeasurementRow, "cells">): number {
+  return row.cells.expected === 0 ? 0 : row.cells.correct / row.cells.expected;
 }
 
 export const TABLE_COLUMNS = ["chooser", "scenario", "questions", "input tokens", "chooser wait (ms)", "total wall (ms)", "cost (USD)", "fields correct", "healing events", "status"] as const;
@@ -136,7 +139,6 @@ export function readMeasurements(md: string): MeasurementRow[] {
       chooserWaitMs: Number(pick("chooser wait (ms)")),
       totalMs: Number(pick("total wall (ms)")),
       costUsd: Number(pick("cost (USD)")),
-      fieldsCorrect: fraction.expected === 0 ? 0 : fraction.correct / fraction.expected,
       cells: fraction,
       healingEvents: Number(pick("healing events")),
       status,

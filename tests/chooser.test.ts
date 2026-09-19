@@ -27,12 +27,19 @@ import { JevChooser, JEV_MAX_STATE_TOKENS, JEV_PRICE_PER_MILLION_INPUT_USD, Type
 import { ModelChooser, DEFAULT_MODEL_ID, DEFAULT_MODEL_STATE_CHARS, MODEL_PRICES } from "../src/chooser/model.js";
 import { RecordedChooser, RecordingChooser } from "../src/chooser/recorded.js";
 import { createChooser } from "../src/chooser/index.js";
-import { premises } from "../src/chooser/questions.js";
-import { Budget, BudgetExhaustedError, ModelUnavailableError, NeedsHumanError } from "../src/billing/budget.js";
+import { Budget, BudgetExhaustedError, ModelUnavailableError, NavviError, NeedsHumanError } from "../src/billing/budget.js";
 
 const SCRATCH = process.env.CLAUDE_SCRATCHPAD ?? tmpdir();
 const RECORDED_DIR = join(process.cwd(), "tests", "recorded");
 const STATE = "<ul><li class=p>Paracetamol 500mg $1.990</li><li class=p>Ibuprofeno 400mg $2.490</li></ul>";
+
+/** Sample premises for the fixture questions; the run's real wording lives in src/chooser/questions.ts. */
+const SAMPLE_PREMISE = {
+  groupChoice: (field: string): string => `Which candidate group contains one record per row with the ${field} value? Pick none when no candidate does.`,
+  consentBoolean: (): string => "Is the visible prompt a consent or cookie banner that can be dismissed without signing in or paying?",
+  fieldQuality: (field: string): string => `How well do the sampled values match the ${field} field?`,
+  textHelper: (what: string): string => `Write the ${what} to type into the control. Answer with the text only.`,
+};
 
 function fixture(id: string): Answer & { inputTokens: number; outputTokens: number } {
   return JSON.parse(readFileSync(join(RECORDED_DIR, "pharmacy", `${id}.json`), "utf8")) as Answer & {
@@ -43,9 +50,9 @@ function fixture(id: string): Answer & { inputTokens: number; outputTokens: numb
 
 function batch(): Question[] {
   return [
-    { id: "group", kind: "choice", premise: premises.groupChoice("price"), options: ["li.x", "li.p", "div.q"], state: STATE },
-    { id: "visible", kind: "boolean", premise: premises.consentBoolean(), state: STATE },
-    { id: "quality", kind: "score", premise: premises.fieldQuality("price"), options: ["wrong", "partial", "right"], state: STATE },
+    { id: "group", kind: "choice", premise: SAMPLE_PREMISE.groupChoice("price"), options: ["li.x", "li.p", "div.q"], state: STATE },
+    { id: "visible", kind: "boolean", premise: SAMPLE_PREMISE.consentBoolean(), state: STATE },
+    { id: "quality", kind: "score", premise: SAMPLE_PREMISE.fieldQuality("price"), options: ["wrong", "partial", "right"], state: STATE },
   ];
 }
 
@@ -158,7 +165,7 @@ afterEach(() => {
 
 describe("validation (R37)", () => {
   it("accepts in-range indices, none, booleans, scores and text", () => {
-    const qs: Question[] = [...batch(), { id: "title", kind: "text", premise: premises.textHelper("store name"), state: STATE, maxLength: 50 }];
+    const qs: Question[] = [...batch(), { id: "title", kind: "text", premise: SAMPLE_PREMISE.textHelper("store name"), state: STATE, maxLength: 50 }];
     const result = validateAnswers(qs, [
       { id: "group", index: 1 },
       { id: "visible", index: 1, probability: 0.9 },
@@ -244,7 +251,7 @@ describe("BaseChooser retry, budget and usage", () => {
       (b) => ({ answers: b.map((q) => ({ id: q.id, index: null, text: "Cruz Verde" })) }),
       (b) => ({ answers: b.map((q) => ({ id: q.id, index: null, text: "Cruz Verde" })) }),
     ], { budget });
-    const q: Question = { id: "title", kind: "text", premise: premises.textHelper("store name"), state: STATE, maxLength: 100 };
+    const q: Question = { id: "title", kind: "text", premise: SAMPLE_PREMISE.textHelper("store name"), state: STATE, maxLength: 100 };
     const [a] = await chooser.ask([q]);
     expect(a?.text).toBe("Cruz Verde");
     expect(chooser.usage().textQuestions).toBe(1);
@@ -255,17 +262,19 @@ describe("BaseChooser retry, budget and usage", () => {
 });
 
 describe("Budget (R28)", () => {
-  it("raises on the sixth healing event", () => {
-    const budget = new Budget();
-    for (let i = 0; i < LIMITS.healingEvents; i++) budget.chargeHealingEvent();
-    expect(() => budget.chargeHealingEvent()).toThrow(BudgetExhaustedError);
+  it("raises on the call past the text helper limit with status budget_exhausted", () => {
+    const budget = new Budget({ textHelperCalls: 2 });
+    budget.chargeTextCall();
+    budget.chargeTextCall();
+    expect(() => budget.chargeTextCall()).toThrow(BudgetExhaustedError);
     try {
-      budget.chargeHealingEvent();
+      budget.chargeTextCall();
     } catch (e) {
+      expect(e).toBeInstanceOf(NavviError);
       expect((e as BudgetExhaustedError).status).toBe("budget_exhausted");
-      expect((e as BudgetExhaustedError).resource).toBe("healingEvents");
+      expect((e as BudgetExhaustedError).resource).toBe("textHelperCalls");
+      expect((e as BudgetExhaustedError).limit).toBe(2);
     }
-    expect(budget.snapshot().healingEvents).toBe(LIMITS.healingEvents);
   });
 });
 
@@ -307,7 +316,7 @@ describe("agent chooser (R45, KTD17)", () => {
       answers: b.questions.map((q) => (q.kind === "text" ? { id: q.id, index: null, text: "Cruz Verde" } : { id: q.id, index: q.kind === "score" ? 2 : 1 })),
     }));
     const chooser = new AgentChooser({ stdin, stdout, questionsDir: join(tmp, "questions"), timeoutMs: 5_000, env: {} });
-    const qs: Question[] = [...batch(), { id: "title", kind: "text", premise: premises.textHelper("store name"), state: STATE, maxLength: 40 }];
+    const qs: Question[] = [...batch(), { id: "title", kind: "text", premise: SAMPLE_PREMISE.textHelper("store name"), state: STATE, maxLength: 40 }];
     const answers = await chooser.ask(qs);
     expect(answers.map((a) => a.index)).toEqual([1, 1, 2, null]);
     expect(answers[3]?.text).toBe("Cruz Verde");
@@ -332,6 +341,23 @@ describe("agent chooser (R45, KTD17)", () => {
     expect((err as NeedsHumanError).status).toBe("needs_human");
   });
 
+  it("answers that arrived over stdio ride along in a later park's answered list", async () => {
+    let batches = 0;
+    const { stdin, stdout } = scripted((b) => {
+      // The first batch is answered; on the second the answering process goes away.
+      if (batches++ > 0) return stdin.end();
+      return { answers: b.questions.map((q) => ({ id: q.id, index: q.kind === "score" ? 2 : 1 })) };
+    });
+    const dir = join(tmp, "questions-carry");
+    const chooser = new AgentChooser({ stdin, stdout, questionsDir: dir, timeoutMs: 5_000, env: {} });
+    expect((await chooser.ask(batch())).map((a) => a.index)).toEqual([1, 1, 2]);
+    const err = await chooser.ask([{ id: "next", kind: "choice", premise: SAMPLE_PREMISE.groupChoice("stock"), options: ["a", "b"], state: STATE }]).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(NeedsHumanError);
+    const parked = JSON.parse(readFileSync(join(dir, `${(err as NeedsHumanError).token}.json`), "utf8")) as { questions: Question[]; answered: Answer[] };
+    expect(parked.questions.map((q) => q.id)).toEqual(["next"]);
+    expect(parked.answered.map((a) => [a.id, a.index])).toEqual([["group", 1], ["visible", 1], ["quality", 2]]);
+  });
+
   it("with a closed non-pipe stdin writes storage/questions/<token>.json and throws needs_human with the token", async () => {
     const dir = join(tmp, "storage", "questions");
     const chooser = new AgentChooser({ stdin: null, stdout: new PassThrough(), questionsDir: dir, env: {} });
@@ -349,7 +375,7 @@ describe("agent chooser (R45, KTD17)", () => {
     // resume: --answers <file> --resume <token>
     const answersPath = join(tmp, "answers.json");
     writeFileSync(answersPath, JSON.stringify({ answers: [{ id: "group", index: 1 }, { id: "visible", index: 0 }, { id: "quality", index: 2 }] }));
-    const resumed = new AgentChooser({ stdin: null, stdout: new PassThrough(), questionsDir: dir, answers: loadAnswersFile(answersPath), resumeToken: token, env: {} });
+    const resumed = new AgentChooser({ stdin: null, stdout: new PassThrough(), questionsDir: dir, answers: loadAnswersFile(answersPath), env: {} });
     const answers = await resumed.ask(batch());
     expect(answers.map((a) => a.index)).toEqual([1, 0, 2]);
   });
@@ -502,7 +528,7 @@ describe("model chooser (KTD2, KTD11)", () => {
   it("answers choice, boolean, score and text through generateObject with usage and cost", async () => {
     const lm = languageMock(JSON.stringify({ answers: [{ id: "group", index: 1 }, { id: "visible", index: 1 }, { id: "quality", index: 2 }, { id: "title", index: null, text: "Cruz Verde" }] }));
     const chooser = new ModelChooser({ model: lm.model });
-    const qs: Question[] = [...batch(), { id: "title", kind: "text", premise: premises.textHelper("store name"), state: STATE, maxLength: 40 }];
+    const qs: Question[] = [...batch(), { id: "title", kind: "text", premise: SAMPLE_PREMISE.textHelper("store name"), state: STATE, maxLength: 40 }];
     const answers = await chooser.ask(qs);
     expect(answers.map((a) => a.index)).toEqual([1, 1, 2, null]);
     expect(answers[3]?.text).toBe("Cruz Verde");

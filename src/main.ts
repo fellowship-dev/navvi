@@ -1,8 +1,11 @@
 import { Actor } from "apify";
 import { ZodError } from "zod";
 import { parseInput, defaultChooser, defaultBrowser, type RunInput } from "./input/schema.js";
-import { NeedsHumanError } from "./billing/budget.js";
+import { promptToInput } from "./input/prompt.js";
+import { NavviError, NeedsHumanError } from "./billing/budget.js";
+import { createChooser } from "./chooser/index.js";
 import { runCrawl, type CrawlDeps } from "./replay/crawler.js";
+import { MASK } from "./secrets/resolve.js";
 
 import type { Status } from "./scraper/schema.js";
 import type { HealingEvent, UnmappedCandidate } from "./replay/heal.js";
@@ -39,45 +42,68 @@ export function formatValidationError(error: ZodError): string {
   return error.issues.map((i) => `${i.path.join(".") || "input"}: ${i.message}`).join("\n");
 }
 
-/** Run entry: validates the input, applies the defaults and runs the crawler. `deps` is for tests and the CLI. */
-export async function run(raw: unknown, deps?: CrawlDeps): Promise<RunSummary> {
+/** The input failed validation; `message` lists every issue, one per line. The CLI maps it to exit code 2. */
+export class InvalidInputError extends NavviError {
+  readonly issues: ZodError["issues"];
+  constructor(error: ZodError) {
+    super("configuration_error", `invalid input\n${formatValidationError(error)}`, { cause: error });
+    this.issues = error.issues;
+  }
+}
+
+/** The summary of a run that ended `status` before the crawler produced one; secret values are masked (R39). */
+export function summaryFor(status: Status, input: RunInput | null, message: string): RunSummary {
+  return {
+    status,
+    items: 0,
+    pages: 0,
+    templates: 0,
+    cacheHit: false,
+    healingEvents: [],
+    unmappedCandidates: [],
+    fieldsNotFound: [],
+    chooser: null,
+    input: input && { ...input, secrets: Object.fromEntries(Object.keys(input.secrets).map((name) => [name, MASK])) },
+    requests: { compile: 0, list: 0, record: 0 },
+    traceReplays: 0,
+    blockedRequests: 0,
+    unhealed: 0,
+    message,
+  };
+}
+
+/**
+ * Run entry: validates the input, applies the defaults, parses a prompt-only
+ * input through the run's chooser (KTD11) and runs the crawler. `deps` is for
+ * tests and the CLI; the chooser built here is the one the crawler uses.
+ */
+export async function run(raw: unknown, deps: CrawlDeps = {}): Promise<RunSummary> {
   let input: RunInput;
   try {
     input = parseInput(raw);
   } catch (error) {
-    if (error instanceof ZodError) {
-      throw new Error(`invalid input\n${formatValidationError(error)}`);
-    }
+    if (error instanceof ZodError) throw new InvalidInputError(error);
     throw error;
   }
-  input.chooser ??= defaultChooser();
-  input.browser ??= defaultBrowser();
+  const env = deps.env ?? process.env;
+  const chooserId = input.chooser ?? defaultChooser(env);
+  const chooser = deps.chooser ?? createChooser({ chooser: chooserId, env });
 
-  try {
-    return await runCrawl(input, deps);
-  } catch (error) {
-    if (error instanceof NeedsHumanError) {
-      return {
-        status: "needs_human",
-        items: 0,
-        pages: 0,
-        templates: 0,
-        cacheHit: false,
-        healingEvents: [],
-        unmappedCandidates: [],
-        fieldsNotFound: [],
-        chooser: null,
-        input,
-        requests: { compile: 0, list: 0, record: 0 },
-        traceReplays: 0,
-        blockedRequests: 0,
-        unhealed: 0,
-        message: error.message,
-        needsHuman: { token: error.token, questionsFile: error.questionsFile },
-      };
+  if (input.prompt && (!input.mode || !input.fields?.length)) {
+    // The validated raw input (not the defaulted one) is the base, so the prompt may still set profile, pagination and detail pages.
+    // A parked question batch (needs_human) here is thrown outside any crawler request handler.
+    try {
+      input = (await promptToInput(input.prompt, raw as Partial<RunInput>, chooser)).input;
+    } catch (error) {
+      if (error instanceof NeedsHumanError) {
+        return { ...summaryFor("needs_human", input, error.message), needsHuman: { token: error.token, questionsFile: error.questionsFile } };
+      }
+      throw error;
     }
-    throw error;
   }
+  input.chooser ??= chooserId;
+  input.browser ??= defaultBrowser(env);
+  return runCrawl(input, { ...deps, chooser });
 }
 
 async function main() {

@@ -5,17 +5,16 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Actor } from "apify";
 import { LogLevel, MemoryStorage, log as crawleeLog } from "crawlee";
-import { ZodError } from "zod";
+import type { RunStatus } from "../src/billing/budget.js";
 import { parseArgs, usage, type CliArgs } from "../src/cli/args.js";
 import { NotifyConfigurationError, createNotifier } from "../src/cli/notify.js";
 import { formatRows, type OutputFormat, type Row } from "../src/cli/output.js";
-import { createChooser, loadAnswersFile, missingCredentialsMessage, NavviError, NeedsHumanError, type Answer, type Chooser } from "../src/chooser/index.js";
-import { promptToInput } from "../src/input/prompt.js";
-import { defaultBrowser, defaultChooser, parseInput, type RunInput } from "../src/input/schema.js";
-import { formatValidationError, run as runNavvi, type RunSummary } from "../src/main.js";
+import { createChooser, loadAnswersFile, missingCredentialsMessage, NavviError, NeedsHumanError, readQuestionsFile, type Answer, type Chooser } from "../src/chooser/index.js";
+import { defaultBrowser, defaultChooser } from "../src/input/schema.js";
+import { run as runNavvi, type RunSummary } from "../src/main.js";
 import type { Notifier } from "../src/prestep/human.js";
 import type { CrawlActor, CrawlDeps } from "../src/replay/crawler.js";
-import type { Status } from "../src/scraper/schema.js";
+import { secretEnvName } from "../src/secrets/resolve.js";
 
 /**
  * U17 / R35: `npx navvi "<prompt>" <url...>`. Runnable by an agent without
@@ -43,8 +42,6 @@ export interface CliIo {
 
 export const EXIT = { ok: 0, short: 1, configuration: 2, needsHuman: 3, budget: 4 } as const;
 
-const SECRET_ENV_PREFIX = "NAVVI_SECRET_";
-
 class CliError extends Error {
   constructor(
     message: string,
@@ -55,10 +52,12 @@ class CliError extends Error {
   }
 }
 
-export function exitCodeFor(status: Status): number {
+export function exitCodeFor(status: RunStatus): number {
   switch (status) {
     case "succeeded":
       return EXIT.ok;
+    case "configuration_error":
+      return EXIT.configuration;
     case "needs_human":
       return EXIT.needsHuman;
     case "budget_exhausted":
@@ -72,11 +71,6 @@ export function exitCodeFor(status: Status): number {
     case "blocked_no_progress":
       return EXIT.short;
   }
-}
-
-/** `NAVVI_SECRET_<NAME>`: upper case, anything but [A-Z0-9] becomes an underscore. */
-export function secretEnvName(name: string): string {
-  return `${SECRET_ENV_PREFIX}${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
 }
 
 export function packageVersion(): string {
@@ -162,8 +156,10 @@ function defaultSecretPrompt(io: CliIo): (name: string) => Promise<string | null
 
 // ---------------------------------------------------------------- input
 
-function baseInput(args: CliArgs, secrets: Record<string, string>): Record<string, unknown> {
+/** The raw run input: run() validates it and parses a prompt-only input through the chooser (KTD11). */
+function rawInput(args: CliArgs, io: CliIo, secrets: Record<string, string>): Record<string, unknown> {
   const hasSecrets = Object.keys(secrets).length > 0;
+  const structured = Boolean(args.mode && args.fields && args.fields.length > 0);
   const base: Record<string, unknown> = {
     startUrls: [...args.fromUrls, ...args.urls],
     allowedDomains: args.allowDomains,
@@ -173,7 +169,12 @@ function baseInput(args: CliArgs, secrets: Record<string, string>): Record<strin
     headed: args.headed,
     forceRecompile: args.forceRecompile,
     secrets,
+    chooser: args.chooser ?? defaultChooser(io.env),
+    browser: args.browser ?? defaultBrowser(io.env),
   };
+  if (args.prompt) base.prompt = args.prompt;
+  // With --mode and --fields the prompt is not parsed; it still names the records for the compile questions.
+  if (args.prompt && structured) base.description = args.prompt;
   if (args.mode) base.mode = args.mode;
   if (args.fields) base.fields = args.fields.map((name) => ({ name }));
   if (args.goal) base.goal = args.goal;
@@ -181,18 +182,10 @@ function baseInput(args: CliArgs, secrets: Record<string, string>): Record<strin
   if (args.maxItems !== undefined) base.maxItems = args.maxItems;
   if (args.followDetails) base.followDetailPages = true;
   if (args.detailFields) base.detailFields = args.detailFields.map((name) => ({ name }));
-  if (args.browser) base.browser = args.browser;
   const profile = args.profile ?? (hasSecrets ? "local" : undefined);
   if (profile) base.profile = profile;
   if (args.scriptId) base.scriptId = args.scriptId;
-  if (args.chooser) base.chooser = args.chooser;
   return base;
-}
-
-function validationError(error: unknown): CliError | null {
-  if (error instanceof ZodError) return new CliError(`invalid input\n${formatValidationError(error)}`);
-  if (error instanceof Error && error.message.startsWith("invalid input")) return new CliError(error.message);
-  return null;
 }
 
 // ---------------------------------------------------------------- storage
@@ -302,17 +295,7 @@ export async function main(argv: readonly string[], io: CliIo): Promise<number> 
     }
     if (error instanceof NavviError) {
       io.stderr.write(`navvi: ${error.status}: ${error.message}\n`);
-      return error.status === "configuration_error" ? EXIT.configuration : exitCodeFor(error.status as Status);
-    }
-    const asValidation = validationError(error);
-    if (asValidation) {
-      io.stderr.write(`navvi: ${asValidation.message}\n`);
-      return asValidation.code;
-    }
-    const withStatus = error as { status?: unknown };
-    if (typeof withStatus.status === "string" && withStatus.status !== "succeeded") {
-      io.stderr.write(`navvi: ${withStatus.status}: ${error instanceof Error ? error.message : String(error)}\n`);
-      return exitCodeFor(withStatus.status as Status);
+      return exitCodeFor(error.status);
     }
     io.stderr.write(`navvi: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
     return EXIT.short;
@@ -342,7 +325,7 @@ function chooserFor(args: CliArgs, io: CliIo, storageDir: string): Chooser {
     if (!existsSync(file)) throw new CliError(`--resume ${args.resume}: no parked questions at ${file}`);
     if (!answers) throw new CliError(`--resume ${args.resume} needs --answers <file>`);
     // Answers from earlier parks ride along in the parked file; the new file wins on conflicts.
-    const parked = JSON.parse(readFileSync(file, "utf8")) as { answered?: Answer[] };
+    const parked = readQuestionsFile(args.resume, questionsDir);
     const merged = new Map<string, Answer>((parked.answered ?? []).map((a) => [a.id, a]));
     for (const a of answers) merged.set(a.id, a);
     answers = [...merged.values()];
@@ -356,7 +339,6 @@ function chooserFor(args: CliArgs, io: CliIo, storageDir: string): Chooser {
       questionsDir,
       ...(args.agentMode ? { mode: args.agentMode } : {}),
       ...(answers ? { answers } : {}),
-      ...(args.resume ? { resumeToken: args.resume } : {}),
     },
   });
 }
@@ -372,28 +354,8 @@ async function execute(args: CliArgs, io: CliIo): Promise<number> {
   }
   const secrets = await collectSecrets(args, io);
   const chooser = chooserFor(args, io, storageDir);
-  const base = baseInput(args, secrets);
-
-  let input: RunInput;
-  if (args.mode && args.fields && args.fields.length > 0) {
-    try {
-      input = parseInput({ ...base, ...(args.prompt ? { prompt: args.prompt, description: args.prompt } : {}) });
-    } catch (error) {
-      throw validationError(error) ?? error;
-    }
-  } else {
-    if (!args.prompt) throw new CliError("give a prompt, or both --mode and --fields.");
-    // KTD11: run() takes structured input only; prompt-only input is parsed here through one text question.
-    let parsedBase: Partial<RunInput>;
-    try {
-      parsedBase = base as Partial<RunInput>;
-      input = (await promptToInput(args.prompt, parsedBase, chooser)).input;
-    } catch (error) {
-      throw validationError(error) ?? error;
-    }
-  }
-  input.chooser ??= args.chooser ?? defaultChooser(io.env);
-  input.browser ??= defaultBrowser(io.env);
+  if (!args.prompt && !(args.mode && args.fields && args.fields.length > 0)) throw new CliError("give a prompt, or both --mode and --fields.");
+  const input = rawInput(args, io, secrets);
 
   const storage = await openStorage(storageDir);
   const deps: CrawlDeps = { chooser, actor: storage.actor, notify, attended: args.headed, storageDir, env: io.env };

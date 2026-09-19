@@ -1,6 +1,8 @@
 import { APICallError } from "@ai-sdk/provider";
 import { type Chooser as ChooserId } from "../input/schema.js";
 import { Budget, ModelUnavailableError, NavviError, NeedsHumanError } from "../billing/budget.js";
+import { maskSecrets } from "../secrets/resolve.js";
+import { isRecord, sleep } from "../util/text.js";
 
 /**
  * R37 / KTD2: one chooser interface. Every choice is a question over
@@ -116,10 +118,6 @@ export interface ValidationResult {
   invalid: InvalidAnswer[];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function isIndex(value: unknown, max: number): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && value < max;
 }
@@ -215,12 +213,12 @@ const REDACTION_PATTERNS: RegExp[] = [
   /\bvck_[A-Za-z0-9_-]{4,}/g,
 ];
 
+const REDACTED = "[redacted]";
+
+/** Secret values first (API keys, the state), then anything shaped like a credential. */
 function redact(text: string, secrets: readonly string[]): string {
-  let out = text;
-  for (const secret of secrets) {
-    if (secret.length >= 4) out = out.split(secret).join("[redacted]");
-  }
-  for (const pattern of REDACTION_PATTERNS) out = out.replace(pattern, "[redacted]");
+  let out = maskSecrets(text, secrets.map((value, i) => [String(i), value] as const), () => REDACTED);
+  for (const pattern of REDACTION_PATTERNS) out = out.replace(pattern, REDACTED);
   return out;
 }
 
@@ -276,10 +274,6 @@ export interface BaseChooserOptions {
 }
 
 const DEFAULT_BACKOFF_MS = [500, 2_000];
-
-function sleep(ms: number): Promise<void> {
-  return ms <= 0 ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 /**
  * Shared behaviour of every backend: question checks, budget, one validation

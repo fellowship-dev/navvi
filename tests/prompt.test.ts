@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { TEXT_INPUT_CAP, questionChars, type Answer, type Chooser, type ChooserUsage, type Question } from "../src/chooser/chooser.js";
 import { RecordedChooser } from "../src/chooser/recorded.js";
-import { CredentialInPromptError, PromptParseError, buildPromptQuestion, looksLikeCredential, promptQuestionId, promptToInput } from "../src/input/prompt.js";
+import { NavviError } from "../src/billing/budget.js";
+import { looksLikeCredential } from "../src/input/credentials.js";
+import { CredentialInPromptError, PromptParseError, buildPromptQuestion, promptQuestionId, promptToInput } from "../src/input/prompt.js";
+import { InputSchema } from "../src/input/schema.js";
 
 const URLS = ["https://www.example-pharmacy.cl/producto/paracetamol-500", "https://www.example-pharmacy.cl/producto/ibuprofeno-400"];
 
@@ -56,6 +59,22 @@ describe("looksLikeCredential (R27)", () => {
     expect(looksLikeCredential("open https://example.com/products/abcdefghij1234567890xyz first")).toBeNull();
     expect(looksLikeCredential("fill the password field, then the username field")).toBeNull();
   });
+
+  it("the input schema refuses a credential in the prompt, goal or description with an issue naming {{secret:name}}", () => {
+    const base = { startUrls: [URLS[0]!], mode: "record", fields: [{ name: "order" }] };
+    for (const [where, text] of [
+      ["prompt", "Log in with password: hunter2 and export my orders"],
+      ["goal", "sign in with token: abc123"],
+      ["description", "orders for max:hunter2@example.com"],
+    ] as const) {
+      const result = InputSchema.safeParse({ ...base, [where]: text });
+      expect(result.success, where).toBe(false);
+      const issue = result.success ? undefined : result.error.issues.find((i) => i.path.join(".") === where);
+      expect(issue?.message, where).toMatch(new RegExp(`the ${where} carries a`));
+      expect(issue?.message, where).toContain("{{secret:name}}");
+    }
+    expect(InputSchema.safeParse({ ...base, prompt: "Log in with my account and export my orders", goal: "type {{secret:password}} then open orders" }).success).toBe(true);
+  });
 });
 
 describe("promptToInput (R1, KTD11)", () => {
@@ -97,6 +116,7 @@ describe("promptToInput (R1, KTD11)", () => {
     const chooser = new FakeChooser([VALID]);
     const run = promptToInput("Log in with password: hunter2 and export my orders", { startUrls: [URLS[0]!] }, chooser);
     await expect(run).rejects.toBeInstanceOf(CredentialInPromptError);
+    await expect(run).rejects.toBeInstanceOf(NavviError);
     await expect(run).rejects.toMatchObject({ status: "blocked_login_required" });
     await expect(run).rejects.toThrow(/\{\{secret:/);
     expect(chooser.asked).toHaveLength(0);

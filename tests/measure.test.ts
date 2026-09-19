@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { MEASUREMENTS_END, MEASUREMENTS_START, readMeasurements, renderReadmeSection, renderTable, replaceSection, type MeasurementRow } from "../src/measure/report.js";
+import { MEASUREMENTS_END, MEASUREMENTS_START, fieldsCorrect, readMeasurements, renderReadmeSection, renderTable, replaceSection, type MeasurementRow } from "../src/measure/report.js";
 import { parseArgs, runMeasurements, writeMeasurements } from "../src/measure/run.js";
 import { SCENARIOS } from "../src/measure/scenarios.js";
 
@@ -58,14 +58,14 @@ describe("offline harness run", () => {
   it("AE8 (v1 then v2 under the same URLs) reports at least one healing event and fieldsCorrect >= 0.9", () => {
     const row = byScenario("agent", "AE8");
     expect(row.healingEvents).toBeGreaterThanOrEqual(1);
-    expect(row.fieldsCorrect).toBeGreaterThanOrEqual(0.9);
+    expect(fieldsCorrect(row)).toBeGreaterThanOrEqual(0.9);
     expect(row.cells.expected).toBe(48);
   });
 
   it("AE7 (pharmacy v1 record) asks four questions and gets every cell right", () => {
     const row = byScenario("agent", "AE7");
     expect(row.questions).toBe(4);
-    expect(row.fieldsCorrect).toBe(1);
+    expect(fieldsCorrect(row)).toBe(1);
     expect(row.cells).toEqual({ correct: 48, expected: 48 });
     expect(row.healingEvents).toBe(0);
   });
@@ -83,10 +83,10 @@ describe("offline harness run", () => {
 
 describe("report", () => {
   const sample: MeasurementRow[] = [
-    { chooser: "agent", scenario: "AE1", questions: 7, inputTokens: 1234, chooserWaitMs: 3, totalMs: 4567, costUsd: 0, fieldsCorrect: 1, cells: { correct: 125, expected: 125 }, healingEvents: 0, status: "ok" },
-    { chooser: "jev", scenario: "AE8", questions: 10, inputTokens: 20000, chooserWaitMs: 1500, totalMs: 30000, costUsd: 0.00084, fieldsCorrect: 46 / 48, cells: { correct: 46, expected: 48 }, healingEvents: 1, status: "ok" },
-    { chooser: "model", scenario: "AE7", questions: 0, inputTokens: 0, chooserWaitMs: 0, totalMs: 0, costUsd: 0, fieldsCorrect: 0, cells: { correct: 0, expected: 0 }, healingEvents: 0, status: "skipped", skipped: "no key (set ANTHROPIC_API_KEY)" },
-    { chooser: "jev", scenario: "live:python.org", questions: 7, inputTokens: 9000, chooserWaitMs: 800, totalMs: 12000, costUsd: 0.000378, fieldsCorrect: 0.5, cells: { correct: 50, expected: 100 }, healingEvents: 0, status: "failed" },
+    { chooser: "agent", scenario: "AE1", questions: 7, inputTokens: 1234, chooserWaitMs: 3, totalMs: 4567, costUsd: 0, cells: { correct: 125, expected: 125 }, healingEvents: 0, status: "ok" },
+    { chooser: "jev", scenario: "AE8", questions: 10, inputTokens: 20000, chooserWaitMs: 1500, totalMs: 30000, costUsd: 0.00084, cells: { correct: 46, expected: 48 }, healingEvents: 1, status: "ok" },
+    { chooser: "model", scenario: "AE7", questions: 0, inputTokens: 0, chooserWaitMs: 0, totalMs: 0, costUsd: 0, cells: { correct: 0, expected: 0 }, healingEvents: 0, status: "skipped", skipped: "no key (set ANTHROPIC_API_KEY)" },
+    { chooser: "jev", scenario: "live:python.org", questions: 7, inputTokens: 9000, chooserWaitMs: 800, totalMs: 12000, costUsd: 0.000378, cells: { correct: 50, expected: 100 }, healingEvents: 0, status: "failed" },
   ];
 
   it("readMeasurements(renderTable(rows)) round-trips", () => {

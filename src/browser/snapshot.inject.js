@@ -162,6 +162,8 @@
   // ------------------------------------------------------------ shapes and labels
   var MONTHS = "(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december|" +
     "ene|enero|febrero|marzo|abr|abril|mayo|junio|julio|ago|agosto|septiembre|octubre|noviembre|dic|diciembre)\\.?";
+  var MONTH_DAY_RE = new RegExp("\\b" + MONTHS + "\\b \\d{1,2}(,? \\d{4})?\\b", "i");
+  var DAY_MONTH_RE = new RegExp("\\b\\d{1,2} (de )?" + MONTHS + "\\b( (de )?\\d{4})?\\b", "i");
   function shapeOf(text, attr) {
     if (attr === "href" || attr === "src") return "url";
     if (attr === "datetime") return "date";
@@ -169,8 +171,8 @@
     if (/^https?:\/\/\S+$/i.test(t)) return "url";
     if (/^\d{4}-\d{2}-\d{2}/.test(t)) return "date";
     if (/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/.test(t)) return "date";
-    if (new RegExp("\\b" + MONTHS + "\\b \\d{1,2}(,? \\d{4})?\\b", "i").test(t)) return "date";
-    if (new RegExp("\\b\\d{1,2} (de )?" + MONTHS + "\\b( (de )?\\d{4})?\\b", "i").test(t)) return "date";
+    if (MONTH_DAY_RE.test(t)) return "date";
+    if (DAY_MONTH_RE.test(t)) return "date";
     if (/\b\d+ (seconds?|minutes?|hours?|days?|weeks?|months?|years?) ago\b/i.test(t) || /^hace \d+ /i.test(t)) return "date";
     if (/(^|[\s(])(\$|€|£|US\$|R\$|CLP|USD|EUR|MXN|ARS|COP|PEN|BRL)\s?\d/i.test(t) || /\d\s?(€|£|CLP|USD|EUR|MXN|ARS|pesos)\b/i.test(t)) return "money";
     if (/^[-+]?\d{1,3}([.,]\d{3})*$/.test(t) || /^[-+]?\d+$/.test(t)) return "int";
@@ -204,9 +206,10 @@
   }
 
   // ------------------------------------------------------------ groups (KTD5)
-  function textSum(items) {
+  /** Total length of the (at most three) 400-char sample texts. */
+  function textSum(fullTexts) {
     var sum = 0;
-    for (var i = 0; i < Math.min(3, items.length); i++) sum += fullText(items[i], 400).length;
+    for (var t of fullTexts) sum += t.length;
     return sum;
   }
   /** Rank: many items help logarithmically; the shortest of the first three sample texts must carry content. */
@@ -263,8 +266,10 @@
       for (var entry of counts) if (entry[1] > n) { best = entry[0]; n = entry[1]; }
       if (n >= min) {
         var items = kids.filter((c) => signature(c) === best);
-        var texts = items.slice(0, 3).map((c) => fullText(c, SAMPLE_TEXT_CHARS));
-        if (textSum(items) >= 30 && !identicalTexts(texts) && visible(items[0])) {
+        // One innerText per sample item: the 140-char sample and the 30-char floor both derive from the 400-char text.
+        var fullTexts = items.slice(0, 3).map((c) => fullText(c, 400));
+        var texts = fullTexts.map((t) => t.slice(0, SAMPLE_TEXT_CHARS));
+        if (textSum(fullTexts) >= 30 && !identicalTexts(texts) && visible(items[0])) {
           found.push({
             id: keyId("g", identity(parent) + "|" + best),
             parent: parent,
@@ -273,7 +278,7 @@
             itemCount: items.length,
             sampleTexts: texts,
             sig: best,
-            score: groupScore(items.length, items.slice(0, 3).map((c) => fullText(c, 400))),
+            score: groupScore(items.length, fullTexts),
           });
         }
       }
@@ -281,7 +286,8 @@
         var period = periodOf(kids, min);
         if (period) {
           var anchors = kids.filter((c) => signature(c) === period.anchorSig);
-          var samples = anchors.slice(0, 3).map((a) => itemText(rowsFor(a, period.span), SAMPLE_TEXT_CHARS));
+          var fullSamples = anchors.slice(0, 3).map((a) => itemText(rowsFor(a, period.span), 400));
+          var samples = fullSamples.map((t) => t.slice(0, SAMPLE_TEXT_CHARS));
           if (anchors.length >= min && samples.join("").length >= 30 && !identicalTexts(samples) && visible(anchors[0])) {
             var parentSel = selectorFor(parent, root);
             var anchorSeg = segment(anchors[0]);
@@ -294,7 +300,7 @@
               sampleTexts: samples,
               anchorPlusRows: { anchorSelector: parentSel + " > " + anchorSeg, span: period.span },
               sig: "rows:" + period.anchorSig + ":" + period.span,
-              score: groupScore(anchors.length, anchors.slice(0, 3).map((a) => itemText(rowsFor(a, period.span), 400))),
+              score: groupScore(anchors.length, fullSamples),
             });
           }
         }
@@ -511,8 +517,17 @@
     var t = (e.getAttribute("type") || "text").toLowerCase();
     return ["text", "search", "email", "url", "tel", "number"].includes(t);
   }
-  function formInfo(form) {
+  /** `memo`: per-form cache for one controls() call (a form's info is the same for every control in it). Each control gets its own copy. */
+  function formInfo(form, memo) {
     if (!form) return null;
+    var info = memo && memo.get(form);
+    if (!info) {
+      info = computeFormInfo(form);
+      if (memo) memo.set(form, info);
+    }
+    return Object.assign({}, info);
+  }
+  function computeFormInfo(form) {
     var hasTypedText = false, hasPasswordField = false, hasPaymentField = false;
     for (var e of form.querySelectorAll("input,textarea")) {
       var t = (e.getAttribute("type") || "text").toLowerCase();
@@ -576,6 +591,7 @@
     var profile = opts.profile === "local" ? "local" : "store";
     var allowMutations = Array.isArray(opts.allowMutations) ? opts.allowMutations : [];
     var out = [];
+    var forms = new Map();
     var scrollX0 = window.scrollX, scrollY0 = window.scrollY;
     for (var e of document.querySelectorAll(CONTROL_SELECTOR)) {
       if (!visible(e)) continue;
@@ -599,7 +615,7 @@
         visible: true,
         clickable: !disabled && hitTest(e),
         scope: scopeText(e),
-        form: formInfo(e.form || e.closest("form")),
+        form: formInfo(e.form || e.closest("form"), forms),
         autocomplete: e.getAttribute("autocomplete") || undefined,
         nameAttr: e.getAttribute("name") || undefined,
         secretCapable: inputType === "password",
