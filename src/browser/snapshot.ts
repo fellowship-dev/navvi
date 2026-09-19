@@ -10,7 +10,22 @@ import type { Shape } from "../scraper/schema.js";
  * these two tables; ids are stable across calls within a page.
  */
 
-const SNAPSHOT_SOURCE = readFileSync(new URL("./snapshot.inject.js", import.meta.url), "utf8");
+/**
+ * Source of the in-page script. tsc appends `export {};` to the compiled copy
+ * under `dist/`, which is not valid inside `page.evaluate`, so it is stripped
+ * at load time. The `__name` shim keeps functions serialized by esbuild-based
+ * runners (tsx sets `keepNames`) working inside the page.
+ */
+export const EVALUATE_SHIM = "globalThis.__name = globalThis.__name || ((fn) => fn);";
+const SNAPSHOT_SOURCE =
+  EVALUATE_SHIM +
+  "\n" +
+  readFileSync(new URL("./snapshot.inject.js", import.meta.url), "utf8").replace(/\n\s*export\s*\{\s*\};?\s*$/, "\n");
+
+/** Defines the `__name` shim in the current document; safe to call repeatedly. */
+export async function ensureEvaluateShim(page: Page): Promise<void> {
+  await page.evaluate(EVALUATE_SHIM);
+}
 
 /** Chooser state budget (KTD5): the largest fixture must serialize under this. */
 export const SNAPSHOT_BUDGET_CHARS = 28_000;
@@ -140,8 +155,9 @@ declare global {
 
 /** Injects snapshot.inject.js once per document; navigation clears it, so every call checks. */
 export async function ensureSnapshotScript(page: Page): Promise<void> {
-  const present = await page.evaluate(() => typeof window.__navvi === "object" && window.__navvi !== null);
+  const present = await page.evaluate("typeof window.__navvi === 'object' && window.__navvi !== null");
   if (!present) await page.evaluate(SNAPSHOT_SOURCE);
+  else await ensureEvaluateShim(page);
 }
 
 export async function getControls(page: Page, opts: ControlOptions): Promise<SnapshotControl[]> {
