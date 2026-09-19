@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Feed</title><style>.post{height:120px;border-bottom:1px solid #eee}</style></head>
+<body>
+<h1>Feed</h1>
+<ul id="feed">
+  <li class="post"><a href="/fixtures/posts/1.html">Post 1</a><span class="likes">7 likes</span></li>
+  <li class="post"><a href="/fixtures/posts/2.html">Post 2</a><span class="likes">14 likes</span></li>
+  <li class="post"><a href="/fixtures/posts/3.html">Post 3</a><span class="likes">21 likes</span></li>
+  <li class="post"><a href="/fixtures/posts/4.html">Post 4</a><span class="likes">28 likes</span></li>
+  <li class="post"><a href="/fixtures/posts/5.html">Post 5</a><span class="likes">35 likes</span></li>
+  <li class="post"><a href="/fixtures/posts/6.html">Post 6</a><span class="likes">42 likes</span></li>
+  <li class="post"><a href="/fixtures/posts/7.html">Post 7</a><span class="likes">49 likes</span></li>
+  <li class="post"><a href="/fixtures/posts/8.html">Post 8</a><span class="likes">56 likes</span></li>
+  <li class="post"><a href="/fixtures/posts/9.html">Post 9</a><span class="likes">63 likes</span></li>
+  <li class="post"><a href="/fixtures/posts/10.html">Post 10</a><span class="likes">70 likes</span></li>
+</ul>
+<p id="status">Scroll for more</p>
+<script>
+let batch = 0;
+window.addEventListener("scroll", () => {
+  if (batch >= 3) return;
+  if (window.scrollY + window.innerHeight < document.body.scrollHeight - 10) return;
+  batch++;
+  const feed = document.getElementById("feed");
+  const start = batch * 10;
+  for (let i = start; i < start + 10; i++) {
+    const li = document.createElement("li");
+    li.className = "post";
+    li.innerHTML = '<a href="/fixtures/posts/' + (i + 1) + '.html">Post ' + (i + 1) + '</a><span class="likes">' + ((i + 1) * 7) + ' likes</span>';
+    feed.appendChild(li);
+  }
+  if (batch >= 3) document.getElementById("status").textContent = "No more posts";
+});
+</script>
+</body>
+</html>

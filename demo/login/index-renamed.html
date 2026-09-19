@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Acme Orders - Log in</title><style>body{font-family:system-ui,sans-serif;max-width:480px;margin:3rem auto;color:#222}label{display:block;margin:.8rem 0 .2rem}input{width:100%;padding:.5rem;box-sizing:border-box}button{margin-top:1rem;padding:.6rem 1.2rem}.error{color:#b00020}</style></head>
+<body>
+<h1>Acme Orders</h1>
+<p>Log in to see your orders.</p>
+<form id="login" method="post" action="/login">
+  <label for="email">Email</label>
+  <input id="email" name="email" type="email" autocomplete="username" required>
+  <label for="password">Password</label>
+  <input id="password" name="password" type="password" autocomplete="current-password" required>
+  <input type="hidden" name="csrf" value="fixture-token">
+  <button type="submit">Sign in</button>
+</form>
+<p class="error" id="error" hidden>Password required.</p>
+<script>if(location.search.includes("error=1"))document.getElementById("error").hidden=false;</script>
+<p><a href="/login/">Forgot your password?</a></p>
+</body>
+</html>

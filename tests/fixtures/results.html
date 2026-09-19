@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Results</title></head>
+<body>
+<h1>Job search</h1>
+<h2 id="heading">Results</h2>
+<ul id="results" class="results"></ul>
+<p><a href="/fixtures/search-form.html">New search</a></p>
+<script>
+const q = new URLSearchParams(location.search).get("q") || "";
+document.getElementById("heading").textContent = "Results for " + q;
+document.getElementById("results").innerHTML = Array.from({ length: 6 }, (_, i) =>
+  '<li class="result"><a href="/fixtures/jobs/' + (200 + i) + '.html">' + q + ' role ' + (i + 1) + '</a><span class="company">Company ' + (i + 1) + '</span></li>'
+).join("");
+</script>
+</body>
+</html>

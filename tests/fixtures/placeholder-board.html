@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Team board</title><style>.row{padding:.4rem;border-bottom:1px solid #eee}.skeleton .bar{display:inline-block;width:60%;background:#eee;color:#eee}</style></head>
+<body>
+<header><h1>Team board</h1><nav><a href="/fixtures/placeholder-board.html?view=all">All</a><a href="/fixtures/placeholder-board.html?view=mine">Mine</a></nav></header>
+<div id="root" class="board">
+  <div class="row skeleton"><span class="bar">Loading…</span></div>
+  <div class="row skeleton"><span class="bar">Loading…</span></div>
+  <div class="row skeleton"><span class="bar">Loading…</span></div>
+  <div class="row skeleton"><span class="bar">Loading…</span></div>
+  <div class="row skeleton"><span class="bar">Loading…</span></div>
+  <div class="row skeleton"><span class="bar">Loading…</span></div>
+  <div class="row skeleton"><span class="bar">Loading…</span></div>
+  <div class="row skeleton"><span class="bar">Loading…</span></div>
+</div>
+<script>
+setTimeout(() => {
+  const owners = ["ana", "bruno", "carla", "diego", "elena"];
+  const root = document.getElementById("root");
+  root.innerHTML = Array.from({ length: 10 }, (_, i) =>
+    '<div class="row"><a class="card-title" href="/fixtures/cards/' + (i + 1) + '.html">Card ' + (i + 1) + ': ' + ["Fix login", "Ship v3", "Write docs", "Refactor billing", "Add tests", "Design review", "Onboard Sam", "Migrate DB", "Cut release", "Plan Q4"][i] + '</a><span class="owner">' + owners[i % owners.length] + '</span><span class="points">' + (i * 3 + 1) + '</span></div>'
+  ).join("");
+}, 800);
+</script>
+</body>
+</html>
