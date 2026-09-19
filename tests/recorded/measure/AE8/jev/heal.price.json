@@ -1,0 +1,22 @@
+{
+  "id": "heal.price",
+  "index": null,
+  "probabilities": [
+    0.06999999999999999,
+    0.01,
+    0.04,
+    0.15000000000000002,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "kind": "choice",
+  "inputTokens": 551,
+  "outputTokens": 134,
+  "chooser": "jev"
+}

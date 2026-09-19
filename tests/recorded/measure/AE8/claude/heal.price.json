@@ -1,0 +1,8 @@
+{
+  "id": "heal.price",
+  "index": 1,
+  "kind": "choice",
+  "inputTokens": 10,
+  "outputTokens": 5557,
+  "chooser": "claude"
+}
