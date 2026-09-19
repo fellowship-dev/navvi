@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import http from "node:http";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, statSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PassThrough, Writable } from "node:stream";
@@ -279,6 +279,40 @@ describe("file-and-resume (exit 3)", () => {
     expect(again).toBe(0);
     expectTwelveProducts(JSON.parse(second.stdout.text) as Array<Record<string, unknown>>);
   }, 90_000);
+
+  it("answers from earlier parks are carried forward: list mode parks twice and each resume needs only the new batch", async () => {
+    const storage = storageFor("file-twice");
+    const fixture = join(REPO, "tests", "recorded", "compile", "python-jobs");
+    const answerFrom = (q: Question): Answer => {
+      const recorded = JSON.parse(readFileSync(join(fixture, `${q.id}.json`), "utf8")) as Answer;
+      return { id: q.id, index: recorded.index };
+    };
+    const listFlags = ["--mode", "list", "--fields", "title,company,location,date,link", "--max-pages", "1", "--allow-private-host", "127.0.0.1", "--browser", "chromium", "--chooser", "agent", "--agent-mode", "file", "--storage", storage];
+    const url = `${server.baseUrl}/fixtures/python-jobs.html`;
+    const questionsDir = join(storage, "questions");
+    const latestToken = () => readdirSync(questionsDir).filter((f) => f.endsWith(".json")).map((f) => ({ f, t: statSync(join(questionsDir, f)).mtimeMs })).sort((a, b) => b.t - a.t)[0]!.f.replace(/\.json$/, "");
+
+    expect(await main([...listFlags, url], makeIo())).toBe(3);
+    const token1 = latestToken();
+    const batch1 = JSON.parse(readFileSync(join(questionsDir, `${token1}.json`), "utf8")) as { questions: Question[] };
+    expect(batch1.questions.map((q) => q.id)).toEqual(["group"]);
+    const answers1 = join(storage, "answers1.json");
+    writeFileSync(answers1, JSON.stringify({ answers: batch1.questions.map(answerFrom) }));
+
+    expect(await main([...listFlags, "--answers", answers1, "--resume", token1, url], makeIo())).toBe(3);
+    const token2 = latestToken();
+    expect(token2).not.toBe(token1);
+    const batch2 = JSON.parse(readFileSync(join(questionsDir, `${token2}.json`), "utf8")) as { questions: Question[]; answered?: Answer[] };
+    expect(batch2.questions.map((q) => q.id)).not.toContain("group");
+    expect(batch2.answered?.map((a) => a.id)).toEqual(["group"]);
+    const answers2 = join(storage, "answers2.json");
+    writeFileSync(answers2, JSON.stringify({ answers: batch2.questions.map(answerFrom) }));
+
+    const io = makeIo();
+    expect(await main([...listFlags, "--answers", answers2, "--resume", token2, url], io)).toBe(0);
+    const rows = JSON.parse(io.stdout.text) as Array<Record<string, unknown>>;
+    expect(rows).toHaveLength(25);
+  }, 120_000);
 
   it("--resume with an unknown token is a configuration error", async () => {
     const io = makeIo();
