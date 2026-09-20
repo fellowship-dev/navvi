@@ -26,6 +26,7 @@ import { AgentChooser, QUESTIONS_START, QUESTIONS_END, loadAnswersFile } from ".
 import { JevChooser, JEV_MAX_STATE_TOKENS, JEV_PRICE_PER_MILLION_INPUT_USD, TypeSafeEvaluationModel } from "../src/chooser/jev.js";
 import { ModelChooser, DEFAULT_MODEL_ID, DEFAULT_MODEL_STATE_CHARS, MODEL_PRICES } from "../src/chooser/model.js";
 import { RecordedChooser, RecordingChooser } from "../src/chooser/recorded.js";
+import type { CliRunner } from "../src/chooser/cli.js";
 import { createChooser } from "../src/chooser/index.js";
 import { Budget, BudgetExhaustedError, ModelUnavailableError, NavviError, NeedsHumanError } from "../src/billing/budget.js";
 
@@ -738,5 +739,164 @@ describe("createChooser", () => {
     ];
     expect(built.map((c) => c.name)).toEqual(names);
     expect(() => createChooser({ chooser: "jev", env: {} })).toThrow(ConfigurationError);
+  });
+});
+
+// ---------------------------------------------------------------- text fallback precedence
+
+/** A PATH directory of executable stubs, so `findOnPath` sees exactly the harnesses a test installs. */
+function fakeBin(harnesses: string[]): string {
+  const dir = mkdtempSync(join(tmp, "bin-"));
+  for (const name of harnesses) writeFileSync(join(dir, name), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  return dir;
+}
+
+/** Records the endpoint a provider reaches for, then fails: which API was chosen, without a network. */
+function recordingFetch(urls: string[]): typeof fetch {
+  return (async (input: unknown) => {
+    urls.push(typeof input === "string" ? input : String((input as { url?: string }).url ?? input));
+    throw new Error("no network in tests");
+  }) as unknown as typeof fetch;
+}
+
+type CliBehaviour = "answers" | "signed-out" | "broken";
+
+/** Stands in for `claude -p` / `codex exec`: an answer, the signed-out failure, or an unrelated crash. */
+function cliRunner(behaviour: CliBehaviour, text = "from the subscription"): CliRunner & { calls: string[] } {
+  const calls: string[] = [];
+  const runner = (async (cmd: string) => {
+    calls.push(cmd);
+    if (behaviour === "broken") return { code: 1, stdout: "", stderr: "segmentation fault" };
+    if (behaviour === "signed-out") {
+      return cmd === "claude"
+        ? { code: 1, stdout: "", stderr: "Invalid API key · Please run /login" }
+        : { code: 1, stdout: `${JSON.stringify({ type: "error", message: "Please log out and sign in again." })}\n`, stderr: "" };
+    }
+    const body = JSON.stringify({ answers: [{ id: "query", index: null, text }] });
+    const envelope = { type: "result", is_error: false, result: body, total_cost_usd: 0.002, usage: { input_tokens: 90, output_tokens: 8 } };
+    return { code: 0, stdout: JSON.stringify(envelope), stderr: "" };
+  }) as CliRunner & { calls: string[] };
+  runner.calls = calls;
+  return runner;
+}
+
+const textQuestion = (): Question => ({ id: "query", kind: "text", premise: SAMPLE_PREMISE.textHelper("search query"), state: STATE, maxLength: 40 });
+
+const MODEL_ANSWER = JSON.stringify({ answers: [{ id: "query", index: null, text: "from the api" }] });
+
+/**
+ * Jev over the Gateway is free, a Gateway text model is not. Text questions
+ * Jev cannot write must prefer a subscription CLI and only then a metered
+ * API, ANTHROPIC_API_KEY before the Gateway.
+ */
+describe("text fallback precedence: subscription before metered", () => {
+  it("gateway key with a CLI on PATH: Jev answers the choice, the CLI answers the text, nothing is metered", async () => {
+    const jev = jevMock();
+    const cli = cliRunner("answers");
+    const urls: string[] = [];
+    const chooser = createChooser({
+      chooser: "jev",
+      env: { AI_GATEWAY_API_KEY: "g", PATH: fakeBin(["claude"]) },
+      jev: { evaluationModel: jev.model },
+      cli: { runner: cli },
+      model: { fetch: recordingFetch(urls), maxAttempts: 1 },
+    });
+    const answers = await chooser.ask([batch()[0]!, textQuestion()]);
+    expect(chooser.name).toBe("jev");
+    expect(answers[0]?.index).toBe(1);
+    expect(answers[1]?.text).toBe("from the subscription");
+    expect(jev.calls).toHaveLength(1);
+    expect(cli.calls).toEqual(["claude"]);
+    expect(urls).toEqual([]);
+    expect(chooser.usage().costUsd).toBeCloseTo((120 * JEV_PRICE_PER_MILLION_INPUT_USD) / 1_000_000);
+  });
+
+  it("gateway key and no CLI on PATH: text falls through to the metered model over the Gateway", async () => {
+    const urls: string[] = [];
+    const chooser = createChooser({
+      chooser: "jev",
+      env: { AI_GATEWAY_API_KEY: "g", PATH: fakeBin([]) },
+      jev: { evaluationModel: jevMock().model },
+      model: { fetch: recordingFetch(urls), maxAttempts: 1 },
+    });
+    await expect(chooser.ask([textQuestion()])).rejects.toBeInstanceOf(ModelUnavailableError);
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain("ai-gateway.vercel.sh");
+  });
+
+  it("a dedicated ANTHROPIC_API_KEY is the metered option, ahead of the Gateway", async () => {
+    const urls: string[] = [];
+    const chooser = createChooser({
+      chooser: "jev",
+      env: { ANTHROPIC_API_KEY: "a", AI_GATEWAY_API_KEY: "g", PATH: fakeBin([]) },
+      jev: { evaluationModel: jevMock().model },
+      model: { fetch: recordingFetch(urls), maxAttempts: 1 },
+    });
+    await expect(chooser.ask([textQuestion()])).rejects.toBeInstanceOf(ModelUnavailableError);
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain("api.anthropic.com");
+  });
+
+  it("no key and no CLI: Jev has no text fallback at all", () => {
+    const chooser = createChooser({ chooser: "jev", env: { TYPESAFE_API_KEY: "t", PATH: fakeBin([]) } });
+    expect(chooser.name).toBe("jev");
+    // Nothing to delegate to: the text question reaches Jev itself, which refuses it.
+    return expect(chooser.ask([textQuestion()])).rejects.toThrow(/text/i);
+  });
+
+  it("an explicit `chooser: model` still resolves to the API model, even with a CLI on PATH", async () => {
+    const urls: string[] = [];
+    const chooser = createChooser({
+      chooser: "model",
+      env: { AI_GATEWAY_API_KEY: "g", PATH: fakeBin(["claude", "codex"]) },
+      model: { fetch: recordingFetch(urls), maxAttempts: 1 },
+    });
+    expect(chooser.name).toBe("model");
+    await expect(chooser.ask([textQuestion()])).rejects.toBeInstanceOf(ModelUnavailableError);
+    expect(urls[0]).toContain("ai-gateway.vercel.sh");
+
+    const anthropic: string[] = [];
+    const direct = createChooser({
+      chooser: "model",
+      env: { ANTHROPIC_API_KEY: "a", AI_GATEWAY_API_KEY: "g", PATH: fakeBin(["claude"]) },
+      model: { fetch: recordingFetch(anthropic), maxAttempts: 1 },
+    });
+    await expect(direct.ask([textQuestion()])).rejects.toBeInstanceOf(ModelUnavailableError);
+    expect(anthropic[0]).toContain("api.anthropic.com");
+  });
+
+  it("an installed but signed-out CLI hands the text on instead of ending the run, once", async () => {
+    const cli = cliRunner("signed-out");
+    const lm = languageMock(MODEL_ANSWER);
+    const chooser = createChooser({
+      chooser: "jev",
+      env: { AI_GATEWAY_API_KEY: "g", PATH: fakeBin(["claude", "codex"]) },
+      jev: { evaluationModel: jevMock().model },
+      cli: { runner: cli },
+      model: { model: lm.model },
+    });
+    expect((await chooser.ask([textQuestion()]))[0]?.text).toBe("from the api");
+    expect(cli.calls).toEqual(["claude", "codex"]);
+
+    // The chain stays where it landed: no second round of doomed CLI calls.
+    expect((await chooser.ask([textQuestion()]))[0]?.text).toBe("from the api");
+    expect(cli.calls).toEqual(["claude", "codex"]);
+    expect(lm.calls).toHaveLength(2);
+    expect(chooser.usage().textQuestions).toBe(2);
+  });
+
+  it("a signed-in CLI that fails for another reason is the answer, not a reason to start spending", async () => {
+    const cli = cliRunner("broken");
+    const lm = languageMock(MODEL_ANSWER);
+    const chooser = createChooser({
+      chooser: "jev",
+      env: { AI_GATEWAY_API_KEY: "g", PATH: fakeBin(["claude"]) },
+      jev: { evaluationModel: jevMock().model },
+      cli: { runner: cli, maxAttempts: 1 },
+      model: { model: lm.model },
+    });
+    await expect(chooser.ask([textQuestion()])).rejects.toBeInstanceOf(ModelUnavailableError);
+    expect(cli.calls).toEqual(["claude"]);
+    expect(lm.calls).toEqual([]);
   });
 });

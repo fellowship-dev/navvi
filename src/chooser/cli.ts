@@ -268,9 +268,17 @@ export function defaultCliModel(harness: CliHarness, env: NodeJS.ProcessEnv): st
   return harness === "claude" ? env.NAVVI_CLAUDE_MODEL || DEFAULT_CLAUDE_MODEL : env.NAVVI_CODEX_MODEL || undefined;
 }
 
-export function signInError(harness: CliHarness, detail?: string): ConfigurationError {
+/**
+ * The harness itself cannot answer: not on PATH, or installed but not signed
+ * in. Still a `ConfigurationError` (an explicit `--chooser claude` must end
+ * the run with the sign-in hint), but distinguishable so a caller holding a
+ * list of backends can move to the next one instead of failing the run.
+ */
+export class CliUnavailableError extends ConfigurationError {}
+
+export function signInError(harness: CliHarness, detail?: string): CliUnavailableError {
   const hint = harness === "claude" ? "run `claude` and sign in" : "run `codex login`";
-  return new ConfigurationError(`${HARNESS_LABEL[harness]} is installed but not signed in: ${hint}, or set an API key.${detail ? ` (${detail.trim().slice(0, 200)})` : ""}`);
+  return new CliUnavailableError(`${HARNESS_LABEL[harness]} is installed but not signed in: ${hint}, or set an API key.${detail ? ` (${detail.trim().slice(0, 200)})` : ""}`);
 }
 
 export class CliChooser extends BaseChooser {
@@ -307,7 +315,7 @@ export class CliChooser extends BaseChooser {
       run = await withTimeout(this.harness === "claude" ? this.runClaude(prompt) : this.runCodex(prompt), this.timeoutMs);
     } catch (err) {
       if (err instanceof CliTimeoutError) throw new ModelUnavailableError(`${HARNESS_LABEL[this.harness]} gave ${err.message}`, { cause: err });
-      if (isRecord(err) && err.code === "ENOENT") throw new ConfigurationError(`${HARNESS_LABEL[this.harness]} is not installed (\`${this.command}\` not found on PATH)`);
+      if (isRecord(err) && err.code === "ENOENT") throw new CliUnavailableError(`${HARNESS_LABEL[this.harness]} is not installed (\`${this.command}\` not found on PATH)`);
       throw err;
     }
     const outcome: { text: string | undefined; inputTokens?: number; outputTokens?: number } = this.harness === "claude" ? this.claudeOutcome(run) : this.codexOutcome(run);

@@ -144,6 +144,19 @@ else `agent`. The choice and its reason print on stderr unless `--quiet`.
 model. CLI usage reports `$0.0000` with billing `subscription`; Claude Code's
 own cost figure is kept as `reportedCostUsd` in the usage.
 
+Jev answers choices, booleans and scores but cannot *write*, so the occasional
+text question (the search query to type into a box) goes to a second backend —
+and there the order is the other way round, subscription before metering:
+`claude`, then `codex` when on PATH, and only then a metered API key
+(`ANTHROPIC_API_KEY` first, since a dedicated key is a deliberate choice, then
+`AI_GATEWAY_API_KEY`). So `AI_GATEWAY_API_KEY` routes Jev's structured
+questions over Vercel, which is free for Jev, while the text questions still
+prefer a signed-in CLI on your subscription; the Gateway text model is used
+only when no CLI is installed. Sign-in cannot be checked without running the
+CLI, so an installed but signed-out CLI is tried once, says so, and the run
+moves to the next backend instead of failing. An explicit `--chooser model`
+always means the API model, whatever is installed.
+
 With the agent chooser, the CLI prints each question batch on stdout between
 `---NAVVI-QUESTIONS---` and `---END---` and reads one JSON answer line from
 stdin. When stdin cannot stay open, `--agent-mode file` parks the batch in

@@ -33,9 +33,11 @@ Optional structure when the prompt is not enough: `--mode list|record --fields a
 
 Navvi never asks a model for a selector or code; it asks it to pick among options it enumerated from the page. Without `--chooser`, the first of these that applies is used and the choice is printed on stderr (`chooser: claude (Claude Code is installed and signed in; using your subscription)`):
 
-1. **Claude Code or Codex installed and signed in** (`claude` or `codex` on PATH): navvi runs it for each batch on your subscription. Nothing to configure; `NAVVI_CLAUDE_MODEL` (default `haiku`) and `NAVVI_CODEX_MODEL` pick the model. An installed CLI that is not signed in is skipped, and the reason names the sign-in command (`claude`, `codex login`).
-2. **A key**: `AI_GATEWAY_API_KEY` or `TYPESAFE_API_KEY` selects `--chooser jev` (fastest, cheapest, unattended healing in cron or CI); `ANTHROPIC_API_KEY` selects `--chooser model`. A key wins over an installed CLI.
+1. **A key**: `AI_GATEWAY_API_KEY` or `TYPESAFE_API_KEY` selects `--chooser jev` (fastest, cheapest, unattended healing in cron or CI); `ANTHROPIC_API_KEY` selects `--chooser model`. A key wins over an installed CLI.
+2. **Claude Code or Codex installed and signed in** (`claude` or `codex` on PATH): navvi runs it for each batch on your subscription. Nothing to configure; `NAVVI_CLAUDE_MODEL` (default `haiku`) and `NAVVI_CODEX_MODEL` pick the model. An installed CLI that is not signed in is skipped, and the reason names the sign-in command (`claude`, `codex login`).
 3. **Otherwise `--chooser agent`**: you are the model and answer the questions yourself, as below.
+
+**Text questions under `jev` prefer your subscription.** Jev picks and judges but cannot write, so a text question (the search query to type into a box) is handed to another backend, and that hand-off runs the other way round: `claude`, then `codex` when on PATH, then a metered API key (`ANTHROPIC_API_KEY` before `AI_GATEWAY_API_KEY`). `AI_GATEWAY_API_KEY` therefore routes Jev over the Vercel AI Gateway, which is free for Jev, while text work still goes to a signed-in CLI subscription; the metered Gateway text model is reached only with no CLI installed. A CLI that turns out to be signed out is tried once and the run continues with the next backend. `--chooser model` asked for explicitly is always the API model.
 
 ## No Key, No CLI: You Answer the Questions
 
@@ -60,8 +62,8 @@ If you cannot keep stdin open (a tool that runs a command to completion), add `-
 ## Unattended
 
 - `--chooser claude` or `--chooser codex`: the installed CLI answers on your subscription; needs no key, only a signed-in `claude` or `codex`
-- `--chooser jev` (fastest, unattended healing): `AI_GATEWAY_API_KEY` (Vercel AI Gateway) or `TYPESAFE_API_KEY`
-- `--chooser model` (any AI SDK model): `ANTHROPIC_API_KEY`
+- `--chooser jev` (fastest, unattended healing): `AI_GATEWAY_API_KEY` (Vercel AI Gateway) or `TYPESAFE_API_KEY`; its text questions go to a signed-in `claude` or `codex` first and to a metered model only without one, so unattended runs want either a CLI or `ANTHROPIC_API_KEY`
+- `--chooser model` (any AI SDK model): `ANTHROPIC_API_KEY`, or `AI_GATEWAY_API_KEY` when that is all there is (metered either way)
 - `--chooser agent` still needs none; a run that cannot answer parks and exits 3
 
 ## Input Contract
