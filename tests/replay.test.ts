@@ -11,7 +11,7 @@ import { RecordedChooser } from "../src/chooser/recorded.js";
 import { parseInput, type RunInput } from "../src/input/schema.js";
 import { urlPatternFor } from "../src/navigate/trace.js";
 import { runCrawl, type CrawlDeps } from "../src/replay/crawler.js";
-import { replayTrace, type ReplayPolicy } from "../src/replay/entry.js";
+import { replayTrace, resolveLocator, type ReplayPolicy } from "../src/replay/entry.js";
 import { MAX_SCROLL_ROUNDS } from "../src/replay/paginate.js";
 import { SCRAPER_VERSION, cacheKey, type CompiledScraper, type TraceStep } from "../src/scraper/schema.js";
 import { ScraperStore } from "../src/scraper/store.js";
@@ -264,6 +264,27 @@ describe("replayTrace (R24, R25, R42)", () => {
   function traced(trace: TraceStep[], profile: "store" | "local" = "store"): CompiledScraper {
     return seeded({ templateKey: "t", cacheKey: "c", profile, entry: { mode: "trace", url: `${server.baseUrl}/` }, trace });
   }
+
+  it("rejects a CSS target whose live name changed before replay", async () => {
+    await withPage("/fixtures/search-form.html", async (page) => {
+      await page.setContent('<div id="suggestion" onclick="document.body.dataset.deleted=1">Delete account</div>');
+      const locator = await resolveLocator(page, [{ role: "button", name: "Python", exact: true, css: "#suggestion" }], 0);
+      expect(locator).toBeNull();
+      expect(await page.locator("body").getAttribute("data-deleted")).toBeNull();
+    });
+  });
+
+  it("replays keyboard suggestions and selects the recorded custom control over a same-name native button", async () => {
+    await withPage("/fixtures/search-form.html", async (page) => {
+      await page.setContent(`<input aria-label="Search"><button onclick="document.body.dataset.chosen='wrong'">Python</button><div id="suggestion" style="display:none;cursor:cell" onclick="document.body.dataset.chosen='right'">Python</div><script>document.querySelector('input').addEventListener('keyup',()=>document.querySelector('#suggestion').style.display='block')</script>`);
+      const result = await replayTrace(page, traced([
+        { op: "type", text: "Python", alternatives: [{ role: "textbox", name: "Search", exact: true }] },
+        { op: "click", alternatives: [{ role: "button", name: "Python", exact: true, css: "#suggestion" }] },
+      ]), { secrets: new Map(), policy: policyFor() });
+      expect(result).toEqual({ ok: true, steps: 2 });
+      expect(await page.locator("body").getAttribute("data-chosen")).toBe("right");
+    });
+  });
 
   it("a urlPattern expectation recorded by the navigator matches the URL it was captured from, and not another path", async () => {
     const results = `${server.baseUrl}/fixtures/results.html?q=python`;

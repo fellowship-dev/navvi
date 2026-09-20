@@ -1,7 +1,7 @@
 {
   "name": "navvi",
   "version": "3.0.0",
-  "description": "Self-healing scraper compiler. Prompt in, data out, and the second run costs nothing.",
+  "description": "Scraper compiler with cached prompts, model-free healthy replay and targeted repair.",
   "license": "MIT",
   "type": "module",
   "engines": {

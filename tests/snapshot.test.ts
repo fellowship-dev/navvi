@@ -14,6 +14,7 @@ import {
   type Candidates,
   type LeafCandidate,
 } from "../src/browser/snapshot.js";
+import { recordStep } from "../src/navigate/trace.js";
 import { freshnessToken, isStale, waitForSettle } from "../src/browser/guards.js";
 import { startFixtureServer, type FixtureServer } from "./server.js";
 
@@ -75,6 +76,23 @@ describe("group candidates (R7, R10, KTD5)", () => {
       expect(top.sampleTexts[0]).toContain("Senior Python Engineer");
       const count = await page.evaluate((sel) => document.querySelectorAll(`${sel} > li.job`).length, top.selector);
       expect(count).toBe(25);
+    });
+  });
+
+  it("finds content rows when more frequent spacer rows have no text", async () => {
+    await withPage("/fixtures/search-form.html", async (page) => {
+      await page.setContent(`<table><tbody id="listings">${Array.from({ length: 8 }, (_, i) => `
+        <tr class="divider"><td></td></tr><tr class="divider"><td></td></tr>
+        <tr class="listing${i > 2 ? " verified" : ""}"><td>Engineer ${i} at Company ${i}, remote worldwide</td></tr>
+        <tr class="expanded" style="display:none"><td>Hidden description ${i}</td></tr>`).join("")}</tbody></table>`);
+      const { groups } = await getCandidates(page);
+      const listings = groups.find((g) => g.selector === "#listings" && g.itemSelector === "tr.listing");
+      expect(listings).toBeDefined();
+      expect(listings!.itemCount).toBe(8);
+      expect(listings!.sampleTexts[0]).toContain("Engineer 0");
+      expect(groups[0]!.id).toBe(listings!.id);
+      expect(await page.locator(`${listings!.selector} > ${listings!.itemSelector}`).count()).toBe(listings!.itemCount);
+      expect(groups.some((g) => g.itemSelector.includes("divider") || g.itemSelector.includes("expanded"))).toBe(false);
     });
   });
 
@@ -278,6 +296,52 @@ describe("link candidates", () => {
 });
 
 describe("controls (R24, R38)", () => {
+  it("enumerates custom pointer targets with policy filtering and a replayable code-generated locator", async () => {
+    await withPage("/fixtures/search-form.html", async (page) => {
+      await page.setContent(`<style>.options > div { cursor:pointer }</style><div class="options">
+        <div data-tag="python" onclick="this.dataset.clicked='yes'">🐍 Python</div>
+        <div style="cursor:cell">JavaScript</div><div>Delete account</div><div aria-disabled="true">Unavailable</div>
+        </div><div style="cursor:pointer;display:none">Hidden</div><div>Ordinary text</div>
+        <button style="cursor:pointer"><span>Native control</span></button>`);
+      const controls = await getControls(page, { profile: "store" });
+      const python = controls.find((c) => c.name === "🐍 Python");
+      expect(python).toMatchObject({ role: "button", tag: "div", clickable: true });
+      expect(controls.find((c) => c.name === "JavaScript")).toMatchObject({ role: "button", clickable: true });
+      expect(controls.find((c) => c.name === "Delete account")).toBeUndefined();
+      expect(controls.find((c) => c.name === "Ordinary text")).toBeUndefined();
+      expect(controls.find((c) => c.name === "Hidden")).toBeUndefined();
+      expect(controls.filter((c) => c.name === "Native control")).toHaveLength(1);
+      expect(controls.find((c) => c.name === "Unavailable")).toMatchObject({ disabled: true, clickable: false });
+      const step = recordStep({ op: "click", control: python!, controls });
+      const css = step.alternatives[0]!.css;
+      expect(css).toBeTruthy();
+      expect(await page.locator(css!).count()).toBe(1);
+      await page.locator(css!).click();
+      expect(await page.locator(css!).getAttribute("data-clicked")).toBe("yes");
+    });
+  });
+
+  it("keeps viewport controls beyond the DOM cap without scrolling through offscreen links", async () => {
+    await withPage("/fixtures/search-form.html", async (page) => {
+      await page.setContent(`<main>${Array.from({ length: 200 }, (_, i) => `<a style="display:block;height:40px" href="/job/${i}">Job ${i}</a>`).join("")}</main>
+        <div style="position:fixed;inset:0;background:white"><button id="close-popup">Close popup</button><input aria-label="Search jobs"></div>`);
+      await page.evaluate(() => {
+        const state = window as unknown as { scrollCalls: number };
+        state.scrollCalls = 0;
+        const original = Element.prototype.scrollIntoView;
+        Element.prototype.scrollIntoView = function (options) { state.scrollCalls++; original.call(this, options); };
+      });
+      const controls = await getControls(page, { profile: "store", maxControls: 5 });
+      expect(controls).toHaveLength(5);
+      expect(controls.find((c) => c.name === "Close popup")).toMatchObject({ clickable: true });
+      expect(controls.find((c) => c.name === "Search jobs")).toMatchObject({ clickable: true });
+      expect(await page.evaluate(() => (window as unknown as { scrollCalls: number }).scrollCalls)).toBe(0);
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
+      const again = await getControls(page, { profile: "store", maxControls: 5 });
+      expect(again.map((c) => c.id)).toEqual(controls.map((c) => c.id));
+    });
+  });
+
   it("marks a button under the cookie overlay as not clickable and the accept button as clickable", async () => {
     await withPage("/fixtures/cookie-banner.html", async (page) => {
       const controls = await getControls(page, { profile: "store" });

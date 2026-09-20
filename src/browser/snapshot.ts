@@ -87,6 +87,8 @@ export interface SnapshotControl {
   autocomplete?: string | undefined;
   nameAttr?: string | undefined;
   idAttr?: string | undefined;
+  /** Code-enumerated locator for pointer controls without a native accessibility role. */
+  css?: string | undefined;
   /** R24: true only for password inputs, which are only reachable through a secret step. */
   secretCapable: boolean;
   href?: string | undefined;
@@ -161,6 +163,7 @@ declare global {
   interface Window {
     __navvi?: {
       controls(opts: unknown): SnapshotControl[];
+      controlName(element: Element): string;
       candidates(opts: unknown): Candidates;
       resolveLeaf(opts: unknown): string | null;
       freshness(): { url: string; text: string; values: Array<[number, string, boolean]> };

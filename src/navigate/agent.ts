@@ -1,4 +1,5 @@
 import type { Locator, Page } from "playwright";
+import { enterText } from "../browser/typing.js";
 import { freshnessToken, isStale, waitForSettle, type SettleOptions } from "../browser/guards.js";
 import { allowedControl, isOnAllowedDomain, isPersonalDataField } from "../browser/policy.js";
 import { getControls, serializeControls, type AriaRole, type SnapshotControl } from "../browser/snapshot.js";
@@ -142,7 +143,7 @@ function isTypeable(c: SnapshotControl): boolean {
 
 /** The facts behind a control, for structured backends; strings are redacted by the caller. */
 function controlFacts(c: SnapshotControl): { [key: string]: JsonValue } {
-  const out: { [key: string]: JsonValue } = { role: c.role, name: clip(c.name, 60) };
+  const out: { [key: string]: JsonValue } = { role: c.role, name: clip(c.name, 60), clickable: c.clickable };
   if (c.inputType) out.input_type = c.inputType;
   if (c.value) out.current_value = clip(c.value, 40);
   if (c.checked !== undefined) out.checked = c.checked;
@@ -183,6 +184,13 @@ function renderHistory(history: readonly HistoryEntry[]): string {
 }
 
 async function locate(page: Page, controls: readonly SnapshotControl[], control: SnapshotControl): Promise<Locator | null> {
+  if (control.css) {
+    const exact = page.locator(control.css);
+    if (await exact.count()) {
+      const name = await exact.first().evaluate((el) => window.__navvi!.controlName(el));
+      if (name === control.name) return exact.first();
+    }
+  }
   if (!ARIA_ROLES.has(control.role)) return null;
   const role = control.role as AriaRole;
   let locator = page.getByRole(role, { name: control.name, exact: true });
@@ -291,6 +299,7 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
   let noProgress = 0;
   let lastControls: SnapshotControl[] = [];
   let lastNoProgress = "";
+  let rejectedCompletionToken: string | undefined;
 
   const secretFor = (c: SnapshotControl): string | null => {
     if (profile !== "local") return null;
@@ -328,7 +337,7 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
     const landmarks = await readLandmarks(page).catch((): Landmark[] => []);
 
     const type = controls.filter((c) => {
-      if (!isTypeable(c)) return false;
+      if (!isTypeable(c) || !c.clickable) return false;
       if (c.secretCapable) return secretFor(c) !== null;
       if (isPersonalDataField(policyControl(c))) return secretFor(c) !== null;
       return allowedControl(policyControl(c), profile, policy).allowed;
@@ -341,7 +350,7 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
     const select: SelectTarget[] = [];
     for (const c of controls.filter((c) => c.tag === "select" && !c.disabled)) select.push(...(await selectOptions(page, controls, c)));
 
-    const offered = OPERATIONS.filter((op) => (op === "CLICK" ? click.length > 0 : op === "TYPE_TEXT" ? type.length > 0 : op === "SELECT" ? select.length > 0 : true));
+    const offered = OPERATIONS.filter((op) => op !== "DONE" || token !== rejectedCompletionToken).filter((op) => (op === "CLICK" ? click.length > 0 : op === "TYPE_TEXT" ? type.length > 0 : op === "SELECT" ? select.length > 0 : true));
     const state = redact([`GOAL: ${goal}`, `URL: ${url}`, `TITLE: ${title}`, "VISIBLE TEXT:", text, serializeControls(controls), renderHistory(history)].join("\n"));
     return { token, url, title, text, controls, targets: { click, type, select }, offered, state, landmarks };
   }
@@ -486,7 +495,8 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
         }
         let landed = "";
         const skipped = await act(control, `field ${control.role} "${control.name}"`, "fill", async (locator) => {
-          await locator.fill(value, { timeout: ACTION_TIMEOUT_MS });
+          if (secret !== null) await locator.fill(value, { timeout: ACTION_TIMEOUT_MS });
+          else await enterText(locator, value, ACTION_TIMEOUT_MS);
           landed = await locator.evaluate((el) => ("value" in el ? String((el as HTMLInputElement).value) : (el.textContent ?? ""))).catch(() => "");
         });
         if (skipped !== null) return { executed: false, skipped };
@@ -537,6 +547,7 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
       if (!answers) return blocked("budget", `request budget of ${maxRequests} reached`);
       const p = probabilityOfTrue(answers[0]);
       if (p >= DONE_THRESHOLD) return { status: "DONE", trace: recorder.steps, steps, requests };
+      rejectedCompletionToken = observation.token;
       noProgressAttempt(`DONE rejected (P(goal achieved) ${p.toFixed(2)} < ${DONE_THRESHOLD})`, "done rejected");
       continue;
     }
