@@ -22,7 +22,7 @@ export const premises = {
       'Schema: {"mode":"list"|"record","description":string,"fields":[{"name":string,"description"?:string}],"goal"?:string,"profile"?:"store"|"local","followDetailPages"?:boolean,"paginate"?:boolean,"secretsExpected"?:string[]}.',
       "mode: list when the prompt wants many rows from listing pages, record when it wants the values of each given page.",
       "description: one sentence naming the records. fields: the values to extract, in prompt order, each with a short description when the prompt gives one.",
-      "goal: only when the prompt asks to navigate, log in or act before extracting. profile: local when the goal needs an account or secrets, else omit.",
+      "goal: required when the prompt asks to search, filter, navigate, log in or act before extracting. Preserve the query and requested action. Example: search for Python jobs means goal: search for Python jobs. Omit goal only for extraction from the given page. profile: local when the goal needs an account or secrets, else omit.",
       "followDetailPages: true when fields live on linked detail pages. paginate: false when the prompt says this page only.",
       "secretsExpected: the secret names a login or form will need (e.g. username, password); names only, never values.",
       "Answer with the JSON object only.",
