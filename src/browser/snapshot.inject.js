@@ -260,24 +260,25 @@
       if (skippable(parent) || parent.closest("script,style,noscript,template,svg")) continue;
       var kids = elementChildren(parent);
       if (kids.length < min) continue;
-      var counts = new Map();
-      for (var k of kids) { var sg = signature(k); counts.set(sg, (counts.get(sg) || 0) + 1); }
-      var best = null, n = 0;
-      for (var entry of counts) if (entry[1] > n) { best = entry[0]; n = entry[1]; }
-      if (n >= min) {
-        var items = kids.filter((c) => signature(c) === best);
+      // Every repeated selector gets a chance: spacer/hidden rows can be more
+      // frequent than the content rows. Count what the emitted selector matches,
+      // including siblings with additional presentation classes.
+      var selectors = new Set(kids.map(segment));
+      for (var itemSelector of selectors) {
+        var items = kids.filter((c) => c.matches(itemSelector));
+        if (items.length < min) continue;
         // One innerText per sample item: the 140-char sample and the 30-char floor both derive from the 400-char text.
         var fullTexts = items.slice(0, 3).map((c) => fullText(c, 400));
         var texts = fullTexts.map((t) => t.slice(0, SAMPLE_TEXT_CHARS));
         if (textSum(fullTexts) >= 30 && !identicalTexts(texts) && visible(items[0])) {
           found.push({
-            id: keyId("g", identity(parent) + "|" + best),
+            id: keyId("g", identity(parent) + "|" + itemSelector),
             parent: parent,
             selector: selectorFor(parent, root),
-            itemSelector: segment(items[0]),
+            itemSelector: itemSelector,
             itemCount: items.length,
             sampleTexts: texts,
-            sig: best,
+            sig: itemSelector,
             score: groupScore(items.length, fullTexts),
           });
         }
@@ -600,11 +601,12 @@
     var scope = e.closest("form,dialog,[role=\"dialog\"],article,li,tr,[role=\"row\"]") || e.parentElement;
     return scope ? fullText(scope, 120) : "";
   }
-  function hitTest(e) {
+  function hitTest(e, scroll) {
     var r = e.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) return false;
     var x = r.left + r.width / 2, y = r.top + r.height / 2;
     if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) {
+      if (!scroll) return false;
       e.scrollIntoView({ block: "center", inline: "center" });
       r = e.getBoundingClientRect();
       x = r.left + r.width / 2; y = r.top + r.height / 2;
@@ -619,12 +621,30 @@
     var allowMutations = Array.isArray(opts.allowMutations) ? opts.allowMutations : [];
     var out = [];
     var forms = new Map();
+    // Rank against the original viewport before any offscreen hit test scrolls.
+    // DOM order alone lets long lists consume the cap before a fixed popup.
+    var ranked = [];
     var scrollX0 = window.scrollX, scrollY0 = window.scrollY;
-    for (var e of document.querySelectorAll(CONTROL_SELECTOR)) {
+    var elements = Array.from(document.querySelectorAll(CONTROL_SELECTOR));
+    var customElements = new Set();
+    // Some sites implement autocomplete options with plain divs with a pointer or cell cursor.
+    // Only offer named viewport targets outside native controls, not arbitrary text.
+    for (var custom of document.querySelectorAll("div,span,li,[onclick],[tabindex]")) {
+      if (custom.closest(CONTROL_SELECTOR) || !visible(custom)) continue;
+      var bounds = custom.getBoundingClientRect();
+      if (bounds.right <= 0 || bounds.bottom <= 0 || bounds.left >= innerWidth || bounds.top >= innerHeight) continue;
+      if (!ownText(custom) && !custom.getAttribute("aria-label")) continue;
+      if (!["pointer", "cell"].includes(getComputedStyle(custom).cursor)) continue;
+      // Do not turn a parent wrapper into a duplicate of its child control.
+      if (custom.querySelector(CONTROL_SELECTOR)) continue;
+      elements.push(custom);
+      customElements.add(custom);
+    }
+    for (var e of elements) {
       if (!visible(e)) continue;
-      if (out.length >= (opts.maxControls || DEFAULT_CAPS.maxControls)) break;
-      var role = roleOf(e);
-      if (!role) continue;
+      var nativeRole = roleOf(e);
+      if (!nativeRole && !customElements.has(e)) continue;
+      var role = nativeRole || "button";
       if (role === "gridcell" && e.querySelector("button,[role=\"button\"]")) continue;
       var tag = e.localName;
       var typeAttr = e.getAttribute("type");
@@ -640,22 +660,33 @@
         checked: inputType === "checkbox" || inputType === "radio" ? !!e.checked : (e.getAttribute("aria-checked") === "true" ? true : undefined),
         disabled: disabled,
         visible: true,
-        clickable: !disabled && hitTest(e),
+        clickable: !disabled && hitTest(e, false),
         scope: scopeText(e),
         form: formInfo(e.form || e.closest("form"), forms),
         autocomplete: e.getAttribute("autocomplete") || undefined,
         nameAttr: e.getAttribute("name") || undefined,
         idAttr: e.id || undefined,
+        css: nativeRole ? undefined : selectorFor(e, document.documentElement),
         secretCapable: inputType === "password",
         href: tag === "a" ? e.href : undefined,
       };
       var decision = allowedControl(control, profile, allowMutations);
       if (!decision.allowed && decision.reason !== "password") continue;
-      out.push(control);
+      var rect = e.getBoundingClientRect();
+      var inViewport = rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight;
+      // Keep native form controls, then custom options, ahead of link-heavy lists.
+      var rank = inViewport ? 3 : 4;
+      if (control.clickable) rank = !nativeRole ? 1 : role === "link" ? 2 : 0;
+      ranked.push({ element: e, control: control, rank: rank });
+    }
+    ranked.sort((a, b) => a.rank - b.rank);
+    var max = opts.maxControls || DEFAULT_CAPS.maxControls;
+    for (var entry of ranked.slice(0, max)) {
+      if (entry.rank === 4 && !entry.control.disabled) entry.control.clickable = hitTest(entry.element, true);
+      out.push(entry.control);
     }
     if (window.scrollX !== scrollX0 || window.scrollY !== scrollY0) window.scrollTo(scrollX0, scrollY0);
-    var max = opts.maxControls || DEFAULT_CAPS.maxControls;
-    return out.length > max ? out.slice(0, max) : out;
+    return out;
   }
 
   // ------------------------------------------------------------ freshness
@@ -671,6 +702,7 @@
 
   window.__navvi = {
     controls: controls,
+    controlName: (element) => accessibleName(element) || roleOf(element) || "button",
     candidates: candidates,
     resolveLeaf: resolveLeaf,
     freshness: freshness,

@@ -1,7 +1,8 @@
 import type { Locator, Page } from "playwright";
+import { enterText } from "../browser/typing.js";
 import { waitForSettle } from "../browser/guards.js";
 import { allowedControl, isOnAllowedDomain, type Control } from "../browser/policy.js";
-import type { AriaRole } from "../browser/snapshot.js";
+import { ensureSnapshotScript, type AriaRole } from "../browser/snapshot.js";
 import type { Profile } from "../input/schema.js";
 import { isHttpHref, matchesUrlPattern } from "../navigate/trace.js";
 import { resolveUrl } from "../scraper/extract.js";
@@ -72,11 +73,16 @@ function describe(step: TraceStep): string {
  * `timeoutMs` runs out (0: one pass); null when none does.
  */
 export async function resolveLocator(page: Page, alternatives: readonly LocatorAlternative[], timeoutMs: number): Promise<Locator | null> {
+  await ensureSnapshotScript(page);
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     for (const alt of alternatives) {
       const candidates = [page.getByRole(alt.role as AriaRole, { name: alt.name, exact: alt.exact }).first()];
-      if (alt.css) candidates.push(page.locator(alt.css).first());
+      if (alt.css) {
+        const css = page.locator(alt.css).first();
+        const name = (await css.count()) > 0 ? await css.evaluate((el) => window.__navvi!.controlName(el)).catch(() => null) : null;
+        if (name === alt.name) candidates.unshift(css);
+      }
       for (const locator of candidates) {
         if ((await locator.count().catch(() => 0)) > 0 && (await locator.isVisible().catch(() => false))) return locator;
       }
@@ -103,6 +109,7 @@ export async function scrollToBottom(page: Page): Promise<void> {
 }
 
 interface LiveControl {
+  name: string;
   tag: string;
   type: string | undefined;
   href: string | undefined;
@@ -117,6 +124,7 @@ function readLiveControl(locator: Locator): Promise<LiveControl> {
     const anchor = el as HTMLAnchorElement;
     const form = (el as HTMLButtonElement).form ?? el.closest("form");
     return {
+      name: window.__navvi!.controlName(el),
       tag: el.tagName.toLowerCase(),
       type: el.getAttribute("type")?.toLowerCase() ?? undefined,
       href: typeof anchor.href === "string" && anchor.href ? anchor.href : undefined,
@@ -189,7 +197,7 @@ function checkClickPolicy(step: TraceStep, live: LiveControl, page: Page, policy
     }
   }
   const form = step.target?.form ?? live.form;
-  const control: Control = { role: alt?.role ?? "button", name: alt?.name ?? "", tag: live.tag };
+  const control: Control = { role: alt?.role ?? "button", name: live.name, tag: live.tag };
   if (live.type) control.inputType = live.type;
   if (live.autocomplete) control.autocomplete = live.autocomplete;
   if (live.nameAttr) control.nameAttr = live.nameAttr;
@@ -224,7 +232,7 @@ async function runStep(page: Page, step: TraceStep, options: ReplayTraceOptions,
         if (step.secret === "password") state.typedSecret = true;
         else state.typedText = true;
       } else {
-        await locator.fill(step.text ?? "", { timeout: STEP_TIMEOUT_MS });
+        await enterText(locator, step.text ?? "", STEP_TIMEOUT_MS);
         state.typedText = true;
       }
       return;

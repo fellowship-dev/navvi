@@ -509,10 +509,10 @@ describe("agent surfaces (R35)", () => {
     expect(skill).toContain("docs/measurements.md");
   });
 
-  it("README's first screen carries the install command and the pitch line; llms.txt links the skill", () => {
-    const readme = readFileSync(join(REPO, "README.md"), "utf8").split("\n").slice(0, 30).join("\n");
-    expect(readme).toContain("Compile it once so you never drive it again");
-    expect(readme).toMatch(/npx navvi/);
+  it("README's first screen provides source installation; llms.txt links the skill", () => {
+    const readme = readFileSync(join(REPO, "README.md"), "utf8").split("\n").slice(0, 40).join("\n");
+    expect(readme).toContain("git clone https://github.com/fellowship-dev/navvi.git");
+    expect(readme).toContain("node dist/bin/cli.js");
     expect(readme).not.toMatch(/\bv2\b/);
     const llms = readFileSync(join(REPO, "llms.txt"), "utf8");
     expect(llms).toMatch(/^# Navvi/m);

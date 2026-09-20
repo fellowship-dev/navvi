@@ -84,6 +84,8 @@ export type HealerHook = (ctx: HealContext) => Promise<HealOutcome>;
 export type PaginateHook = (page: Page, scraper: CompiledScraper, pageIndex: number) => Promise<boolean>;
 
 export interface CrawlDeps {
+  /** Observe each actual crawler page before navigation (e.g. recording compile and replay). */
+  onPage?: ((page: Page) => Promise<void>) | undefined;
   chooser?: Chooser | undefined;
   actor?: CrawlActor | undefined;
   store?: ScraperStore | undefined;
@@ -478,7 +480,10 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       useSessionPool: true,
       persistCookiesPerSession: false,
       sessionPoolOptions: { maxPoolSize: singleSession ? 1 : 4 },
-      preNavigationHooks: [async ({ page }) => guardContext(page.context())],
+      preNavigationHooks: [async ({ page }) => {
+        await guardContext(page.context());
+        await deps.onPage?.(page);
+      }],
       requestHandler: async (ctx) => {
         if (state.stop) return;
         const data = ctx.request.userData as UserData;
@@ -828,6 +833,13 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     for (;;) {
       const scraper = plan.scraper;
       if (!scraper) return;
+      // Dynamic lists may still contain only skeletons after navigation. Wait
+      // for the compiled anchor, bounded so genuinely empty lists still finish.
+      if (scraper.item) {
+        await ctx.page.locator(scraper.item.anchorSelector).first().waitFor({ state: "attached", timeout: 5_000 }).catch((error: unknown) => {
+          if (!(error instanceof Error) || error.name !== "TimeoutError") throw error;
+        });
+      }
       const pushed = await pushItems(ctx, plan, scraper, ctx.page.url(), seen);
       if (state.stop) return;
       pageIndex += 1;
