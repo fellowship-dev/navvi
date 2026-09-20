@@ -137,16 +137,12 @@ describe("crawler runs", () => {
     const actor = makeActor(dir);
     const chooser = new RecordedChooser({ fixture: "compile/python-jobs" });
     const raw = { startUrls: [`${server.baseUrl}/fixtures/python-jobs.html`], mode: "list", fields: F("title", "company", "location", "date", "link"), description: "python job listing" };
-<<<<<<< Updated upstream
     const observed: string[] = [];
     const onPage = async (page: import("playwright").Page) => { observed.push(page.url()); };
-    const summary = await runCrawl(input(raw), { ...makeDeps(actor, chooser), onPage });
+    const summary = await runCrawl(fixtureInput(raw), { ...makeDeps(dir, actor, chooser), onPage });
     expect(observed.length).toBeGreaterThan(0);
     expect(observed.every((url) => url === "about:blank")).toBe(true);
     const observedBeforeReplay = observed.length;
-=======
-    const summary = await runCrawl(fixtureInput(raw), makeDeps(dir, actor, chooser));
->>>>>>> Stashed changes
     expect(summary.status).toBe("succeeded");
     expect(summary.templates).toBe(1);
     expect(summary.cacheHit).toBe(false);
@@ -171,12 +167,8 @@ describe("crawler runs", () => {
 
     // second run, same store: no chooser call, cache hit
     const empty = new RecordedChooser({ fixture: "crawler/empty" });
-<<<<<<< Updated upstream
-    const again = await runCrawl(input(raw), { ...makeDeps(actor, empty), onPage });
+    const again = await runCrawl(fixtureInput(raw), { ...makeDeps(dir, actor, empty), onPage });
     expect(observed.length).toBeGreaterThan(observedBeforeReplay);
-=======
-    const again = await runCrawl(fixtureInput(raw), makeDeps(dir, actor, empty));
->>>>>>> Stashed changes
     expect(again.cacheHit).toBe(true);
     expect(again.status).toBe("succeeded");
     expect(again.items).toBe(25);
@@ -234,7 +226,7 @@ describe("crawler runs", () => {
   it("waits for hydrated compiled rows before declaring a cached list empty", async () => {
     const delayed = await startHelperServer({ "/jobs": { type: "text/html", body: `<h1>Jobs</h1><ul id="jobs"><li class="placeholder">Loading</li></ul><script>setTimeout(() => document.querySelector('#jobs').innerHTML = '<li class="result"><b>Python engineer</b></li>', 900)</script>` } });
     try {
-      const actor = makeActor();
+      const actor = makeActor(dir);
       const startUrls = [`${delayed.baseUrl}/jobs`];
       const store = await ScraperStore.open({ actor });
       await store.put(seeded({
@@ -244,7 +236,7 @@ describe("crawler runs", () => {
         fields: { title: { alternatives: [{ selector: "b", fingerprint: { samples: ["Python engineer"], shape: "text" } }] } },
       }));
       const chooser = new RecordedChooser({ fixture: "crawler/empty" });
-      const summary = await runCrawl(input({ startUrls, mode: "list", fields: F("title"), maxPages: 1 }), makeDeps(actor, chooser));
+      const summary = await runCrawl(fixtureInput({ startUrls, mode: "list", fields: F("title"), maxPages: 1 }), makeDeps(dir, actor, chooser));
       expect(summary.status).toBe("succeeded");
       expect(summary.cacheHit).toBe(true);
       expect(summary.items).toBe(1);
