@@ -18,7 +18,7 @@ export {
   batchChars,
   buildFieldQuestions,
   candidateKey,
-  candidateLabel,
+  candidateContext, candidateContexts, candidateLabel,
   chunkQuestions,
   fieldQuestionId,
   intersectCandidates,

@@ -25,7 +25,8 @@
     "scrape": "tsx src/main.ts",
     "demo": "tsx scripts/demo.ts",
     "measure": "tsx src/measure/run.ts",
-    "postinstall": "node scripts/postinstall.mjs"
+    "postinstall": "node scripts/postinstall.mjs",
+    "hillclimb": "tsx src/measure/hillclimb.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.58",

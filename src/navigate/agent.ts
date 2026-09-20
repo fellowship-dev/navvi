@@ -2,7 +2,7 @@ import type { Locator, Page } from "playwright";
 import { freshnessToken, isStale, waitForSettle, type SettleOptions } from "../browser/guards.js";
 import { allowedControl, isOnAllowedDomain, isPersonalDataField } from "../browser/policy.js";
 import { getControls, serializeControls, type AriaRole, type SnapshotControl } from "../browser/snapshot.js";
-import type { Answer, Chooser, Question } from "../chooser/chooser.js";
+import type { Answer, Chooser, JsonValue, Question, QuestionContext } from "../chooser/chooser.js";
 import { premises } from "../chooser/questions.js";
 import { LIMITS, type Profile } from "../input/schema.js";
 import type { StepExpect, TraceStep } from "../scraper/schema.js";
@@ -138,6 +138,31 @@ const TYPE_ROLES: ReadonlySet<string> = new Set(["textbox", "searchbox", "spinbu
 function isTypeable(c: SnapshotControl): boolean {
   if (c.disabled || c.tag === "select") return false;
   return c.tag === "textarea" || TYPE_ROLES.has(c.role) || (c.role === "combobox" && c.tag === "input");
+}
+
+/** The facts behind a control, for structured backends; strings are redacted by the caller. */
+function controlFacts(c: SnapshotControl): { [key: string]: JsonValue } {
+  const out: { [key: string]: JsonValue } = { role: c.role, name: clip(c.name, 60) };
+  if (c.inputType) out.input_type = c.inputType;
+  if (c.value) out.current_value = clip(c.value, 40);
+  if (c.checked !== undefined) out.checked = c.checked;
+  if (c.href) out.href = clip(c.href, 80);
+  if (c.scope) out.scope = clip(c.scope, 60);
+  if (c.disabled) out.disabled = true;
+  if (c.form) out.form = { method: c.form.method, action: clip(c.form.action, 80) };
+  return out;
+}
+
+/** Applies a string redaction to every string in a JSON value. */
+export function redactJson(value: JsonValue, redact: (text: string) => string): JsonValue {
+  if (typeof value === "string") return redact(value);
+  if (Array.isArray(value)) return value.map((v) => redactJson(v, redact));
+  if (value !== null && typeof value === "object") {
+    const out: { [key: string]: JsonValue } = {};
+    for (const [k, v] of Object.entries(value)) out[k] = redactJson(v, redact);
+    return out;
+  }
+  return value;
 }
 
 function describeControl(c: SnapshotControl): string {
@@ -315,15 +340,51 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
     return { token, url, title, text, controls, targets: { click, type, select }, offered, state, landmarks };
   }
 
+  /** The page as structured facts (R13 state), redacted like the text state. */
+  function pageContext(o: Observation, extra: QuestionContext): QuestionContext {
+    const recent = history.slice(-10).map((h) => {
+      const entry: { [key: string]: JsonValue } = { action: h.action, page_changed: h.pageChanged };
+      if (h.text !== undefined) entry.text = h.text;
+      return entry;
+    });
+    const page: QuestionContext = { ...extra, shared: { goal, page: { url: o.url, title: o.title, visible_text: o.text }, controls: o.controls.map(controlFacts), recent_actions: recent } };
+    return redactJson(page, redact) as QuestionContext;
+  }
+
   function batchFor(n: number, o: Observation): Question[] {
     const batch: Question[] = [
-      { id: `nav.${n}.op`, kind: "choice", premise: premises.operationChoice(goal), options: o.offered.map((op) => OPERATION_LABELS[op]), state: o.state },
+      {
+        id: `nav.${n}.op`,
+        kind: "choice",
+        premise: premises.operationChoice(goal),
+        options: o.offered.map((op) => OPERATION_LABELS[op]),
+        state: o.state,
+        context: pageContext(o, { decision: "next_operation" }),
+        optionContext: o.offered.map((op) => OPERATION_LABELS[op]),
+      },
     ];
+    const targetContext = (controls: readonly SnapshotControl[]): JsonValue[] => controls.map((c) => redactJson(controlFacts(c), redact));
     if (o.targets.click.length > 0) {
-      batch.push({ id: `nav.${n}.click`, kind: "choice", premise: premises.operationTarget("CLICK", goal), options: o.targets.click.map((c) => redact(describeControl(c))), state: o.state });
+      batch.push({
+        id: `nav.${n}.click`,
+        kind: "choice",
+        premise: premises.operationTarget("CLICK", goal),
+        options: o.targets.click.map((c) => redact(describeControl(c))),
+        state: o.state,
+        context: pageContext(o, { decision: "operation_target", operation: "CLICK" }),
+        optionContext: targetContext(o.targets.click),
+      });
     }
     if (o.targets.type.length > 0) {
-      batch.push({ id: `nav.${n}.type`, kind: "choice", premise: premises.operationTarget("TYPE_TEXT", goal), options: o.targets.type.map((c) => redact(describeControl(c))), state: o.state });
+      batch.push({
+        id: `nav.${n}.type`,
+        kind: "choice",
+        premise: premises.operationTarget("TYPE_TEXT", goal),
+        options: o.targets.type.map((c) => redact(describeControl(c))),
+        state: o.state,
+        context: pageContext(o, { decision: "operation_target", operation: "TYPE_TEXT" }),
+        optionContext: targetContext(o.targets.type),
+      });
     }
     if (o.targets.select.length > 0) {
       batch.push({
@@ -332,6 +393,8 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
         premise: premises.operationTarget("SELECT", goal),
         options: o.targets.select.map((s) => redact(`${describeControl(s.control)} = ${JSON.stringify(clip(s.label, 60))}`)),
         state: o.state,
+        context: pageContext(o, { decision: "operation_target", operation: "SELECT" }),
+        optionContext: o.targets.select.map((s) => redactJson({ ...controlFacts(s.control), option: clip(s.label, 60) }, redact)),
       });
     }
     return batch;
@@ -464,7 +527,7 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
     }
     if (decision.op === "BLOCKED") return blocked("no_progress", "the chooser found no supported operation that makes progress");
     if (decision.op === "DONE") {
-      const answers = await ask([{ id: `nav.${n}.done`, kind: "boolean", premise: premises.goalAchieved(goal), state: observation.state }]);
+      const answers = await ask([{ id: `nav.${n}.done`, kind: "boolean", premise: premises.goalAchieved(goal), state: observation.state, context: pageContext(observation, { decision: "goal_achieved" }) }]);
       if (!answers) return blocked("budget", `request budget of ${maxRequests} reached`);
       const p = probabilityOfTrue(answers[0]);
       if (p >= DONE_THRESHOLD) return { status: "DONE", trace: recorder.steps, steps, requests };

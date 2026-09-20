@@ -1,8 +1,8 @@
 import type { Page } from "playwright";
 import { DEFAULT_CAPS, getCandidates, getControls, type LeafCandidate, type SnapshotControl } from "../browser/snapshot.js";
-import type { Question } from "../chooser/chooser.js";
+import type { JsonValue, Question } from "../chooser/chooser.js";
 import { premises } from "../chooser/questions.js";
-import { askChunked, candidateKey, candidateLabel, toAlternative, type FieldCandidate } from "../compile/index.js";
+import { askChunked, candidateContexts, candidateKey, candidateLabel, toAlternative, type FieldCandidate } from "../compile/index.js";
 import { appendFieldAlternative, appendStepAlternative, markHealed, type CompiledScraper, type LocatorAlternative, type Shape, type TraceStep } from "../scraper/schema.js";
 import { clip, isRecord } from "../util/text.js";
 import type { HealContext, HealOutcome, HealerHook } from "./crawler.js";
@@ -192,7 +192,16 @@ async function healFields(ctx: HealContext, fields: readonly string[], memory: S
     if (candidates.length === 0 || memory.has(memoryKey(name, fresh))) continue;
     offered.set(name, candidates);
     freshByField.set(name, fresh);
-    questions.push({ id: fieldHealQuestionId(name), kind: "choice", premise: premises.healField(name, samples), options: candidates.map(candidateLabel), state });
+    const allFields = Object.keys(scraper.fields);
+    questions.push({
+      id: fieldHealQuestionId(name),
+      kind: "choice",
+      premise: premises.healField(name, samples),
+      options: candidates.map(candidateLabel),
+      state,
+      context: { decision: "heal_field_value", field: { name }, earlier_values: [...samples], shape, shared: { healing: "the compiled selectors no longer resolve on this page", page: url, mode: scraper.mode, fields: allFields, broken_fields: [...fields] } },
+      optionContext: candidateContexts(candidates),
+    });
   }
   if (questions.length === 0) {
     return { healed: false, reason: `no new candidate for ${fields.join(", ")} on ${url}`, unmapped: unmappedFrom(leaves, scraper) };
@@ -237,6 +246,19 @@ export function fitsStep(step: TraceStep, control: SnapshotControl): boolean {
 
 const q = (s: string, max: number): string => JSON.stringify(clip(s, max));
 
+/** The facts behind a control option, for structured backends. */
+export function controlContext(control: SnapshotControl): JsonValue {
+  const out: { [key: string]: JsonValue } = { role: control.role, name: clip(control.name, 60) };
+  if (control.inputType) out.input_type = control.inputType;
+  if (control.disabled) out.disabled = true;
+  if (control.href) out.href = control.href.slice(0, 100);
+  if (control.scope) out.scope = clip(control.scope, 60);
+  if (control.value) out.current_value = clip(control.value, 60);
+  if (control.checked !== undefined) out.checked = control.checked;
+  if (control.form) out.form = { method: control.form.method, action: clip(control.form.action, 80) };
+  return out;
+}
+
 export function controlLabel(control: SnapshotControl): string {
   const bits = [control.role, q(control.name, 60)];
   if (control.inputType && control.inputType !== "text" && control.inputType !== "submit") bits.push(`type=${control.inputType}`);
@@ -263,6 +285,8 @@ async function healStep(ctx: HealContext, stepIndex: number, reason: string): Pr
     premise: premises.healStep(step.op, last?.name ?? ""),
     options: offered.map(controlLabel),
     state,
+    context: { decision: "heal_trace_step", step: { index: stepIndex + 1, of: scraper.trace.length, operation: step.op, secret: step.secret !== undefined, recorded_control: last ? { role: last.role, name: last.name } : null }, shared: { page: url, failure: reason } },
+    optionContext: offered.map(controlContext),
   };
   const [answer] = await chooser.ask([question]);
   const chosen = answer && answer.index !== null ? offered[answer.index] : undefined;

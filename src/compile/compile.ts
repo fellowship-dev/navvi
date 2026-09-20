@@ -212,7 +212,7 @@ async function compileList(options: CompileOptions): Promise<CompileResult> {
     if (groups.length === 0) continue;
 
     const groupState = `Records: ${description}\nFields: ${names.join(", ")}\nPage: ${page.url()}`;
-    const [groupAnswer] = await options.chooser.ask([buildGroupQuestion(groups, description, names, groupState, suffix)]);
+    const [groupAnswer] = await options.chooser.ask([buildGroupQuestion(groups, description, names, groupState, suffix, page.url())]);
     const group = groupAnswer && groupAnswer.index !== null ? groups[groupAnswer.index] : undefined;
     if (!group) continue;
 
@@ -223,11 +223,12 @@ async function compileList(options: CompileOptions): Promise<CompileResult> {
     const candidates = await intersectCandidates(samples.map((s) => s.leaves), listResolver(page, item, indices));
 
     const state = fanOutState(description, options.fields, group.sampleTexts, `list mode, ${indices.length} sample rows of ${item.anchorSelector}`);
-    const questions = buildFieldQuestions(options.fields, candidates, state, suffix);
+    const shared = { records: description, fields: options.fields, samples: group.sampleTexts, mode: "list" as const };
+    const questions = buildFieldQuestions(options.fields, candidates, state, suffix, shared);
     const nextLinks = nextLinkCandidates(cands.links, options.startUrls, allowed);
-    if (nextLinks.length > 0) questions.push(buildNextLinkQuestion(nextLinks, state, suffix));
+    if (nextLinks.length > 0) questions.push(buildNextLinkQuestion(nextLinks, state, suffix, shared));
     const detailCands = options.followDetailPages ? detailLinkCandidates(candidates, page.url(), options.startUrls, allowed) : [];
-    if (detailCands.length > 0) questions.push(buildDetailLinkQuestion(detailCands, description, state, suffix));
+    if (detailCands.length > 0) questions.push(buildDetailLinkQuestion(detailCands, description, state, suffix, shared));
 
     const answers = await askChunked(options.chooser, questions);
     const mapped = applyFieldAnswers(options.fields, candidates, answers, suffix);
@@ -270,7 +271,8 @@ async function compileRecord(options: CompileOptions): Promise<CompileResult> {
     if (candidates.length === 0) continue;
 
     const state = fanOutState(description, options.fields, pages.map((p) => p.url()), `record mode, ${pages.length} sample pages`);
-    const answers = await askChunked(options.chooser, buildFieldQuestions(options.fields, candidates, state, suffix));
+    const shared = { records: description, fields: options.fields, samples: pages.map((p) => p.url()), mode: "record" as const };
+    const answers = await askChunked(options.chooser, buildFieldQuestions(options.fields, candidates, state, suffix, shared));
     const mapped = applyFieldAnswers(options.fields, candidates, answers, suffix);
     if (allNone(mapped)) continue;
 

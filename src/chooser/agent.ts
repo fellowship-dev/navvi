@@ -43,6 +43,12 @@ export interface StoredAnswer extends Answer {
   asked?: string;
 }
 
+/** The wire form of a question: premise, options and state; the structured context is for JSON backends only. */
+export function wireQuestion(q: Question): Question {
+  const { context: _context, optionContext: _optionContext, ...wire } = q;
+  return wire;
+}
+
 /** What an answer commits to: the question kind and its offered options, not the id alone. */
 export function questionKey(q: Pick<Question, "kind" | "options">): string {
   return createHash("sha256").update(JSON.stringify([q.kind, q.options ?? []])).digest("hex").slice(0, 16);
@@ -217,7 +223,7 @@ export class AgentChooser extends BaseChooser {
       protocol: PROTOCOL,
       token,
       createdAt: new Date().toISOString(),
-      questions,
+      questions: questions.map(wireQuestion),
       answerWith: ANSWER_WITH,
       answered: [...this.answered.values()],
     };
@@ -226,7 +232,7 @@ export class AgentChooser extends BaseChooser {
   }
 
   private roundTrip(batch: Question[], stdin: NodeJS.ReadableStream, token: string): Promise<unknown[]> {
-    const payload = { protocol: PROTOCOL, token, questions: batch };
+    const payload = { protocol: PROTOCOL, token, questions: batch.map(wireQuestion) };
     this.stdout.write(`${QUESTIONS_START}\n${JSON.stringify(payload, null, 2)}\n${QUESTIONS_END}\n`);
 
     return new Promise<unknown[]>((resolvePromise, reject) => {

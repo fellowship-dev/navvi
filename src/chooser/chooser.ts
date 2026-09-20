@@ -27,7 +27,18 @@ export interface Question {
   maxLength?: number;
   /** text only: JSON schema the answer must parse into. Presence means the answer is JSON. */
   schema?: unknown;
+  /**
+   * Structured facts behind the premise and state (the field being decided, the
+   * samples, the page), for backends that read JSON better than prose (Jev).
+   * Never contains a secret. Text backends keep reading `premise` and `state`.
+   */
+  context?: QuestionContext | undefined;
+  /** choice only: structured facts per option, in option order, same length as `options`. */
+  optionContext?: readonly JsonValue[] | undefined;
 }
+
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+export type QuestionContext = { [key: string]: JsonValue };
 
 export interface Answer {
   id: string;

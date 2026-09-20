@@ -1,0 +1,587 @@
+{
+  "scenario": "AE8",
+  "batch": 1,
+  "entries": [
+    {
+      "question": {
+        "id": "heal.name",
+        "kind": "choice",
+        "premise": "The compiled selectors for name no longer resolve on this page. Which candidate holds the name value here (earlier pages gave \"Amoxicilina 500 mg x 21 cápsulas\", \"Atorvastatina 20 mg x 30 comprimidos\")? Pick none when no candidate is right: this page may simply not show it.",
+        "options": [
+          "main/article/div/h1 = Amoxicilina 500 mg x 21 cápsulas",
+          "main/section/ul/li/a = Atorvastatina 20 mg x 30 comprimidos",
+          "main/nav/span = Amoxicilina 500 mg x 21 cápsulas",
+          "main/article/div/p/span = Laboratorio:",
+          "main/article/div/p/span = Bagó",
+          "main/article/div/p/span = Stock:",
+          "main/article/div/p/span = Disponible",
+          "main/article/div/p/span = SKU:",
+          "main/article/div/p/span = FA-0005",
+          "main/article/div/div/p = Amoxicilina 500 mg de Bagó. Medicamento de venta directa. L…",
+          "main/section/h2 = Productos relacionados",
+          "main/section/ul/li/a = Losartán 50 mg x 30 comprimidos"
+        ],
+        "state": "Healing on http://127.0.0.1:55170/demo/pharmacy/producto/amoxicilina-500-mg.html\nFields whose compiled selectors no longer resolve: name, laboratory, price, stock\nEarlier name values: \"Amoxicilina 500 mg x 21 cápsulas\" | \"Atorvastatina 20 mg x 30 comprimidos\" | \"Clotrimazol 1% crema 20 g\"\nEarlier laboratory values: \"Bagó\" | \"Abbott\" | \"Bayer\"\nEarlier price values: \"$ 6.990\" | \"$ 12.990\" | \"$ 5.290\"\nEarlier stock values: \"Disponible\" | \"Disponible\" | \"Disponible\"",
+        "context": {
+          "decision": "heal_field_value",
+          "field": {
+            "name": "name"
+          },
+          "earlier_values": [
+            "Amoxicilina 500 mg x 21 cápsulas",
+            "Atorvastatina 20 mg x 30 comprimidos"
+          ],
+          "shape": "text",
+          "shared": {
+            "healing": "the compiled selectors no longer resolve on this page",
+            "page": "http://127.0.0.1:55170/demo/pharmacy/producto/amoxicilina-500-mg.html",
+            "mode": "record",
+            "fields": [
+              "name",
+              "laboratory",
+              "price",
+              "stock"
+            ],
+            "broken_fields": [
+              "name",
+              "laboratory",
+              "price",
+              "stock"
+            ]
+          }
+        },
+        "optionContext": [
+          {
+            "path": "main/article/div/h1",
+            "shape": "text",
+            "values": [
+              "Amoxicilina 500 mg x 21 cápsulas"
+            ]
+          },
+          {
+            "path": "main/section/ul/li/a",
+            "shape": "text",
+            "values": [
+              "Atorvastatina 20 mg x 30 comprimidos"
+            ],
+            "candidates_on_same_path": 2
+          },
+          {
+            "path": "main/nav/span",
+            "shape": "text",
+            "values": [
+              "Amoxicilina 500 mg x 21 cápsulas"
+            ]
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "Laboratorio:"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "Bagó"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "Stock:"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "Disponible"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "SKU:"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "FA-0005"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/div/p",
+            "shape": "text",
+            "values": [
+              "Amoxicilina 500 mg de Bagó. Medicamento de venta directa. L…"
+            ]
+          },
+          {
+            "path": "main/section/h2",
+            "shape": "text",
+            "values": [
+              "Productos relacionados"
+            ]
+          },
+          {
+            "path": "main/section/ul/li/a",
+            "shape": "text",
+            "values": [
+              "Losartán 50 mg x 30 comprimidos"
+            ],
+            "candidates_on_same_path": 2
+          }
+        ]
+      },
+      "gold": 0
+    },
+    {
+      "question": {
+        "id": "heal.laboratory",
+        "kind": "choice",
+        "premise": "The compiled selectors for laboratory no longer resolve on this page. Which candidate holds the laboratory value here (earlier pages gave \"Bagó\", \"Abbott\")? Pick none when no candidate is right: this page may simply not show it.",
+        "options": [
+          "main/article/div/p/span = Bagó",
+          "main/article/div/h1 = Amoxicilina 500 mg x 21 cápsulas",
+          "main/article/div/p/span = Laboratorio:",
+          "main/article/div/p/span = Stock:",
+          "main/article/div/p/span = Disponible",
+          "main/article/div/p/span = SKU:",
+          "main/article/div/p/span = FA-0005",
+          "main/article/div/div/p = Amoxicilina 500 mg de Bagó. Medicamento de venta directa. L…",
+          "main/section/h2 = Productos relacionados",
+          "main/section/ul/li/a = Losartán 50 mg x 30 comprimidos",
+          "main/section/ul/li/span = Sin stock",
+          "main/section/ul/li/a = Metformina 850 mg x 60 comprimidos"
+        ],
+        "state": "Healing on http://127.0.0.1:55170/demo/pharmacy/producto/amoxicilina-500-mg.html\nFields whose compiled selectors no longer resolve: name, laboratory, price, stock\nEarlier name values: \"Amoxicilina 500 mg x 21 cápsulas\" | \"Atorvastatina 20 mg x 30 comprimidos\" | \"Clotrimazol 1% crema 20 g\"\nEarlier laboratory values: \"Bagó\" | \"Abbott\" | \"Bayer\"\nEarlier price values: \"$ 6.990\" | \"$ 12.990\" | \"$ 5.290\"\nEarlier stock values: \"Disponible\" | \"Disponible\" | \"Disponible\"",
+        "context": {
+          "decision": "heal_field_value",
+          "field": {
+            "name": "laboratory"
+          },
+          "earlier_values": [
+            "Bagó",
+            "Abbott"
+          ],
+          "shape": "text",
+          "shared": {
+            "healing": "the compiled selectors no longer resolve on this page",
+            "page": "http://127.0.0.1:55170/demo/pharmacy/producto/amoxicilina-500-mg.html",
+            "mode": "record",
+            "fields": [
+              "name",
+              "laboratory",
+              "price",
+              "stock"
+            ],
+            "broken_fields": [
+              "name",
+              "laboratory",
+              "price",
+              "stock"
+            ]
+          }
+        },
+        "optionContext": [
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "Bagó"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/h1",
+            "shape": "text",
+            "values": [
+              "Amoxicilina 500 mg x 21 cápsulas"
+            ]
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "Laboratorio:"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "Stock:"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "Disponible"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "SKU:"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "FA-0005"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/div/p",
+            "shape": "text",
+            "values": [
+              "Amoxicilina 500 mg de Bagó. Medicamento de venta directa. L…"
+            ]
+          },
+          {
+            "path": "main/section/h2",
+            "shape": "text",
+            "values": [
+              "Productos relacionados"
+            ]
+          },
+          {
+            "path": "main/section/ul/li/a",
+            "shape": "text",
+            "values": [
+              "Losartán 50 mg x 30 comprimidos"
+            ],
+            "candidates_on_same_path": 2
+          },
+          {
+            "path": "main/section/ul/li/span",
+            "shape": "text",
+            "values": [
+              "Sin stock"
+            ]
+          },
+          {
+            "path": "main/section/ul/li/a",
+            "shape": "text",
+            "values": [
+              "Metformina 850 mg x 60 comprimidos"
+            ],
+            "candidates_on_same_path": 2
+          }
+        ]
+      },
+      "gold": 0
+    },
+    {
+      "question": {
+        "id": "heal.price",
+        "kind": "choice",
+        "premise": "The compiled selectors for price no longer resolve on this page. Which candidate holds the price value here (earlier pages gave \"$ 6.990\", \"$ 12.990\")? Pick none when no candidate is right: this page may simply not show it.",
+        "options": [
+          "main/article/aside/span = $ 6.990",
+          "main/section/ul/li/span = $ 8.490",
+          "main/section/ul/li/span = $ 10.390",
+          "main/section/ul/li/span = $ 9.990",
+          "main/article/div/h1 = Amoxicilina 500 mg x 21 cápsulas",
+          "main/article/div/p/span = Laboratorio:",
+          "main/article/div/p/span = Bagó",
+          "main/article/div/p/span = Stock:",
+          "main/article/div/p/span = Disponible",
+          "main/article/div/p/span = SKU:",
+          "main/article/div/p/span = FA-0005",
+          "main/article/div/div/p = Amoxicilina 500 mg de Bagó. Medicamento de venta directa. L…"
+        ],
+        "state": "Healing on http://127.0.0.1:55170/demo/pharmacy/producto/amoxicilina-500-mg.html\nFields whose compiled selectors no longer resolve: name, laboratory, price, stock\nEarlier name values: \"Amoxicilina 500 mg x 21 cápsulas\" | \"Atorvastatina 20 mg x 30 comprimidos\" | \"Clotrimazol 1% crema 20 g\"\nEarlier laboratory values: \"Bagó\" | \"Abbott\" | \"Bayer\"\nEarlier price values: \"$ 6.990\" | \"$ 12.990\" | \"$ 5.290\"\nEarlier stock values: \"Disponible\" | \"Disponible\" | \"Disponible\"",
+        "context": {
+          "decision": "heal_field_value",
+          "field": {
+            "name": "price"
+          },
+          "earlier_values": [
+            "$ 6.990",
+            "$ 12.990"
+          ],
+          "shape": "money",
+          "shared": {
+            "healing": "the compiled selectors no longer resolve on this page",
+            "page": "http://127.0.0.1:55170/demo/pharmacy/producto/amoxicilina-500-mg.html",
+            "mode": "record",
+            "fields": [
+              "name",
+              "laboratory",
+              "price",
+              "stock"
+            ],
+            "broken_fields": [
+              "name",
+              "laboratory",
+              "price",
+              "stock"
+            ]
+          }
+        },
+        "optionContext": [
+          {
+            "path": "main/article/aside/span",
+            "shape": "money",
+            "values": [
+              "$ 6.990"
+            ]
+          },
+          {
+            "path": "main/section/ul/li/span",
+            "shape": "money",
+            "values": [
+              "$ 8.490"
+            ],
+            "candidates_on_same_path": 3
+          },
+          {
+            "path": "main/section/ul/li/span",
+            "shape": "money",
+            "values": [
+              "$ 10.390"
+            ],
+            "candidates_on_same_path": 3
+          },
+          {
+            "path": "main/section/ul/li/span",
+            "shape": "money",
+            "values": [
+              "$ 9.990"
+            ],
+            "candidates_on_same_path": 3
+          },
+          {
+            "path": "main/article/div/h1",
+            "shape": "text",
+            "values": [
+              "Amoxicilina 500 mg x 21 cápsulas"
+            ]
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "Laboratorio:"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "Bagó"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "Stock:"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "Disponible"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "SKU:"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "FA-0005"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/div/p",
+            "shape": "text",
+            "values": [
+              "Amoxicilina 500 mg de Bagó. Medicamento de venta directa. L…"
+            ]
+          }
+        ]
+      },
+      "gold": 0
+    },
+    {
+      "question": {
+        "id": "heal.stock",
+        "kind": "choice",
+        "premise": "The compiled selectors for stock no longer resolve on this page. Which candidate holds the stock value here (earlier pages gave \"Disponible\", \"Disponible\")? Pick none when no candidate is right: this page may simply not show it.",
+        "options": [
+          "main/article/div/p/span = Disponible",
+          "main/article/div/h1 = Amoxicilina 500 mg x 21 cápsulas",
+          "main/article/div/p/span = Laboratorio:",
+          "main/article/div/p/span = Bagó",
+          "main/article/div/p/span = Stock:",
+          "main/article/div/p/span = SKU:",
+          "main/article/div/p/span = FA-0005",
+          "main/article/div/div/p = Amoxicilina 500 mg de Bagó. Medicamento de venta directa. L…",
+          "main/section/h2 = Productos relacionados",
+          "main/section/ul/li/a = Losartán 50 mg x 30 comprimidos",
+          "main/section/ul/li/span = Sin stock",
+          "main/section/ul/li/a = Metformina 850 mg x 60 comprimidos"
+        ],
+        "state": "Healing on http://127.0.0.1:55170/demo/pharmacy/producto/amoxicilina-500-mg.html\nFields whose compiled selectors no longer resolve: name, laboratory, price, stock\nEarlier name values: \"Amoxicilina 500 mg x 21 cápsulas\" | \"Atorvastatina 20 mg x 30 comprimidos\" | \"Clotrimazol 1% crema 20 g\"\nEarlier laboratory values: \"Bagó\" | \"Abbott\" | \"Bayer\"\nEarlier price values: \"$ 6.990\" | \"$ 12.990\" | \"$ 5.290\"\nEarlier stock values: \"Disponible\" | \"Disponible\" | \"Disponible\"",
+        "context": {
+          "decision": "heal_field_value",
+          "field": {
+            "name": "stock"
+          },
+          "earlier_values": [
+            "Disponible",
+            "Disponible"
+          ],
+          "shape": "text",
+          "shared": {
+            "healing": "the compiled selectors no longer resolve on this page",
+            "page": "http://127.0.0.1:55170/demo/pharmacy/producto/amoxicilina-500-mg.html",
+            "mode": "record",
+            "fields": [
+              "name",
+              "laboratory",
+              "price",
+              "stock"
+            ],
+            "broken_fields": [
+              "name",
+              "laboratory",
+              "price",
+              "stock"
+            ]
+          }
+        },
+        "optionContext": [
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "Disponible"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/h1",
+            "shape": "text",
+            "values": [
+              "Amoxicilina 500 mg x 21 cápsulas"
+            ]
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "Laboratorio:"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "Bagó"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "Stock:"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "SKU:"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/p/span",
+            "shape": "text",
+            "values": [
+              "FA-0005"
+            ],
+            "candidates_on_same_path": 6
+          },
+          {
+            "path": "main/article/div/div/p",
+            "shape": "text",
+            "values": [
+              "Amoxicilina 500 mg de Bagó. Medicamento de venta directa. L…"
+            ]
+          },
+          {
+            "path": "main/section/h2",
+            "shape": "text",
+            "values": [
+              "Productos relacionados"
+            ]
+          },
+          {
+            "path": "main/section/ul/li/a",
+            "shape": "text",
+            "values": [
+              "Losartán 50 mg x 30 comprimidos"
+            ],
+            "candidates_on_same_path": 2
+          },
+          {
+            "path": "main/section/ul/li/span",
+            "shape": "text",
+            "values": [
+              "Sin stock"
+            ]
+          },
+          {
+            "path": "main/section/ul/li/a",
+            "shape": "text",
+            "values": [
+              "Metformina 850 mg x 60 comprimidos"
+            ],
+            "candidates_on_same_path": 2
+          }
+        ]
+      },
+      "gold": 0
+    }
+  ]
+}

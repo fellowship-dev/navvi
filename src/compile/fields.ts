@@ -1,5 +1,5 @@
 import type { LeafCandidate } from "../browser/snapshot.js";
-import type { Answer, Question } from "../chooser/chooser.js";
+import type { Answer, JsonValue, Question, QuestionContext } from "../chooser/chooser.js";
 import { premises } from "../chooser/questions.js";
 import { URL_ATTRS, commonShape, resolveUrl } from "../scraper/extract.js";
 import type { FieldAlternative, Shape } from "../scraper/schema.js";
@@ -96,14 +96,56 @@ export function fieldQuestionId(name: string, suffix = ""): string {
   return `${FIELD_QUESTION_PREFIX}${name}${suffix}`;
 }
 
-export function buildFieldQuestions(fields: readonly CompileField[], candidates: readonly FieldCandidate[], state: string, suffix = ""): Question[] {
+/** The facts behind a candidate option, for structured backends. */
+export function candidateContext(candidate: FieldCandidate, samePath = 1): JsonValue {
+  const out: { [key: string]: JsonValue } = { path: candidate.path, shape: candidate.shape, values: candidate.values.map((v) => clip(v, LABEL_VALUE_CHARS)) };
+  if (candidate.attr) out.attribute = candidate.attr;
+  // Several candidates on one path are the rows of a list (related products, a menu), not the page's own value.
+  if (samePath > 1) out.candidates_on_same_path = samePath;
+  return out;
+}
+
+/** Contexts for a whole option list, each knowing how many options share its path. */
+export function candidateContexts(candidates: readonly FieldCandidate[]): JsonValue[] {
+  const counts = new Map<string, number>();
+  for (const c of candidates) counts.set(c.path, (counts.get(c.path) ?? 0) + 1);
+  return candidates.map((c) => candidateContext(c, counts.get(c.path) ?? 1));
+}
+
+/** What the fan-out shares: the records, every field, the samples. Builders add the field under decision. */
+export interface FanOutContext {
+  records: string;
+  fields: readonly CompileField[];
+  samples: readonly string[];
+  mode: "list" | "record";
+}
+
+/** The batch-wide state as JSON: every question in a fan-out batch carries the same one. */
+export function sharedContext(shared: FanOutContext): JsonValue {
+  const fields: JsonValue[] = shared.fields.map((f): JsonValue => (f.description ? { name: f.name, description: f.description } : { name: f.name }));
+  return { records: shared.records, mode: shared.mode, fields, samples: [...shared.samples] };
+}
+
+/** `shared` is the batch-wide state (every question in the batch carries the same one); the rest is this question's own. */
+function fieldContext(field: CompileField, shared: FanOutContext | undefined): QuestionContext {
+  const out: QuestionContext = { decision: "field_value", field: field.description ? { name: field.name, description: field.description } : { name: field.name } };
+  if (shared) {
+    out.shared = sharedContext(shared);
+  }
+  return out;
+}
+
+export function buildFieldQuestions(fields: readonly CompileField[], candidates: readonly FieldCandidate[], state: string, suffix = "", shared?: FanOutContext): Question[] {
   const options = candidates.map(candidateLabel);
+  const optionContext = candidateContexts(candidates);
   return fields.map((field) => ({
     id: fieldQuestionId(field.name, suffix),
     kind: "choice",
     premise: premises.fieldChoice(field.name, field.description),
     options,
     state,
+    context: fieldContext(field, shared),
+    optionContext,
   }));
 }
 

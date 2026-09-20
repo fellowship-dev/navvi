@@ -82,3 +82,80 @@ export const premises = {
 } as const;
 
 export type PremiseName = keyof typeof premises;
+
+/**
+ * Jev framing (docs/jev-hillclimb.md). Jev is a classifier that reads
+ * structure: the batch's shared facts travel as JSON state, each question's own
+ * facts as structured instructions, each option as a structured criterion.
+ * Every rule below was kept because it moved the bank number; the log says
+ * which step added it.
+ */
+export type JevInstructions = { [key: string]: import("./chooser.js").JsonValue };
+
+export const jevFraming = {
+  /** How `none` is described per decision: what it means and what it is not for. */
+  none: (decision: string | undefined): import("./chooser.js").JsonValue => {
+    switch (decision) {
+      case "field_value":
+      case "heal_field_value":
+        return { what: "No candidate holds this field's value at all", not_for: "Two candidates both hold the value: pick the one whose values are exactly the field, not the breadcrumb, a related item or a label" };
+      case "list_group":
+        return { what: "No candidate group is the list of records", not_for: "A single candidate that does hold one record per item: pick it" };
+      case "next_page_link":
+        return { what: "This is the last page, or no offered control leads to the next page of the same listing" };
+      case "detail_page_link":
+        return { what: "The records have no detail page of their own" };
+      case "heal_trace_step":
+        return { what: "No offered control can play the recorded step" };
+      case "operation_target":
+        return { what: "No offered control fits this operation for the goal" };
+      case "next_operation":
+        return { what: "No listed operation applies" };
+      default:
+        return "None of the options is right.";
+    }
+  },
+
+  /** The question's own facts plus the rule for its decision, as structured instructions. */
+  instructions: (premise: string, own: JevInstructions): JevInstructions => {
+    const decision = typeof own.decision === "string" ? own.decision : undefined;
+    const rule = jevFraming.rule(decision);
+    return { question: premise.replace(/ Pick none[^.]*\./, ""), ...own, ...(rule ? { rule } : {}) };
+  },
+
+  /**
+   * The presence gate: for decisions where `none` loses to a split among
+   * equally wrong options, a separate yes/no question decides whether the
+   * value is on the page at all; the choice then picks only among candidates.
+   * Returns the gate's instructions, or undefined when the decision has none.
+   */
+  presence: (own: JevInstructions, candidates: readonly import("./chooser.js").JsonValue[]): JevInstructions | undefined => {
+    const field = typeof own.field === "object" && own.field !== null && !Array.isArray(own.field) && typeof own.field.name === "string" ? own.field.name : undefined;
+    switch (own.decision) {
+      case "heal_field_value":
+        return {
+          question: `Is the page's own ${field ?? "field"} value among the candidates?`,
+          field: own.field ?? null,
+          earlier_values: own.earlier_values ?? [],
+          candidates: [...candidates],
+          rule: "Answer no when the page's own record does not show this value (for example an out-of-stock product without a price), even when other records listed on the page (several candidates on one path) show values of the same kind.",
+        };
+      default:
+        return undefined;
+    }
+  },
+
+  /** Whether the choice for this decision is asked without `none` (the presence gate stands in for it). */
+  gated: (decision: string | undefined): boolean => decision === "heal_field_value",
+
+  rule: (decision: string | undefined): string | undefined => {
+    switch (decision) {
+      case "field_value":
+        return "The right candidate shows the field's value and nothing else on every sample. A candidate showing a label (such as 'Price:'), a related record, a breadcrumb or a longer text that merely contains the value is not it.";
+      case "heal_field_value":
+        return "The page was redesigned; the field may still be shown. Earlier values come from other pages: they show the kind and shape of value to look for, not the value to find. The right candidate shows this page's own value of the field, not a label, a breadcrumb, or a value from a list of other records (several candidates on one path).";
+      default:
+        return undefined;
+    }
+  },
+} as const;

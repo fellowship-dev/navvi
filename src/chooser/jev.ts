@@ -3,6 +3,7 @@ import { createGateway } from "@ai-sdk/gateway";
 import {
   APICallError,
   type Experimental_EvaluationModelV4,
+  type Experimental_EvaluationModelV4Input,
   type Experimental_EvaluationModelV4CallOptions,
   type Experimental_EvaluationModelV4Result,
   type JSONValue,
@@ -14,11 +15,12 @@ import {
   type BackendResult,
   type BaseChooserOptions,
   type ChooserName,
+  type JsonValue,
   type Price,
   type Question,
   type ZeroDataRetentionState,
 } from "./chooser.js";
-import { NONE_OPTION } from "./questions.js";
+import { jevFraming, NONE_OPTION } from "./questions.js";
 
 /**
  * KTD2: TypeSafe Jev through AI SDK `experimental_evaluate`, either via Vercel
@@ -72,23 +74,63 @@ function selectProvider(options: JevChooserOptions, env: NodeJS.ProcessEnv): Sel
 
 export interface EvaluationQuestionMapping {
   question: Experimental_EvaluationQuestion;
-  /** Criteria keys in option order (choice only), `none` last. */
+  /** Criteria keys in option order (choice only), `none` last unless gated. */
   keys: string[];
+  /** The presence gate asked alongside a gated choice: yes means an option, no means `none`. */
+  gate?: Experimental_EvaluationQuestion;
 }
 
-/** Map a Navvi question to the AI SDK evaluation question. Choice questions always end with `none`. */
+/** Question id of the presence gate that accompanies a gated choice. */
+export const gateId = (id: string): string => `${id}.present`;
+
+/** The question's own structured facts: its context without the batch-wide `shared` part. */
+function ownContext(q: Question): { [key: string]: JsonValue } | undefined {
+  if (!q.context) return undefined;
+  const { shared: _shared, ...own } = q.context;
+  return own;
+}
+
+/**
+ * The state a batch is asked over: the structured shared facts when the
+ * questions carry them (every question in a batch shares one), else the text.
+ */
+export function toEvaluationState(batch: readonly Question[]): Experimental_EvaluationModelV4Input {
+  const shared = batch[0]?.context?.shared;
+  return shared !== undefined ? asInput(shared) : (batch[0]?.state ?? "");
+}
+
+/** A JSON value as an evaluation input: scalars other than strings are wrapped. */
+function asInput(value: JsonValue): Experimental_EvaluationModelV4Input {
+  if (typeof value === "string" || Array.isArray(value) || (typeof value === "object" && value !== null)) return value;
+  return { value };
+}
+
+/**
+ * Map a Navvi question to the AI SDK evaluation question. Choice questions
+ * always end with `none`. With structured context the instructions and the
+ * criteria are JSON (docs/jev-hillclimb.md); without it, the premise and the
+ * option strings.
+ */
 export function toEvaluationQuestion(q: Question): EvaluationQuestionMapping {
+  const own = ownContext(q);
   switch (q.kind) {
     case "choice": {
       const options = q.options ?? [];
       const keys = optionKeys(options);
-      const criteria: Record<string, string | null> = {};
-      keys.forEach((key, i) => (criteria[key] = options[i] ?? null));
-      criteria[NONE_OPTION] = "None of the options is right.";
-      return { question: { type: "choice", instructions: q.premise, criteria }, keys: [...keys, NONE_OPTION] };
+      const criteria: Record<string, Experimental_EvaluationModelV4Input | null> = {};
+      const structured = q.optionContext && q.optionContext.length === options.length ? q.optionContext : undefined;
+      keys.forEach((key, i) => (criteria[key] = structured ? asInput(structured[i] ?? null) : (options[i] ?? null)));
+      const decision = typeof own?.decision === "string" ? own.decision : undefined;
+      const instructions = own ? jevFraming.instructions(q.premise, own) : q.premise;
+      const gate = own && jevFraming.gated(decision) ? jevFraming.presence(own, structured ?? options) : undefined;
+      if (gate && options.length > 0) {
+        return { question: { type: "choice", instructions, criteria }, keys, gate: { type: "boolean", instructions: gate } };
+      }
+      criteria[NONE_OPTION] = own ? asInput(jevFraming.none(decision)) : "None of the options is right.";
+      return { question: { type: "choice", instructions, criteria }, keys: [...keys, NONE_OPTION] };
     }
     case "boolean":
-      return { question: { type: "boolean", instructions: q.premise }, keys: [] };
+      return { question: { type: "boolean", instructions: own ? jevFraming.instructions(q.premise, own) : q.premise }, keys: [] };
     case "score":
       return { question: { type: "score", instructions: q.premise, criteria: q.options ?? [] }, keys: [] };
     case "text":
@@ -136,12 +178,17 @@ export class JevChooser extends BaseChooser {
   protected async callBackend(batch: Question[]): Promise<BackendResult> {
     const questions: Record<string, Experimental_EvaluationQuestion> = {};
     const keysById = new Map<string, string[]>();
+    const gated = new Set<string>();
     for (const q of batch) {
       const mapped = toEvaluationQuestion(q);
       questions[q.id] = mapped.question;
       keysById.set(q.id, mapped.keys);
+      if (mapped.gate) {
+        questions[gateId(q.id)] = mapped.gate;
+        gated.add(q.id);
+      }
     }
-    const state = batch[0]?.state ?? "";
+    const state = toEvaluationState(batch);
     const result = await experimental_evaluate({
       model: this.model,
       state,
@@ -159,7 +206,12 @@ export class JevChooser extends BaseChooser {
         const keys = keysById.get(q.id) ?? [];
         const position = keys.indexOf(answer.choice);
         const probabilities = answer.probabilities ? keys.slice(0, options.length).map((k) => answer.probabilities?.[k] ?? 0) : undefined;
-        return { id: q.id, index: position < 0 || position >= options.length ? null : position, probabilities };
+        let index = position < 0 || position >= options.length ? null : position;
+        if (gated.has(q.id)) {
+          const gate = result.answers[gateId(q.id)];
+          if (gate?.type === "boolean" && gate.probability < 0.5) index = null;
+        }
+        return { id: q.id, index, probabilities };
       }
       if (answer.type === "boolean") {
         return { id: q.id, index: answer.probability >= 0.5 ? 1 : 0, probability: answer.probability };
@@ -234,7 +286,8 @@ export class TypeSafeEvaluationModel implements Experimental_EvaluationModelV4 {
     return {
       answers,
       usage: { inputTokens: parsed.usage?.input_tokens, outputTokens: parsed.usage?.output_tokens },
-      rounding: { probabilityDecimals: 3, scoreDecimals: 3 },
+      // The API rounds probabilities to two decimals; declaring three made twelve-option answers fail the SDK's sum check.
+      rounding: { probabilityDecimals: 2, scoreDecimals: 3 },
       warnings: [],
       response: { modelId: parsed.model },
     };
