@@ -75,8 +75,11 @@ export async function resolveLocator(page: Page, alternatives: readonly LocatorA
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     for (const alt of alternatives) {
-      const locator = page.getByRole(alt.role as AriaRole, { name: alt.name, exact: alt.exact }).first();
-      if ((await locator.count().catch(() => 0)) > 0 && (await locator.isVisible().catch(() => false))) return locator;
+      const candidates = [page.getByRole(alt.role as AriaRole, { name: alt.name, exact: alt.exact }).first()];
+      if (alt.css) candidates.push(page.locator(alt.css).first());
+      for (const locator of candidates) {
+        if ((await locator.count().catch(() => 0)) > 0 && (await locator.isVisible().catch(() => false))) return locator;
+      }
     }
     if (Date.now() >= deadline) return null;
     await page.waitForTimeout(150);

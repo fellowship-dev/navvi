@@ -2,8 +2,8 @@
   "id": "nav.1.type",
   "index": 1,
   "probabilities": [
-    0.01,
-    0.97
+    0,
+    0.99
   ],
   "kind": "choice",
   "inputTokens": 549,

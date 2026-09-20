@@ -1,0 +1,22 @@
+{
+  "id": "field.quote",
+  "index": 0,
+  "probabilities": [
+    0.98,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "kind": "choice",
+  "inputTokens": 1088,
+  "outputTokens": 142,
+  "chooser": "jev"
+}

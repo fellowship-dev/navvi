@@ -6,6 +6,7 @@ import { askChunked, candidateContexts, candidateKey, candidateLabel, toAlternat
 import { appendFieldAlternative, appendStepAlternative, markHealed, type CompiledScraper, type LocatorAlternative, type Shape, type TraceStep } from "../scraper/schema.js";
 import { clip, isRecord } from "../util/text.js";
 import type { HealContext, HealOutcome, HealerHook } from "./crawler.js";
+import { withCss } from "../navigate/trace.js";
 
 /**
  * Healing (U13; R19, R31, R32, R33, R42). A page that fails its fingerprint
@@ -291,7 +292,7 @@ async function healStep(ctx: HealContext, stepIndex: number, reason: string): Pr
   const [answer] = await chooser.ask([question]);
   const chosen = answer && answer.index !== null ? offered[answer.index] : undefined;
   if (!chosen) return { healed: false, reason: `the chooser picked no control for step ${stepIndex} on ${url}` };
-  const locator: LocatorAlternative = { role: chosen.role, name: chosen.name, exact: true };
+  const locator: LocatorAlternative = withCss({ role: chosen.role, name: chosen.name, exact: true }, chosen);
   const healed = markHealed(appendStepAlternative(scraper, stepIndex, locator));
   return { healed: true, scraper: healed, event: { kind: "step", stepIndex, locator, at: new Date().toISOString(), url } };
 }

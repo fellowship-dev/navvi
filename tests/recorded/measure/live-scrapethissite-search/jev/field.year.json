@@ -1,0 +1,16 @@
+{
+  "id": "field.year",
+  "index": 1,
+  "probabilities": [
+    0,
+    0.98,
+    0,
+    0,
+    0,
+    0
+  ],
+  "kind": "choice",
+  "inputTokens": 563,
+  "outputTokens": 79,
+  "chooser": "jev"
+}

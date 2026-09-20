@@ -160,6 +160,10 @@ export const jevFraming = {
         return "The detail link is the per-item link whose targets differ per item and open a page of that item's own. A lone candidate that fits is the answer; none is only for records with no page of their own (an anchor within the page, a link shared by every item).";
       case "next_page_link":
         return "The next-page control continues the same listing (next, more, older, a page number one higher). Sorting, filters, a search page, the previous page or a section anchor are not it.";
+      case "goal_achieved":
+        return "Evidence lives in the page and recent_actions. A login goal is evidenced by a session on the page (a logout or sign-out control, the account's name) after the login form was submitted. A search or filter goal by results matching the request. An open-a-page goal by that page's own content, not a link to it.";
+      case "next_operation":
+        return "Judge from recent_actions and the page: a submitted form whose page changed has done its work. A login goal is achieved once the page shows a session (a logout or sign-out control, the account's name): DONE, not BLOCKED. BLOCKED only when no listed operation can make progress.";
       default:
         return undefined;
     }

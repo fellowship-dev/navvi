@@ -3,6 +3,6 @@
   "index": 1,
   "kind": "choice",
   "inputTokens": 3,
-  "outputTokens": 166,
+  "outputTokens": 344,
   "chooser": "claude"
 }

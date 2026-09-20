@@ -1,0 +1,9 @@
+{
+  "id": "text.0",
+  "index": null,
+  "text": "Rangers",
+  "kind": "text",
+  "inputTokens": 10,
+  "outputTokens": 246,
+  "chooser": "claude"
+}

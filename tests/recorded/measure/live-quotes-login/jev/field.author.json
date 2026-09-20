@@ -1,0 +1,22 @@
+{
+  "id": "field.author",
+  "index": 2,
+  "probabilities": [
+    0.02,
+    0,
+    0.93,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "kind": "choice",
+  "inputTokens": 1088,
+  "outputTokens": 142,
+  "chooser": "jev"
+}

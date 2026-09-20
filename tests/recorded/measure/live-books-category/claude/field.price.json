@@ -1,0 +1,8 @@
+{
+  "id": "field.price",
+  "index": 4,
+  "kind": "choice",
+  "inputTokens": 3,
+  "outputTokens": 222,
+  "chooser": "claude"
+}

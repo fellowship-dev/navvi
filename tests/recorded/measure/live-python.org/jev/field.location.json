@@ -1,0 +1,26 @@
+{
+  "id": "field.location",
+  "index": 4,
+  "probabilities": [
+    0,
+    0,
+    0,
+    0,
+    0.96,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "kind": "choice",
+  "inputTokens": 1604,
+  "outputTokens": 235,
+  "chooser": "jev"
+}

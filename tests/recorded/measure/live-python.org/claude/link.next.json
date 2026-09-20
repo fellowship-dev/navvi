@@ -1,0 +1,8 @@
+{
+  "id": "link.next",
+  "index": 3,
+  "kind": "choice",
+  "inputTokens": 2,
+  "outputTokens": 238,
+  "chooser": "claude"
+}

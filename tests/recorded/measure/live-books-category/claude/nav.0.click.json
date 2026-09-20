@@ -1,0 +1,8 @@
+{
+  "id": "nav.0.click",
+  "index": 3,
+  "kind": "choice",
+  "inputTokens": 5,
+  "outputTokens": 277,
+  "chooser": "claude"
+}

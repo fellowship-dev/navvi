@@ -9,7 +9,7 @@ import type { StepExpect, TraceStep } from "../scraper/schema.js";
 import { maskSecrets } from "../secrets/resolve.js";
 import { clip } from "../util/text.js";
 import { generateText, policyControl, type RecentAction } from "./textHelper.js";
-import { captureExpectation, isHttpHref, readLandmarks, secretNameFor, TraceRecorder, type Landmark } from "./trace.js";
+import { captureExpectation, cssHint, isHttpHref, readLandmarks, secretNameFor, TraceRecorder, type Landmark } from "./trace.js";
 
 /**
  * Navigate phase (U7): the jev-ultrafast loop with the chooser in Jev's seat.
@@ -191,7 +191,13 @@ async function locate(page: Page, controls: readonly SnapshotControl[], control:
     locator = page.getByRole(role, { name: control.name, exact: false });
     count = await locator.count();
   }
-  if (count === 0) return null;
+  if (count === 0) {
+    const css = cssHint(control);
+    if (!css) return null;
+    locator = page.locator(css);
+    count = await locator.count();
+    if (count === 0) return null;
+  }
   if (count > 1) {
     const twins = controls.filter((c) => c.role === control.role && c.name === control.name);
     const k = twins.findIndex((c) => c.id === control.id);
