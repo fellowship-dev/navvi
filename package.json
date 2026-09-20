@@ -12,6 +12,7 @@
   },
   "files": [
     "dist",
+    "scripts/postinstall.mjs",
     "SKILL.md",
     "llms.txt",
     "README.md",

@@ -21,6 +21,7 @@ import {
   type ZeroDataRetentionState,
 } from "./chooser.js";
 import { jevFraming, NONE_OPTION } from "./questions.js";
+import { wellFormed } from "../util/text.js";
 
 /**
  * KTD2: TypeSafe Jev through AI SDK `experimental_evaluate`, either via Vercel
@@ -261,7 +262,10 @@ export class TypeSafeEvaluationModel implements Experimental_EvaluationModelV4 {
     for (const [id, q] of Object.entries(options.questions)) {
       questions[id] = q.type === "boolean" ? { ...q, type: "noul" } : q;
     }
-    const body = JSON.stringify({ state: options.state, model: this.modelId, questions });
+    // DOM strings can contain lone surrogates (including text clipped in the page).
+    // JSON permits escaped surrogates, but TypeSafe rejects them as invalid Unicode.
+    const body = JSON.stringify({ state: options.state, model: this.modelId, questions },
+      (_key, value: unknown) => typeof value === "string" ? wellFormed(value) : value);
     const response = await this.fetchImpl(this.url, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${this.apiKey}`, ...options.headers },
