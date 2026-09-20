@@ -291,6 +291,13 @@ export interface BaseChooserOptions {
 }
 
 const DEFAULT_BACKOFF_MS = [500, 2_000];
+// Usage snapshots must not overlap for callers delegating to the same chooser.
+const FALLBACK_QUEUES = new WeakMap<Chooser, Promise<void>>();
+const USAGE_COUNTERS = ["questions", "textQuestions", "batches", "inputTokens", "outputTokens", "waitMs"] as const;
+
+function combineRetention(a: ZeroDataRetentionState | undefined, b: ZeroDataRetentionState): ZeroDataRetentionState {
+  return a === undefined || a === b ? b : "unknown";
+}
 
 /**
  * Shared behaviour of every backend: question checks, budget, one validation
@@ -312,6 +319,8 @@ export abstract class BaseChooser implements Chooser {
 
   private counters = { questions: 0, textQuestions: 0, batches: 0, inputTokens: 0, outputTokens: 0, waitMs: 0 };
   private observedZeroDataRetention: ZeroDataRetentionState | undefined;
+  private delegated = { questions: 0, textQuestions: 0, batches: 0, inputTokens: 0, outputTokens: 0, waitMs: 0, costUsd: 0 };
+  private delegatedZeroDataRetention: ZeroDataRetentionState | undefined;
 
   constructor(options: BaseChooserOptions = {}) {
     this.budget = options.budget ?? new Budget();
@@ -324,12 +333,52 @@ export abstract class BaseChooser implements Chooser {
 
   usage(): ChooserUsage {
     const { inputTokens, outputTokens } = this.counters;
+    const totals = { ...this.counters };
+    for (const key of USAGE_COUNTERS) totals[key] += this.delegated[key];
+    const ownRetention = this.observedZeroDataRetention ?? this.zeroDataRetentionDefault;
+    const hasOwnUsage = USAGE_COUNTERS.some((key) => this.counters[key] > 0);
+    const zeroDataRetention = this.delegatedZeroDataRetention === undefined ? ownRetention
+      : combineRetention(hasOwnUsage ? ownRetention : undefined, this.delegatedZeroDataRetention);
     return {
       chooser: this.name,
-      ...this.counters,
-      costUsd: (inputTokens * this.price.inputPerMillion + outputTokens * this.price.outputPerMillion) / 1_000_000,
-      zeroDataRetention: this.observedZeroDataRetention ?? this.zeroDataRetentionDefault,
+      ...totals,
+      costUsd: (inputTokens * this.price.inputPerMillion + outputTokens * this.price.outputPerMillion) / 1_000_000 + this.delegated.costUsd,
+      zeroDataRetention,
     };
+  }
+
+  private async askTextFallback(text: Question[]): Promise<Answer[]> {
+    const fallback = this.textFallback!;
+    const previous = FALLBACK_QUEUES.get(fallback);
+    let release!: () => void;
+    const turn = new Promise<void>((resolve) => { release = resolve; });
+    FALLBACK_QUEUES.set(fallback, turn);
+    await previous;
+    try {
+      return await this.accountTextFallback(fallback, text);
+    } finally {
+      release();
+      if (FALLBACK_QUEUES.get(fallback) === turn) FALLBACK_QUEUES.delete(fallback);
+    }
+  }
+
+  private async accountTextFallback(fallback: Chooser, text: Question[]): Promise<Answer[]> {
+    const before = fallback.usage();
+    try {
+      return await fallback.ask(text);
+    } finally {
+      // The fallback already charges its budget and prices its own tokens. Only
+      // include work delegated by this chooser, even if the call failed.
+      const after = fallback.usage();
+      let used = false;
+      for (const key of USAGE_COUNTERS) {
+        const delta = after[key] - before[key];
+        this.delegated[key] += delta;
+        used ||= delta > 0;
+      }
+      this.delegated.costUsd += after.costUsd - before.costUsd;
+      if (used) this.delegatedZeroDataRetention = combineRetention(this.delegatedZeroDataRetention, after.zeroDataRetention);
+    }
   }
 
   async ask(batch: Question[]): Promise<Answer[]> {
@@ -339,7 +388,7 @@ export abstract class BaseChooser implements Chooser {
     const text = batch.filter((q) => q.kind === "text");
     const own = this.textFallback && text.length > 0 ? batch.filter((q) => q.kind !== "text") : batch;
     if (own.length < batch.length) {
-      for (const a of await this.textFallback!.ask(text)) byId.set(a.id, a);
+      for (const a of await this.askTextFallback(text)) byId.set(a.id, a);
     }
     for (const group of groupByState(own)) {
       for (const a of await this.askGroup(group)) byId.set(a.id, a);
@@ -393,7 +442,7 @@ export abstract class BaseChooser implements Chooser {
     this.counters.batches += 1;
     this.counters.inputTokens += input;
     this.counters.outputTokens += result.outputTokens ?? 0;
-    if (result.zeroDataRetention) this.observedZeroDataRetention = result.zeroDataRetention;
+    if (result.zeroDataRetention) this.observedZeroDataRetention = combineRetention(this.observedZeroDataRetention, result.zeroDataRetention);
   }
 
   private async callWithRetry(batch: Question[]): Promise<BackendResult> {

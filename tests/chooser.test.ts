@@ -206,6 +206,80 @@ describe("BaseChooser retry, budget and usage", () => {
     expect(usage.costUsd).toBeCloseTo(120 / 1_000_000);
   });
 
+  it("counts delegated text usage at the fallback price without prior shared usage or duplicate budget charges", async () => {
+    const budget = new Budget({ chooserInputTokens: 400, textHelperCalls: 2 });
+    const text: Question = { id: "parse", kind: "text", premise: "Parse", state: "prompt" };
+    const textResult = (qs: Question[]): BackendResult => ({
+      answers: qs.map((q) => ({ id: q.id, index: null, text: "parsed" })),
+      inputTokens: 100, outputTokens: 20, zeroDataRetention: "not_applicable",
+    });
+    const fallback = new ScriptedChooser([textResult, textResult], { budget });
+    await fallback.ask([text]); // Another caller already used this fallback.
+    const before = fallback.usage();
+    const mock = jevMock();
+    const chooser = new JevChooser({ evaluationModel: mock.model, textFallback: fallback, budget });
+    await chooser.ask([text, batch()[0]!]);
+    const usage = chooser.usage();
+    expect(usage).toMatchObject({ questions: 2, textQuestions: 1, batches: 2, inputTokens: 220, outputTokens: 20, zeroDataRetention: "unknown" });
+    expect(usage.costUsd).toBeCloseTo((100 + 20 * 5 + 120 * JEV_PRICE_PER_MILLION_INPUT_USD) / 1_000_000);
+    expect(usage.waitMs).toBeGreaterThanOrEqual(fallback.usage().waitMs - before.waitMs);
+    expect(() => budget.chargeInputTokens(80)).not.toThrow();
+    expect(() => budget.chargeInputTokens(1)).toThrow(BudgetExhaustedError);
+    expect(chooser.usage()).toEqual(usage);
+  });
+
+  it("retains delegated failed-call usage and retention without claiming a zero-call run", async () => {
+    const text: Question = { id: "parse", kind: "text", premise: "Parse", state: "prompt" };
+    const bad = (): BackendResult => ({ answers: [], inputTokens: 50, outputTokens: 10, zeroDataRetention: "confirmed" });
+    const fallback = new ScriptedChooser([bad, bad]);
+    const chooser = new JevChooser({ evaluationModel: jevMock().model, textFallback: fallback });
+    await expect(chooser.ask([text])).rejects.toBeInstanceOf(ModelUnavailableError);
+    expect(chooser.usage()).toMatchObject({ questions: 0, textQuestions: 0, batches: 2, inputTokens: 100, outputTokens: 20, zeroDataRetention: "confirmed" });
+    expect(chooser.usage().costUsd).toBeCloseTo(0.0002);
+    expect(chooser.usage().waitMs).toEqual(fallback.usage().waitMs);
+  });
+
+  it("snapshots only delegated usage when the fallback is reused later", async () => {
+    const text: Question = { id: "parse", kind: "text", premise: "Parse", state: "prompt" };
+    const ok = (): BackendResult => ({ answers: [{ id: "parse", index: null, text: "ok" }], inputTokens: 10, zeroDataRetention: "not_applicable" });
+    const fallback = new ScriptedChooser([ok, ok]);
+    const chooser = new JevChooser({ evaluationModel: jevMock().model, textFallback: fallback });
+    await chooser.ask([text]);
+    const usage = chooser.usage();
+    expect(usage).toMatchObject({ questions: 1, textQuestions: 1, batches: 1, inputTokens: 10, zeroDataRetention: "not_applicable" });
+    await fallback.ask([text]);
+    expect(chooser.usage()).toEqual(usage);
+  });
+
+  it("attributes overlapping text calls once across callers sharing a fallback", async () => {
+    const text: Question = { id: "parse", kind: "text", premise: "Parse", state: "prompt" };
+    const ok = async (): Promise<BackendResult> => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return { answers: [{ id: "parse", index: null, text: "ok" }], inputTokens: 10, outputTokens: 2 };
+    };
+    const fallback = new ScriptedChooser([ok, ok, ok]);
+    const first = new JevChooser({ evaluationModel: jevMock().model, textFallback: fallback });
+    const second = new JevChooser({ evaluationModel: jevMock().model, textFallback: fallback });
+    await Promise.all([first.ask([text]), first.ask([text]), second.ask([text])]);
+    expect(first.usage()).toMatchObject({ questions: 2, textQuestions: 2, batches: 2, inputTokens: 20, outputTokens: 4 });
+    expect(second.usage()).toMatchObject({ questions: 1, textQuestions: 1, batches: 1, inputTokens: 10, outputTokens: 2 });
+    expect(first.usage().costUsd + second.usage().costUsd).toBeCloseTo(fallback.usage().costUsd);
+    expect(first.usage().waitMs + second.usage().waitMs).toBeCloseTo(fallback.usage().waitMs);
+  });
+
+  it("releases the shared fallback queue after a failed call", async () => {
+    const text: Question = { id: "parse", kind: "text", premise: "Parse", state: "prompt" };
+    const fallback = new ScriptedChooser([
+      () => { throw new Error("unavailable"); },
+      () => ({ answers: [{ id: "parse", index: null, text: "ok" }], inputTokens: 10 }),
+    ]);
+    const chooser = new JevChooser({ evaluationModel: jevMock().model, textFallback: fallback });
+    const results = await Promise.allSettled([chooser.ask([text]), chooser.ask([text])]);
+    expect(results.map((result) => result.status)).toEqual(["rejected", "fulfilled"]);
+    expect(chooser.usage()).toMatchObject({ questions: 1, textQuestions: 1, batches: 1, inputTokens: 10 });
+    expect(chooser.usage().waitMs).toEqual(fallback.usage().waitMs);
+  });
+
   it("retries an out-of-range answer once, then fails typed", async () => {
     const bad = (b: Question[]): BackendResult => ({ answers: b.map((q) => ({ id: q.id, index: 99 })) });
     const chooser = new ScriptedChooser([bad, (b) => fixtureResult(b)]);

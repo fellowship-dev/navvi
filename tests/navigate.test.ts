@@ -73,7 +73,7 @@ async function serveInline(page: Page, name: string, html: string): Promise<stri
   return url;
 }
 
-function options(spy: SpyChooser, goal: string, over: Partial<NavigateOptions> = {}): NavigateOptions {
+function options(spy: Chooser, goal: string, over: Partial<NavigateOptions> = {}): NavigateOptions {
   return {
     goal,
     chooser: spy,
@@ -275,6 +275,34 @@ describe("navigate: text helper (KTD11, R24)", () => {
 });
 
 describe("navigate: progress, budgets and domain (R13, R25, R28)", () => {
+  it("does not offer rejected DONE again until the page changes", async () => {
+    await withPage(null, async (page) => {
+      await serveInline(page, "completion", `<button onclick="this.replaceWith(Object.assign(document.createElement('h1'),{textContent:'Results'}))">Apply filter</button>`);
+      let operationCalls = 0;
+      let verifications = 0;
+      const empty = new RecordedChooser({ fixture: "crawler/empty" });
+      const chooser: Chooser = {
+        name: "recorded", usage: () => empty.usage(),
+        async ask(batch) {
+          return batch.map(q => {
+            if (q.id.endsWith(".done")) return { id: q.id, index: verifications++ === 0 ? 0 : 1 };
+            if (q.id.endsWith(".op")) {
+              operationCalls++;
+              if (operationCalls === 2) expect(q.options?.some(o => o.startsWith("DONE:"))).toBe(false);
+              const wanted = operationCalls === 2 ? "CLICK:" : "DONE:";
+              return { id: q.id, index: q.options!.findIndex(o => o.startsWith(wanted)) };
+            }
+            return { id: q.id, index: q.id.endsWith(".click") ? 0 : null };
+          });
+        },
+      };
+      const result = await navigate(page, options(chooser, "apply the filter"));
+      expect(result.status).toBe("DONE");
+      expect(result.trace).toHaveLength(1);
+      expect(verifications).toBe(2);
+    });
+  });
+
   it("three WAIT steps without progress end BLOCKED with a no-progress reason", async () => {
     await withPage("/fixtures/python-jobs.html", async (page) => {
       const spy = spyFor("three-waits");
@@ -355,14 +383,15 @@ describe("navigate: progress, budgets and domain (R13, R25, R28)", () => {
     });
   });
 
-  it("DONE with P(goal achieved) 0.4 is not accepted and the loop continues", async () => {
+  it("DONE with low confidence cannot be retried on the unchanged page", async () => {
     await withPage("/fixtures/python-jobs.html", async (page) => {
       const spy = spyFor("done-low");
       const result = await navigate(page, options(spy, "open the python jobs listing"));
 
-      expect(spy.ids()).toEqual(["nav.0.op", "nav.0.click", "nav.0.done", "nav.1.op", "nav.1.click", "nav.1.done"]);
-      expect(result.status).toBe("DONE");
-      expect(result.requests).toBe(4);
+      expect(spy.ids()).toEqual(["nav.0.op", "nav.0.click", "nav.0.done", "nav.1.op", "nav.1.click"]);
+      expect(spy.question("nav.1.op")?.options?.some(o => o.startsWith("DONE:"))).toBe(false);
+      expect(result.status).toBe("BLOCKED");
+      expect(result.requests).toBe(3);
       expect(result.steps).toBe(0);
     });
   });
@@ -423,7 +452,7 @@ describe("navigate: trace helpers (R12, R42)", () => {
     await withPage("/fixtures/python-jobs.html", async (page) => {
       const spy = spyFor("done-low");
       const result = await nav(page, "open the python jobs listing", { chooser: spy, profile: "store", startUrls: [server.baseUrl + "/"] });
-      expect(result.status).toBe("DONE");
+      expect(result.status).toBe("BLOCKED");
     });
   });
 });

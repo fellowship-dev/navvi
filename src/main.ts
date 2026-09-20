@@ -104,7 +104,7 @@ export async function run(raw: unknown, deps: CrawlDeps = {}): Promise<RunSummar
     // The validated raw input (not the defaulted one) is the base, so the prompt may still set profile, pagination and detail pages.
     // A parked question batch (needs_human) here is thrown outside any crawler request handler.
     try {
-      input = (await promptToInput(input.prompt, raw as Partial<RunInput>, chooser)).input;
+      input = (await promptToInput(input.prompt, raw as Partial<RunInput>, chooser, deps.actor ?? Actor)).input;
     } catch (error) {
       if (error instanceof NeedsHumanError) {
         return { ...summaryFor("needs_human", input, error.message), needsHuman: { token: error.token, questionsFile: error.questionsFile } };

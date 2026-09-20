@@ -114,8 +114,9 @@ describe("field healing (AE8, R17, R31, R32, R33)", () => {
     const actor = makeActor();
     const urls = productUrls();
     const raw = { startUrls: urls, mode: "record", fields: F(...FIELDS), description: "pharmacy product" };
-    // the out-of-stock pages offer no price candidate: the chooser answers none there
-    const chooser = new RoutingSpy((batch) => (isHealBatch(batch) && batch.every((q) => q.id === "heal.price") ? "heal/pharmacy-nostock" : "heal/pharmacy"));
+    // The known out-of-stock fixture pages have no product price; related prices
+    // are distractors. A price-only batch can also occur on an in-stock page.
+    const chooser = new RoutingSpy((batch) => (isHealBatch(batch) && batch.every((q) => q.id === "heal.price" && /^Healing on \S+\/(?:ibuprofeno-400-mg|losartan-50-mg)\.html(?:\n|$)/.test(q.state)) ? "heal/pharmacy-nostock" : "heal/pharmacy"));
 
     server.switchDemo("v1");
     const first = await runCrawl(input(raw), makeDeps(actor, chooser));

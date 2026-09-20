@@ -1,73 +1,77 @@
 # Navvi
 
-**Compile it once so you never drive it again.**
+**Turn a browser task into a scraper you can run again.**
 
-Navvi is a self-healing scraper compiler. Say what you want from a site,
-give it the URLs, and it compiles a scraper you keep: the second run makes
-zero model calls, and when the site drifts it heals the broken field or step
-instead of failing. No API key needed: if Claude Code or Codex is installed
-and signed in, navvi uses it on your subscription; otherwise the coding agent
-running the command answers the compile questions itself.
+Navvi uses a model to choose among controls and fields found by code, then saves
+a scraper with selectors, fingerprints and a navigation trace. Healthy repeat
+runs reuse the prompt interpretation and scraper without model calls. When a
+field or step changes, Navvi can ask the model for a targeted repair; some changes
+still require a person or recompilation.
 
-![Navvi demo](docs/demo.gif)
+Jev supplies fast typed decisions. Navvi adds persistence, structured extraction,
+replay and repair around those decisions. Jev also uses a text-capable fallback
+for prompt interpretation and values to type; those calls are included in usage.
 
-The same site, three runs: compile, heal when the markup changes, replay the original with zero questions. Video: [docs/demo.mp4](docs/demo.mp4) — reproduce it with `npm run demo`.
+## Try the compiler from source
 
-## Install and run
+The compiler is version 3.0.0 in this checkout. As of 2026-09-20, npm's `navvi`
+package is still 2.0.1 and represents the earlier product. Use the source revision
+containing this README until the compiler release is published.
 
 ```bash
-npm install navvi            # or skip: npx fetches it on first use
-npx navvi "name, lab and price of each product" https://shop.example/p/1 https://shop.example/p/2 --out products.json
-npx navvi "every job with title, company and link, follow next page" https://jobs.example/python --out jobs.csv
-npx navvi "log in and list my invoices with number, date and total" https://app.example/login --secret password --goal "sign in as max with {{secret:password}}"
+git clone https://github.com/fellowship-dev/navvi.git
+cd navvi
+NAVVI_SKIP_BROWSER_DOWNLOAD=1 npm ci
+npx playwright install chromium
+npm run build
+node dist/bin/cli.js "Search Remote OK for Python jobs and extract up to 10 results with job title, company, location and job link. Exclude ads." https://remoteok.com/ --browser chromium --max-pages 1 --max-items 10 --out jobs.json
+# Repeat the identical command to reuse the saved prompt interpretation and scraper.
 ```
 
-Node 22+. The first run downloads Camoufox; set `NAVVI_BROWSER=chromium` to
-use Playwright's Chromium instead. Agents: read [`SKILL.md`](SKILL.md) first;
-[`llms.txt`](llms.txt) indexes everything.
+Node 22+. Select a chooser below; an installed, signed-in Claude Code or Codex CLI
+can answer on your subscription. Jev needs a TypeSafe or AI Gateway key plus a
+text-capable fallback. Browser time and subscription/API charges still apply.
+Agents: read [`SKILL.md`](SKILL.md); [`llms.txt`](llms.txt) indexes the docs.
 
-## Measured, with and without Jev
+## Demos and evidence
 
-Same scenarios per chooser, 2026-09-20, after the Jev hillclimb
-([`docs/jev-hillclimb.md`](docs/jev-hillclimb.md)): four fixture proofs, five
-navigation and form flows (a search form, a login with secrets, a category
-link, pagination, detail pages) and five live sites. Full table in
-[`docs/measurements.md`](docs/measurements.md); reproduce with
-`npm run measure -- --choosers agent,jev,claude --live python.org,hackernews,scrapethissite-search,quotes-login,books-category`.
+![Real Remote OK first run and saved replay](docs/remoteok-replay.gif)
 
-| chooser | scenarios right | fields correct | chooser wait per scenario | cost for all 14 |
-|---|---|---|---|---|
-| `jev` (TypeSafe, direct API) | 14 of 14 | 784/785 | 0.6 to 3.0 s | $0.008 |
-| `claude` (Claude Code, Haiku, subscription) | 14 of 14 | 782/785 | 4.9 to 59 s | $0 billed |
-| `agent` (recorded replay of the host agent's answers) | 9 of 9 fixture scenarios | 490/490 | 0 | $0 |
+[Watch the 45-second clip](docs/remoteok-replay.mp4): two real sequential runs,
+aligned for comparison with their original timers (42.6 s / 3.7 s). Both produce
+ten records from the selected results page; replay makes zero model questions.
+The clip demonstrates healthy reuse. It does not demonstrate healing or establish
+a general speed ratio. [Capture provenance](docs/remoteok-replay-provenance.json)
+and [separate final-revision source proof](docs/remoteok-proof.json) preserve the
+evidence. The attempted Jev-versus-Haiku race was withheld because equivalent
+search completion was inconsistent.
 
-The one cell both miss is a Hacker News story without a points count. Jev
-beats Claude on field healing (48/48 against 46/48) and is ten to thirty times
-faster on every scenario; Claude's one typed value (the search query) is also
-what Jev's lane uses, through the CLI fallback. Before the hillclimb Jev lost
-38 of 48 healing cells to `none` and flipped on single-candidate questions;
-what changed is how the questions are framed, not the chooser interface: the
-batch's facts as JSON state, each option as a structured criterion, one rule
-per decision, and a presence question that decides `none` separately.
+The controlled fixture below demonstrates compile, deliberately changed markup,
+and replay. Its answers are recorded fixtures: it shows behavior, not live model
+latency or a production-site guarantee. [Video](docs/demo.mp4), `npm run demo`.
 
-![Jev against Claude Haiku on the same prompt](docs/race.gif)
+![Controlled compile, healing and replay fixture](docs/demo.gif)
 
-The same search-form prompt under Jev and under Claude Haiku, live, in real
-time: Jev compiles in 12 s, Claude in 63 s, and the replay costs both 0.8 s
-and zero questions. Reproduce with `npx tsx scripts/record-race.ts`.
+The older [search-form comparison](docs/race.mp4) is a fixture recording, not
+Remote OK. Current capture instructions and the two-run real-site recorder are in
+[`docs/recording.md`](docs/recording.md). Failed recordings retain evidence and do
+not export a success clip.
+
+The historical [measurement table](docs/measurements.md) and
+[Jev question-bank hillclimb](docs/jev-hillclimb.md) report a tuned scenario set.
+Their cell counts are harness checks, not independent semantic accuracy. They do
+not establish universal speedups, unseen-site accuracy or current prompt-to-output
+costs. A new live demo must retain its own rows, timings and revision.
 
 ## What you get
 
-- **Records**: a JSON array on stdout or in `--out <file>` (`.csv` writes CSV),
-  one object per item, each with its `_source` URL.
-- **A scraper you can commit**: `storage/key_value_stores/scraper-cache/<cacheKey>.json`,
-  selectors with fingerprints plus the recorded navigation trace. Only that
-  file; the rest of `storage/` holds browser profiles with live sessions.
-- **A second run that costs nothing**: same prompt, same fields, same site
-  template, no model call. Run it from cron, CI or a script.
-- **Healing**: a moved field or a renamed button is repaired on the spot from
-  the recorded alternatives and fingerprints; a real redesign is reported as
-  `drift` rather than guessed at.
+- JSON or CSV records with a `_source` URL.
+- A reusable scraper at `storage/key_value_stores/scraper-cache/<cacheKey>.json`.
+  The rest of `storage/` can contain live browser sessions; keep it private.
+- Cached prompt interpretation and healthy scraper replay with zero model calls.
+  `--force-recompile` deliberately bypasses reuse.
+- A targeted repair path plus explicit failure statuses when automation cannot finish.
+- A stderr summary with pages, items, chooser usage and healing events.
 - **Typed values when you ask for them**: `--fields name,price:money,stock:boolean`
   (or `type` on a field in the JSON input) coerces the extracted text after
   the fingerprint check: `money` and `number` read `$ 6.990` as `6990` and
@@ -81,8 +85,6 @@ and zero questions. Reproduce with `npx tsx scripts/record-race.ts`.
   answers the pages to scrape as newline text or JSON (an array of URLs or of
   `{ url }` objects, or an object whose `urls`, `data` or `items` is one), so
   a backend endpoint can feed the daily target list directly.
-- **A summary on stderr**: status, items, pages, chooser usage, healing
-  events, unmapped candidates. `--quiet` turns it off.
 
 ## Choosers
 
@@ -114,14 +116,15 @@ stdin. When stdin cannot stay open, `--agent-mode file` parks the batch in
 
 ## How it differs
 
-Browserbase Director, Browser Use and similar agents drive the browser with
-a model on every run: flexible, but every run pays and every run can wander.
-Crawl4AI and exported Playwright scripts are the opposite: cheap to run, but
-static, so the first layout change breaks them. Navvi compiles once into a
-scraper with recorded alternatives and fingerprints, replays it with no
-model, and when a check fails it heals by merging a small repair into the
-same scraper instead of re-driving the whole flow. The model (or the agent)
-is only ever asked to pick among options the code enumerated.
+The reusable scraper is the product. A model-backed browser interaction produces
+an artifact that code can execute again, with fingerprints and alternatives to
+help detect and repair changes. This is useful for recurring extraction rather
+than asking an agent to rediscover the same workflow every time.
+
+The side-by-side recorder compares **Navvi + Jev with Navvi + Haiku** under the
+same task. It does not measure Navvi against Jev Ultra Fast as a separate product.
+A healthy replay recording also does not prove live healing; demonstrate drift
+separately before making that claim.
 
 ## Local and Apify
 
@@ -196,8 +199,13 @@ paragraph is updated with the observed numbers.
 
 ## Limits
 
-- Heals drift, reports redesigns. A page that no longer carries the fields is
-  `drift`, not a silent empty result.
+- Models can mistake a filled form for a completed search. Validate the target
+  results and output meaning, not just status or non-empty fields.
+- Repairs supported field/step changes, but cannot guarantee repair of a redesign.
+  An empty listing may report `no_items_found`; it is not always distinguishable
+  from a changed item selector. Missing compiled rows get a bounded five-second wait.
+- Extraction reflects the source. A selected search filter does not guarantee every
+  returned job matches its meaning; verify relevance separately.
 - No captcha solving. On a headed run (`--headed`) a challenge is handed to
   the person at the keyboard and their step is recorded; unattended runs
   report `blocked_bot_detection`.
