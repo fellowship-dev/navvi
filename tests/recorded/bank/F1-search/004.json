@@ -1,0 +1,81 @@
+{
+  "scenario": "F1-search",
+  "batch": 4,
+  "entries": [
+    {
+      "question": {
+        "id": "nav.2.done",
+        "kind": "boolean",
+        "premise": "Judging only by the visible text and controls in the state, is the goal \"search for python jobs\" already visibly achieved on this page? Every requirement must be evidenced; a link that would lead there is not enough.",
+        "state": "GOAL: search for python jobs\nURL: http://127.0.0.1:56321/fixtures/results.html?q=python+jobs\nTITLE: Results\nVISIBLE TEXT:\nJob search\nResults for python jobs\npython jobs role 1Company 1\npython jobs role 2Company 2\npython jobs role 3Company 3\npython jobs role 4Company 4\npython jobs role 5Company 5\npython jobs role 6Company 6\n\nNew search\nCONTROLS (7)\nc1 link \"python jobs role 1\" -> http://127.0.0.1:56321/fixtures/jobs/200.html in \"python jobs role 1Company 1\"\nc2 link \"python jobs role 2\" -> http://127.0.0.1:56321/fixtures/jobs/201.html in \"python jobs role 2Company 2\"\nc3 link \"python jobs role 3\" -> http://127.0.0.1:56321/fixtures/jobs/202.html in \"python jobs role 3Company 3\"\nc4 link \"python jobs role 4\" -> http://127.0.0.1:56321/fixtures/jobs/203.html in \"python jobs role 4Company 4\"\nc5 link \"python jobs role 5\" -> http://127.0.0.1:56321/fixtures/jobs/204.html in \"python jobs role 5Company 5\"\nc6 link \"python jobs role 6\" -> http://127.0.0.1:56321/fixtures/jobs/205.html in \"python jobs role 6Company 6\"\nc7 link \"New search\" -> http://127.0.0.1:56321/fixtures/search-form.html in \"New search\"\nRECENT ACTIONS (oldest first)\n- type searchbox \"Search jobs\" = \"python jobs\" (page changed)\n- click button \"Search\" (page changed)",
+        "context": {
+          "decision": "goal_achieved",
+          "shared": {
+            "goal": "search for python jobs",
+            "page": {
+              "url": "http://127.0.0.1:56321/fixtures/results.html?q=python+jobs",
+              "title": "Results",
+              "visible_text": "Job search\nResults for python jobs\npython jobs role 1Company 1\npython jobs role 2Company 2\npython jobs role 3Company 3\npython jobs role 4Company 4\npython jobs role 5Company 5\npython jobs role 6Company 6\n\nNew search"
+            },
+            "controls": [
+              {
+                "role": "link",
+                "name": "python jobs role 1",
+                "href": "http://127.0.0.1:56321/fixtures/jobs/200.html",
+                "scope": "python jobs role 1Company 1"
+              },
+              {
+                "role": "link",
+                "name": "python jobs role 2",
+                "href": "http://127.0.0.1:56321/fixtures/jobs/201.html",
+                "scope": "python jobs role 2Company 2"
+              },
+              {
+                "role": "link",
+                "name": "python jobs role 3",
+                "href": "http://127.0.0.1:56321/fixtures/jobs/202.html",
+                "scope": "python jobs role 3Company 3"
+              },
+              {
+                "role": "link",
+                "name": "python jobs role 4",
+                "href": "http://127.0.0.1:56321/fixtures/jobs/203.html",
+                "scope": "python jobs role 4Company 4"
+              },
+              {
+                "role": "link",
+                "name": "python jobs role 5",
+                "href": "http://127.0.0.1:56321/fixtures/jobs/204.html",
+                "scope": "python jobs role 5Company 5"
+              },
+              {
+                "role": "link",
+                "name": "python jobs role 6",
+                "href": "http://127.0.0.1:56321/fixtures/jobs/205.html",
+                "scope": "python jobs role 6Company 6"
+              },
+              {
+                "role": "link",
+                "name": "New search",
+                "href": "http://127.0.0.1:56321/fixtures/search-form.html",
+                "scope": "New search"
+              }
+            ],
+            "recent_actions": [
+              {
+                "action": "type searchbox \"Search jobs\"",
+                "page_changed": true,
+                "text": "python jobs"
+              },
+              {
+                "action": "click button \"Search\"",
+                "page_changed": true
+              }
+            ]
+          }
+        }
+      },
+      "gold": 1
+    }
+  ]
+}

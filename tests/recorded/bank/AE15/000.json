@@ -9,9 +9,9 @@
         "premise": "The recorded click step targeted the control \"Log in\", which no longer matches on this page. Which control should the click step use instead? Pick none when no control fits.",
         "options": [
           "button \"Sign in\" in \"Email Password Sign in\"",
-          "link \"Forgot your password?\" -> http://127.0.0.1:55170/login/ in \"Forgot your password?\""
+          "link \"Forgot your password?\" -> http://127.0.0.1:56321/login/ in \"Forgot your password?\""
         ],
-        "state": "Trace step 3 of 3: click\nPage: http://127.0.0.1:55170/login/\nFailure: no visible control matched button \"Log in\"",
+        "state": "Trace step 3 of 3: click\nPage: http://127.0.0.1:56321/login/\nFailure: no visible control matched button \"Log in\"",
         "context": {
           "decision": "heal_trace_step",
           "step": {
@@ -25,7 +25,7 @@
             }
           },
           "shared": {
-            "page": "http://127.0.0.1:55170/login/",
+            "page": "http://127.0.0.1:56321/login/",
             "failure": "no visible control matched button \"Log in\""
           }
         },
@@ -43,7 +43,7 @@
           {
             "role": "link",
             "name": "Forgot your password?",
-            "href": "http://127.0.0.1:55170/login/",
+            "href": "http://127.0.0.1:56321/login/",
             "scope": "Forgot your password?"
           }
         ]

@@ -1,22 +1,22 @@
 {
   "id": "heal.stock",
-  "index": null,
+  "index": 0,
   "probabilities": [
+    0.93,
     0,
     0,
     0,
-    0.2,
-    0.05,
-    0,
-    0,
-    0.01,
+    0.03,
     0,
     0,
     0,
+    0,
+    0,
+    0.04,
     0
   ],
   "kind": "choice",
-  "inputTokens": 551,
-  "outputTokens": 134,
+  "inputTokens": 1688,
+  "outputTokens": 147,
   "chooser": "jev"
 }

@@ -1,0 +1,8 @@
+{
+  "id": "nav.2.done",
+  "index": 1,
+  "kind": "boolean",
+  "inputTokens": 10,
+  "outputTokens": 375,
+  "chooser": "claude"
+}

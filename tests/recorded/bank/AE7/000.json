@@ -59,7 +59,7 @@
           "footer.site-footer/nav/a = Términos y condiciones | Términos y condiciones | Términos y condiciones",
           "footer.site-footer/nav/a/@href = ../index.html#terminos | ../index.html#terminos | ../index.html#terminos"
         ],
-        "state": "Records: pharmacy product\nFields: name, laboratory, price, stock\nSamples: record mode, 3 sample pages\nSample 1: http://127.0.0.1:55170/demo/pharmacy-v1/producto/amoxicilina-500-mg.html\nSample 2: http://127.0.0.1:55170/demo/pharmacy-v1/producto/atorvastatina-20-mg.html\nSample 3: http://127.0.0.1:55170/demo/pharmacy-v1/producto/clotrimazol-crema.html",
+        "state": "Records: pharmacy product\nFields: name, laboratory, price, stock\nSamples: record mode, 3 sample pages\nSample 1: http://127.0.0.1:56321/demo/pharmacy-v1/producto/amoxicilina-500-mg.html\nSample 2: http://127.0.0.1:56321/demo/pharmacy-v1/producto/atorvastatina-20-mg.html\nSample 3: http://127.0.0.1:56321/demo/pharmacy-v1/producto/clotrimazol-crema.html",
         "context": {
           "decision": "field_value",
           "field": {
@@ -83,9 +83,9 @@
               }
             ],
             "samples": [
-              "http://127.0.0.1:55170/demo/pharmacy-v1/producto/amoxicilina-500-mg.html",
-              "http://127.0.0.1:55170/demo/pharmacy-v1/producto/atorvastatina-20-mg.html",
-              "http://127.0.0.1:55170/demo/pharmacy-v1/producto/clotrimazol-crema.html"
+              "http://127.0.0.1:56321/demo/pharmacy-v1/producto/amoxicilina-500-mg.html",
+              "http://127.0.0.1:56321/demo/pharmacy-v1/producto/atorvastatina-20-mg.html",
+              "http://127.0.0.1:56321/demo/pharmacy-v1/producto/clotrimazol-crema.html"
             ]
           }
         },
@@ -650,7 +650,7 @@
           "footer.site-footer/nav/a = Términos y condiciones | Términos y condiciones | Términos y condiciones",
           "footer.site-footer/nav/a/@href = ../index.html#terminos | ../index.html#terminos | ../index.html#terminos"
         ],
-        "state": "Records: pharmacy product\nFields: name, laboratory, price, stock\nSamples: record mode, 3 sample pages\nSample 1: http://127.0.0.1:55170/demo/pharmacy-v1/producto/amoxicilina-500-mg.html\nSample 2: http://127.0.0.1:55170/demo/pharmacy-v1/producto/atorvastatina-20-mg.html\nSample 3: http://127.0.0.1:55170/demo/pharmacy-v1/producto/clotrimazol-crema.html",
+        "state": "Records: pharmacy product\nFields: name, laboratory, price, stock\nSamples: record mode, 3 sample pages\nSample 1: http://127.0.0.1:56321/demo/pharmacy-v1/producto/amoxicilina-500-mg.html\nSample 2: http://127.0.0.1:56321/demo/pharmacy-v1/producto/atorvastatina-20-mg.html\nSample 3: http://127.0.0.1:56321/demo/pharmacy-v1/producto/clotrimazol-crema.html",
         "context": {
           "decision": "field_value",
           "field": {
@@ -674,9 +674,9 @@
               }
             ],
             "samples": [
-              "http://127.0.0.1:55170/demo/pharmacy-v1/producto/amoxicilina-500-mg.html",
-              "http://127.0.0.1:55170/demo/pharmacy-v1/producto/atorvastatina-20-mg.html",
-              "http://127.0.0.1:55170/demo/pharmacy-v1/producto/clotrimazol-crema.html"
+              "http://127.0.0.1:56321/demo/pharmacy-v1/producto/amoxicilina-500-mg.html",
+              "http://127.0.0.1:56321/demo/pharmacy-v1/producto/atorvastatina-20-mg.html",
+              "http://127.0.0.1:56321/demo/pharmacy-v1/producto/clotrimazol-crema.html"
             ]
           }
         },
@@ -1241,7 +1241,7 @@
           "footer.site-footer/nav/a = Términos y condiciones | Términos y condiciones | Términos y condiciones",
           "footer.site-footer/nav/a/@href = ../index.html#terminos | ../index.html#terminos | ../index.html#terminos"
         ],
-        "state": "Records: pharmacy product\nFields: name, laboratory, price, stock\nSamples: record mode, 3 sample pages\nSample 1: http://127.0.0.1:55170/demo/pharmacy-v1/producto/amoxicilina-500-mg.html\nSample 2: http://127.0.0.1:55170/demo/pharmacy-v1/producto/atorvastatina-20-mg.html\nSample 3: http://127.0.0.1:55170/demo/pharmacy-v1/producto/clotrimazol-crema.html",
+        "state": "Records: pharmacy product\nFields: name, laboratory, price, stock\nSamples: record mode, 3 sample pages\nSample 1: http://127.0.0.1:56321/demo/pharmacy-v1/producto/amoxicilina-500-mg.html\nSample 2: http://127.0.0.1:56321/demo/pharmacy-v1/producto/atorvastatina-20-mg.html\nSample 3: http://127.0.0.1:56321/demo/pharmacy-v1/producto/clotrimazol-crema.html",
         "context": {
           "decision": "field_value",
           "field": {
@@ -1265,9 +1265,9 @@
               }
             ],
             "samples": [
-              "http://127.0.0.1:55170/demo/pharmacy-v1/producto/amoxicilina-500-mg.html",
-              "http://127.0.0.1:55170/demo/pharmacy-v1/producto/atorvastatina-20-mg.html",
-              "http://127.0.0.1:55170/demo/pharmacy-v1/producto/clotrimazol-crema.html"
+              "http://127.0.0.1:56321/demo/pharmacy-v1/producto/amoxicilina-500-mg.html",
+              "http://127.0.0.1:56321/demo/pharmacy-v1/producto/atorvastatina-20-mg.html",
+              "http://127.0.0.1:56321/demo/pharmacy-v1/producto/clotrimazol-crema.html"
             ]
           }
         },
@@ -1832,7 +1832,7 @@
           "footer.site-footer/nav/a = Términos y condiciones | Términos y condiciones | Términos y condiciones",
           "footer.site-footer/nav/a/@href = ../index.html#terminos | ../index.html#terminos | ../index.html#terminos"
         ],
-        "state": "Records: pharmacy product\nFields: name, laboratory, price, stock\nSamples: record mode, 3 sample pages\nSample 1: http://127.0.0.1:55170/demo/pharmacy-v1/producto/amoxicilina-500-mg.html\nSample 2: http://127.0.0.1:55170/demo/pharmacy-v1/producto/atorvastatina-20-mg.html\nSample 3: http://127.0.0.1:55170/demo/pharmacy-v1/producto/clotrimazol-crema.html",
+        "state": "Records: pharmacy product\nFields: name, laboratory, price, stock\nSamples: record mode, 3 sample pages\nSample 1: http://127.0.0.1:56321/demo/pharmacy-v1/producto/amoxicilina-500-mg.html\nSample 2: http://127.0.0.1:56321/demo/pharmacy-v1/producto/atorvastatina-20-mg.html\nSample 3: http://127.0.0.1:56321/demo/pharmacy-v1/producto/clotrimazol-crema.html",
         "context": {
           "decision": "field_value",
           "field": {
@@ -1856,9 +1856,9 @@
               }
             ],
             "samples": [
-              "http://127.0.0.1:55170/demo/pharmacy-v1/producto/amoxicilina-500-mg.html",
-              "http://127.0.0.1:55170/demo/pharmacy-v1/producto/atorvastatina-20-mg.html",
-              "http://127.0.0.1:55170/demo/pharmacy-v1/producto/clotrimazol-crema.html"
+              "http://127.0.0.1:56321/demo/pharmacy-v1/producto/amoxicilina-500-mg.html",
+              "http://127.0.0.1:56321/demo/pharmacy-v1/producto/atorvastatina-20-mg.html",
+              "http://127.0.0.1:56321/demo/pharmacy-v1/producto/clotrimazol-crema.html"
             ]
           }
         },

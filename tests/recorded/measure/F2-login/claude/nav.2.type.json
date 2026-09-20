@@ -1,0 +1,8 @@
+{
+  "id": "nav.2.type",
+  "index": null,
+  "kind": "choice",
+  "inputTokens": 3,
+  "outputTokens": 179,
+  "chooser": "claude"
+}

@@ -1,0 +1,41 @@
+{
+  "scenario": "F2-login",
+  "batch": 5,
+  "entries": [
+    {
+      "question": {
+        "id": "group",
+        "kind": "choice",
+        "premise": "Which candidate group holds one order per item, with the order, total values? Pick none when no candidate does.",
+        "options": [
+          "ul.orders > li.order (5 items): Order #1001 Shipped $ 45.990 || Order #1002 Delivered $ 12.500 || Order #1003 Processing $ 89.900"
+        ],
+        "state": "Records: order\nFields: order, total\nPage: http://127.0.0.1:56321/login/account.html",
+        "context": {
+          "decision": "list_group",
+          "shared": {
+            "records": "order",
+            "fields": [
+              "order",
+              "total"
+            ],
+            "page": "http://127.0.0.1:56321/login/account.html"
+          }
+        },
+        "optionContext": [
+          {
+            "container": "ul.orders",
+            "item": "li.order",
+            "item_count": 5,
+            "sample_items": [
+              "Order #1001 Shipped $ 45.990",
+              "Order #1002 Delivered $ 12.500",
+              "Order #1003 Processing $ 89.900"
+            ]
+          }
+        ]
+      },
+      "gold": 0
+    }
+  ]
+}

@@ -1,0 +1,257 @@
+{
+  "scenario": "F1-search",
+  "batch": 6,
+  "entries": [
+    {
+      "question": {
+        "id": "field.title",
+        "kind": "choice",
+        "premise": "Which candidate holds the title value on every sample? Pick none when no candidate is right on all samples.",
+        "options": [
+          "a = python jobs role 1 | python jobs role 2 | python jobs role 3",
+          "a/@href = /fixtures/jobs/200.html | /fixtures/jobs/201.html | /fixtures/jobs/202.html",
+          "span.company = Company 1 | Company 2 | Company 3"
+        ],
+        "state": "Records: job search result\nFields: title, company, link\nSamples: list mode, 3 sample rows of #results > li.result\nSample 1: python jobs role 1Company 1\nSample 2: python jobs role 2Company 2\nSample 3: python jobs role 3Company 3",
+        "context": {
+          "decision": "field_value",
+          "field": {
+            "name": "title"
+          },
+          "shared": {
+            "records": "job search result",
+            "mode": "list",
+            "fields": [
+              {
+                "name": "title"
+              },
+              {
+                "name": "company"
+              },
+              {
+                "name": "link"
+              }
+            ],
+            "samples": [
+              "python jobs role 1Company 1",
+              "python jobs role 2Company 2",
+              "python jobs role 3Company 3"
+            ]
+          }
+        },
+        "optionContext": [
+          {
+            "path": "a",
+            "shape": "text",
+            "values": [
+              "python jobs role 1",
+              "python jobs role 2",
+              "python jobs role 3"
+            ]
+          },
+          {
+            "path": "a/@href",
+            "shape": "url",
+            "values": [
+              "/fixtures/jobs/200.html",
+              "/fixtures/jobs/201.html",
+              "/fixtures/jobs/202.html"
+            ],
+            "attribute": "href"
+          },
+          {
+            "path": "span.company",
+            "shape": "text",
+            "values": [
+              "Company 1",
+              "Company 2",
+              "Company 3"
+            ]
+          }
+        ]
+      },
+      "gold": 0
+    },
+    {
+      "question": {
+        "id": "field.company",
+        "kind": "choice",
+        "premise": "Which candidate holds the company value on every sample? Pick none when no candidate is right on all samples.",
+        "options": [
+          "a = python jobs role 1 | python jobs role 2 | python jobs role 3",
+          "a/@href = /fixtures/jobs/200.html | /fixtures/jobs/201.html | /fixtures/jobs/202.html",
+          "span.company = Company 1 | Company 2 | Company 3"
+        ],
+        "state": "Records: job search result\nFields: title, company, link\nSamples: list mode, 3 sample rows of #results > li.result\nSample 1: python jobs role 1Company 1\nSample 2: python jobs role 2Company 2\nSample 3: python jobs role 3Company 3",
+        "context": {
+          "decision": "field_value",
+          "field": {
+            "name": "company"
+          },
+          "shared": {
+            "records": "job search result",
+            "mode": "list",
+            "fields": [
+              {
+                "name": "title"
+              },
+              {
+                "name": "company"
+              },
+              {
+                "name": "link"
+              }
+            ],
+            "samples": [
+              "python jobs role 1Company 1",
+              "python jobs role 2Company 2",
+              "python jobs role 3Company 3"
+            ]
+          }
+        },
+        "optionContext": [
+          {
+            "path": "a",
+            "shape": "text",
+            "values": [
+              "python jobs role 1",
+              "python jobs role 2",
+              "python jobs role 3"
+            ]
+          },
+          {
+            "path": "a/@href",
+            "shape": "url",
+            "values": [
+              "/fixtures/jobs/200.html",
+              "/fixtures/jobs/201.html",
+              "/fixtures/jobs/202.html"
+            ],
+            "attribute": "href"
+          },
+          {
+            "path": "span.company",
+            "shape": "text",
+            "values": [
+              "Company 1",
+              "Company 2",
+              "Company 3"
+            ]
+          }
+        ]
+      },
+      "gold": 2
+    },
+    {
+      "question": {
+        "id": "field.link",
+        "kind": "choice",
+        "premise": "Which candidate holds the link value on every sample? Pick none when no candidate is right on all samples.",
+        "options": [
+          "a = python jobs role 1 | python jobs role 2 | python jobs role 3",
+          "a/@href = /fixtures/jobs/200.html | /fixtures/jobs/201.html | /fixtures/jobs/202.html",
+          "span.company = Company 1 | Company 2 | Company 3"
+        ],
+        "state": "Records: job search result\nFields: title, company, link\nSamples: list mode, 3 sample rows of #results > li.result\nSample 1: python jobs role 1Company 1\nSample 2: python jobs role 2Company 2\nSample 3: python jobs role 3Company 3",
+        "context": {
+          "decision": "field_value",
+          "field": {
+            "name": "link"
+          },
+          "shared": {
+            "records": "job search result",
+            "mode": "list",
+            "fields": [
+              {
+                "name": "title"
+              },
+              {
+                "name": "company"
+              },
+              {
+                "name": "link"
+              }
+            ],
+            "samples": [
+              "python jobs role 1Company 1",
+              "python jobs role 2Company 2",
+              "python jobs role 3Company 3"
+            ]
+          }
+        },
+        "optionContext": [
+          {
+            "path": "a",
+            "shape": "text",
+            "values": [
+              "python jobs role 1",
+              "python jobs role 2",
+              "python jobs role 3"
+            ]
+          },
+          {
+            "path": "a/@href",
+            "shape": "url",
+            "values": [
+              "/fixtures/jobs/200.html",
+              "/fixtures/jobs/201.html",
+              "/fixtures/jobs/202.html"
+            ],
+            "attribute": "href"
+          },
+          {
+            "path": "span.company",
+            "shape": "text",
+            "values": [
+              "Company 1",
+              "Company 2",
+              "Company 3"
+            ]
+          }
+        ]
+      },
+      "gold": 1
+    },
+    {
+      "question": {
+        "id": "link.next",
+        "kind": "choice",
+        "premise": "Which control leads to the next page of the same listing? Pick none when this is the last page or no control does.",
+        "options": [
+          "\"New search\" -> http://127.0.0.1:56321/fixtures/search-form.html"
+        ],
+        "state": "Records: job search result\nFields: title, company, link\nSamples: list mode, 3 sample rows of #results > li.result\nSample 1: python jobs role 1Company 1\nSample 2: python jobs role 2Company 2\nSample 3: python jobs role 3Company 3",
+        "context": {
+          "decision": "next_page_link",
+          "shared": {
+            "records": "job search result",
+            "mode": "list",
+            "fields": [
+              {
+                "name": "title"
+              },
+              {
+                "name": "company"
+              },
+              {
+                "name": "link"
+              }
+            ],
+            "samples": [
+              "python jobs role 1Company 1",
+              "python jobs role 2Company 2",
+              "python jobs role 3Company 3"
+            ]
+          }
+        },
+        "optionContext": [
+          {
+            "text": "New search",
+            "href": "http://127.0.0.1:56321/fixtures/search-form.html"
+          }
+        ]
+      },
+      "gold": null
+    }
+  ]
+}

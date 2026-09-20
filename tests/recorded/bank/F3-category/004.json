@@ -1,0 +1,501 @@
+{
+  "scenario": "F3-category",
+  "batch": 4,
+  "entries": [
+    {
+      "question": {
+        "id": "field.title",
+        "kind": "choice",
+        "premise": "Which candidate holds the title value on every sample? Pick none when no candidate is right on all samples.",
+        "options": [
+          "h2.job-title/a = Senior Python Engineer II | Backend Developer (Django) | Data Engineer",
+          "h2.job-title/a/@href = /fixtures/jobs/100.html | /fixtures/jobs/101.html | /fixtures/jobs/102.html",
+          "span.company = Anaconda | Canonical | Mozilla",
+          "span.location = Remote | Berlin, Germany | London, UK",
+          "time.posted = 28 Aug 2026 | 27 Aug 2026 | 26 Aug 2026",
+          "time.posted/@datetime = 2026-08-28 | 2026-08-27 | 2026-08-26"
+        ],
+        "state": "Records: python job listing\nFields: title, company, location, link\nSamples: list mode, 3 sample rows of ul.jobs > li.job\nSample 1: Senior Python Engineer II Anaconda Remote 28 Aug 2026\nSample 2: Backend Developer (Django) Canonical Berlin, Germany 27 Aug 2026\nSample 3: Data Engineer Mozilla London, UK 26 Aug 2026",
+        "context": {
+          "decision": "field_value",
+          "field": {
+            "name": "title"
+          },
+          "shared": {
+            "records": "python job listing",
+            "mode": "list",
+            "fields": [
+              {
+                "name": "title"
+              },
+              {
+                "name": "company"
+              },
+              {
+                "name": "location"
+              },
+              {
+                "name": "link"
+              }
+            ],
+            "samples": [
+              "Senior Python Engineer II Anaconda Remote 28 Aug 2026",
+              "Backend Developer (Django) Canonical Berlin, Germany 27 Aug 2026",
+              "Data Engineer Mozilla London, UK 26 Aug 2026"
+            ]
+          }
+        },
+        "optionContext": [
+          {
+            "path": "h2.job-title/a",
+            "shape": "text",
+            "values": [
+              "Senior Python Engineer II",
+              "Backend Developer (Django)",
+              "Data Engineer"
+            ]
+          },
+          {
+            "path": "h2.job-title/a/@href",
+            "shape": "url",
+            "values": [
+              "/fixtures/jobs/100.html",
+              "/fixtures/jobs/101.html",
+              "/fixtures/jobs/102.html"
+            ],
+            "attribute": "href"
+          },
+          {
+            "path": "span.company",
+            "shape": "text",
+            "values": [
+              "Anaconda",
+              "Canonical",
+              "Mozilla"
+            ]
+          },
+          {
+            "path": "span.location",
+            "shape": "text",
+            "values": [
+              "Remote",
+              "Berlin, Germany",
+              "London, UK"
+            ]
+          },
+          {
+            "path": "time.posted",
+            "shape": "date",
+            "values": [
+              "28 Aug 2026",
+              "27 Aug 2026",
+              "26 Aug 2026"
+            ]
+          },
+          {
+            "path": "time.posted/@datetime",
+            "shape": "date",
+            "values": [
+              "2026-08-28",
+              "2026-08-27",
+              "2026-08-26"
+            ],
+            "attribute": "datetime"
+          }
+        ]
+      },
+      "gold": 0
+    },
+    {
+      "question": {
+        "id": "field.company",
+        "kind": "choice",
+        "premise": "Which candidate holds the company value on every sample? Pick none when no candidate is right on all samples.",
+        "options": [
+          "h2.job-title/a = Senior Python Engineer II | Backend Developer (Django) | Data Engineer",
+          "h2.job-title/a/@href = /fixtures/jobs/100.html | /fixtures/jobs/101.html | /fixtures/jobs/102.html",
+          "span.company = Anaconda | Canonical | Mozilla",
+          "span.location = Remote | Berlin, Germany | London, UK",
+          "time.posted = 28 Aug 2026 | 27 Aug 2026 | 26 Aug 2026",
+          "time.posted/@datetime = 2026-08-28 | 2026-08-27 | 2026-08-26"
+        ],
+        "state": "Records: python job listing\nFields: title, company, location, link\nSamples: list mode, 3 sample rows of ul.jobs > li.job\nSample 1: Senior Python Engineer II Anaconda Remote 28 Aug 2026\nSample 2: Backend Developer (Django) Canonical Berlin, Germany 27 Aug 2026\nSample 3: Data Engineer Mozilla London, UK 26 Aug 2026",
+        "context": {
+          "decision": "field_value",
+          "field": {
+            "name": "company"
+          },
+          "shared": {
+            "records": "python job listing",
+            "mode": "list",
+            "fields": [
+              {
+                "name": "title"
+              },
+              {
+                "name": "company"
+              },
+              {
+                "name": "location"
+              },
+              {
+                "name": "link"
+              }
+            ],
+            "samples": [
+              "Senior Python Engineer II Anaconda Remote 28 Aug 2026",
+              "Backend Developer (Django) Canonical Berlin, Germany 27 Aug 2026",
+              "Data Engineer Mozilla London, UK 26 Aug 2026"
+            ]
+          }
+        },
+        "optionContext": [
+          {
+            "path": "h2.job-title/a",
+            "shape": "text",
+            "values": [
+              "Senior Python Engineer II",
+              "Backend Developer (Django)",
+              "Data Engineer"
+            ]
+          },
+          {
+            "path": "h2.job-title/a/@href",
+            "shape": "url",
+            "values": [
+              "/fixtures/jobs/100.html",
+              "/fixtures/jobs/101.html",
+              "/fixtures/jobs/102.html"
+            ],
+            "attribute": "href"
+          },
+          {
+            "path": "span.company",
+            "shape": "text",
+            "values": [
+              "Anaconda",
+              "Canonical",
+              "Mozilla"
+            ]
+          },
+          {
+            "path": "span.location",
+            "shape": "text",
+            "values": [
+              "Remote",
+              "Berlin, Germany",
+              "London, UK"
+            ]
+          },
+          {
+            "path": "time.posted",
+            "shape": "date",
+            "values": [
+              "28 Aug 2026",
+              "27 Aug 2026",
+              "26 Aug 2026"
+            ]
+          },
+          {
+            "path": "time.posted/@datetime",
+            "shape": "date",
+            "values": [
+              "2026-08-28",
+              "2026-08-27",
+              "2026-08-26"
+            ],
+            "attribute": "datetime"
+          }
+        ]
+      },
+      "gold": 2
+    },
+    {
+      "question": {
+        "id": "field.location",
+        "kind": "choice",
+        "premise": "Which candidate holds the location value on every sample? Pick none when no candidate is right on all samples.",
+        "options": [
+          "h2.job-title/a = Senior Python Engineer II | Backend Developer (Django) | Data Engineer",
+          "h2.job-title/a/@href = /fixtures/jobs/100.html | /fixtures/jobs/101.html | /fixtures/jobs/102.html",
+          "span.company = Anaconda | Canonical | Mozilla",
+          "span.location = Remote | Berlin, Germany | London, UK",
+          "time.posted = 28 Aug 2026 | 27 Aug 2026 | 26 Aug 2026",
+          "time.posted/@datetime = 2026-08-28 | 2026-08-27 | 2026-08-26"
+        ],
+        "state": "Records: python job listing\nFields: title, company, location, link\nSamples: list mode, 3 sample rows of ul.jobs > li.job\nSample 1: Senior Python Engineer II Anaconda Remote 28 Aug 2026\nSample 2: Backend Developer (Django) Canonical Berlin, Germany 27 Aug 2026\nSample 3: Data Engineer Mozilla London, UK 26 Aug 2026",
+        "context": {
+          "decision": "field_value",
+          "field": {
+            "name": "location"
+          },
+          "shared": {
+            "records": "python job listing",
+            "mode": "list",
+            "fields": [
+              {
+                "name": "title"
+              },
+              {
+                "name": "company"
+              },
+              {
+                "name": "location"
+              },
+              {
+                "name": "link"
+              }
+            ],
+            "samples": [
+              "Senior Python Engineer II Anaconda Remote 28 Aug 2026",
+              "Backend Developer (Django) Canonical Berlin, Germany 27 Aug 2026",
+              "Data Engineer Mozilla London, UK 26 Aug 2026"
+            ]
+          }
+        },
+        "optionContext": [
+          {
+            "path": "h2.job-title/a",
+            "shape": "text",
+            "values": [
+              "Senior Python Engineer II",
+              "Backend Developer (Django)",
+              "Data Engineer"
+            ]
+          },
+          {
+            "path": "h2.job-title/a/@href",
+            "shape": "url",
+            "values": [
+              "/fixtures/jobs/100.html",
+              "/fixtures/jobs/101.html",
+              "/fixtures/jobs/102.html"
+            ],
+            "attribute": "href"
+          },
+          {
+            "path": "span.company",
+            "shape": "text",
+            "values": [
+              "Anaconda",
+              "Canonical",
+              "Mozilla"
+            ]
+          },
+          {
+            "path": "span.location",
+            "shape": "text",
+            "values": [
+              "Remote",
+              "Berlin, Germany",
+              "London, UK"
+            ]
+          },
+          {
+            "path": "time.posted",
+            "shape": "date",
+            "values": [
+              "28 Aug 2026",
+              "27 Aug 2026",
+              "26 Aug 2026"
+            ]
+          },
+          {
+            "path": "time.posted/@datetime",
+            "shape": "date",
+            "values": [
+              "2026-08-28",
+              "2026-08-27",
+              "2026-08-26"
+            ],
+            "attribute": "datetime"
+          }
+        ]
+      },
+      "gold": 3
+    },
+    {
+      "question": {
+        "id": "field.link",
+        "kind": "choice",
+        "premise": "Which candidate holds the link value on every sample? Pick none when no candidate is right on all samples.",
+        "options": [
+          "h2.job-title/a = Senior Python Engineer II | Backend Developer (Django) | Data Engineer",
+          "h2.job-title/a/@href = /fixtures/jobs/100.html | /fixtures/jobs/101.html | /fixtures/jobs/102.html",
+          "span.company = Anaconda | Canonical | Mozilla",
+          "span.location = Remote | Berlin, Germany | London, UK",
+          "time.posted = 28 Aug 2026 | 27 Aug 2026 | 26 Aug 2026",
+          "time.posted/@datetime = 2026-08-28 | 2026-08-27 | 2026-08-26"
+        ],
+        "state": "Records: python job listing\nFields: title, company, location, link\nSamples: list mode, 3 sample rows of ul.jobs > li.job\nSample 1: Senior Python Engineer II Anaconda Remote 28 Aug 2026\nSample 2: Backend Developer (Django) Canonical Berlin, Germany 27 Aug 2026\nSample 3: Data Engineer Mozilla London, UK 26 Aug 2026",
+        "context": {
+          "decision": "field_value",
+          "field": {
+            "name": "link"
+          },
+          "shared": {
+            "records": "python job listing",
+            "mode": "list",
+            "fields": [
+              {
+                "name": "title"
+              },
+              {
+                "name": "company"
+              },
+              {
+                "name": "location"
+              },
+              {
+                "name": "link"
+              }
+            ],
+            "samples": [
+              "Senior Python Engineer II Anaconda Remote 28 Aug 2026",
+              "Backend Developer (Django) Canonical Berlin, Germany 27 Aug 2026",
+              "Data Engineer Mozilla London, UK 26 Aug 2026"
+            ]
+          }
+        },
+        "optionContext": [
+          {
+            "path": "h2.job-title/a",
+            "shape": "text",
+            "values": [
+              "Senior Python Engineer II",
+              "Backend Developer (Django)",
+              "Data Engineer"
+            ]
+          },
+          {
+            "path": "h2.job-title/a/@href",
+            "shape": "url",
+            "values": [
+              "/fixtures/jobs/100.html",
+              "/fixtures/jobs/101.html",
+              "/fixtures/jobs/102.html"
+            ],
+            "attribute": "href"
+          },
+          {
+            "path": "span.company",
+            "shape": "text",
+            "values": [
+              "Anaconda",
+              "Canonical",
+              "Mozilla"
+            ]
+          },
+          {
+            "path": "span.location",
+            "shape": "text",
+            "values": [
+              "Remote",
+              "Berlin, Germany",
+              "London, UK"
+            ]
+          },
+          {
+            "path": "time.posted",
+            "shape": "date",
+            "values": [
+              "28 Aug 2026",
+              "27 Aug 2026",
+              "26 Aug 2026"
+            ]
+          },
+          {
+            "path": "time.posted/@datetime",
+            "shape": "date",
+            "values": [
+              "2026-08-28",
+              "2026-08-27",
+              "2026-08-26"
+            ],
+            "attribute": "datetime"
+          }
+        ]
+      },
+      "gold": 1
+    },
+    {
+      "question": {
+        "id": "link.next",
+        "kind": "choice",
+        "premise": "Which control leads to the next page of the same listing? Pick none when this is the last page or no control does.",
+        "options": [
+          "\"Previous\" -> http://127.0.0.1:56321/fixtures/python-jobs.html?page=0",
+          "\"Next\" -> http://127.0.0.1:56321/fixtures/python-jobs.html?page=2",
+          "\"Python Jobs\" -> http://127.0.0.1:56321/fixtures/python-jobs.html",
+          "\"About\" -> http://127.0.0.1:56321/fixtures/python-jobs.html#about",
+          "\"RSS\" -> http://127.0.0.1:56321/fixtures/python-jobs.html#rss",
+          "\"Remote\" -> http://127.0.0.1:56321/fixtures/python-jobs.html?type=remote",
+          "\"On-site\" -> http://127.0.0.1:56321/fixtures/python-jobs.html?type=onsite",
+          "\"Search\" -> http://127.0.0.1:56321/fixtures/search-form.html"
+        ],
+        "state": "Records: python job listing\nFields: title, company, location, link\nSamples: list mode, 3 sample rows of ul.jobs > li.job\nSample 1: Senior Python Engineer II Anaconda Remote 28 Aug 2026\nSample 2: Backend Developer (Django) Canonical Berlin, Germany 27 Aug 2026\nSample 3: Data Engineer Mozilla London, UK 26 Aug 2026",
+        "context": {
+          "decision": "next_page_link",
+          "shared": {
+            "records": "python job listing",
+            "mode": "list",
+            "fields": [
+              {
+                "name": "title"
+              },
+              {
+                "name": "company"
+              },
+              {
+                "name": "location"
+              },
+              {
+                "name": "link"
+              }
+            ],
+            "samples": [
+              "Senior Python Engineer II Anaconda Remote 28 Aug 2026",
+              "Backend Developer (Django) Canonical Berlin, Germany 27 Aug 2026",
+              "Data Engineer Mozilla London, UK 26 Aug 2026"
+            ]
+          }
+        },
+        "optionContext": [
+          {
+            "text": "Previous",
+            "href": "http://127.0.0.1:56321/fixtures/python-jobs.html?page=0"
+          },
+          {
+            "text": "Next",
+            "href": "http://127.0.0.1:56321/fixtures/python-jobs.html?page=2"
+          },
+          {
+            "text": "Python Jobs",
+            "href": "http://127.0.0.1:56321/fixtures/python-jobs.html"
+          },
+          {
+            "text": "About",
+            "href": "http://127.0.0.1:56321/fixtures/python-jobs.html#about"
+          },
+          {
+            "text": "RSS",
+            "href": "http://127.0.0.1:56321/fixtures/python-jobs.html#rss"
+          },
+          {
+            "text": "Remote",
+            "href": "http://127.0.0.1:56321/fixtures/python-jobs.html?type=remote"
+          },
+          {
+            "text": "On-site",
+            "href": "http://127.0.0.1:56321/fixtures/python-jobs.html?type=onsite"
+          },
+          {
+            "text": "Search",
+            "href": "http://127.0.0.1:56321/fixtures/search-form.html"
+          }
+        ]
+      },
+      "gold": 1
+    }
+  ]
+}

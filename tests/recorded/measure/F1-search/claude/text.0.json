@@ -1,0 +1,9 @@
+{
+  "id": "text.0",
+  "index": null,
+  "text": "python jobs",
+  "kind": "text",
+  "inputTokens": 10,
+  "outputTokens": 382,
+  "chooser": "claude"
+}

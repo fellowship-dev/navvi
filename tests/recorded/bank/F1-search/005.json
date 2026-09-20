@@ -1,0 +1,42 @@
+{
+  "scenario": "F1-search",
+  "batch": 5,
+  "entries": [
+    {
+      "question": {
+        "id": "group",
+        "kind": "choice",
+        "premise": "Which candidate group holds one job search result per item, with the title, company, link values? Pick none when no candidate does.",
+        "options": [
+          "#results > li.result (6 items): python jobs role 1Company 1 || python jobs role 2Company 2 || python jobs role 3Company 3"
+        ],
+        "state": "Records: job search result\nFields: title, company, link\nPage: http://127.0.0.1:56321/fixtures/results.html?q=python+jobs",
+        "context": {
+          "decision": "list_group",
+          "shared": {
+            "records": "job search result",
+            "fields": [
+              "title",
+              "company",
+              "link"
+            ],
+            "page": "http://127.0.0.1:56321/fixtures/results.html?q=python+jobs"
+          }
+        },
+        "optionContext": [
+          {
+            "container": "#results",
+            "item": "li.result",
+            "item_count": 6,
+            "sample_items": [
+              "python jobs role 1Company 1",
+              "python jobs role 2Company 2",
+              "python jobs role 3Company 3"
+            ]
+          }
+        ]
+      },
+      "gold": 0
+    }
+  ]
+}

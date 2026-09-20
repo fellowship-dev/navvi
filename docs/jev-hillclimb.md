@@ -62,6 +62,24 @@ Per-batch wall time went from 374 ms to 495 ms across the steps (larger
 state, the gate question); input tokens per five repeats from 133k to 248k
 (about one cent).
 
+### With the complex flows in the bank
+
+Bank of the nine scenarios (AE1, AE7, AE8, AE15 plus F1 search, F2 login,
+F3 category, F4 pagination, F5 detail pages): 66 scored questions, 5 repeats.
+Navigation target heads are speculative (R11: only the head of the chosen
+operation is consumed), so a head the run never used is asked but not scored.
+
+| step | change | all | heal.field | link | nav.op | nav.target | nav.done |
+|---|---|---|---|---|---|---|---|
+| 4 | steps 0 to 3 on the larger bank | 329/330 (99.7%) after scoring only used heads; the one miss is the stock heal gate, one run in five | 24/25 | 34/35 then 35/35 | 43/45 then 45/45 | 30/30 | 15/15 |
+| 5 | one rule each for `list_group`, `detail_page_link` and `next_page_link` (a lone candidate that fits is the answer; what a next link is not) | 329/330 (99.7%) | 24/25 | 35/35 | 45/45 | 30/30 | 15/15 |
+| 6 | the gate is joint: a gated choice stands when P(present) x P(choice) >= 0.2 instead of P(present) >= 0.5. Two rewordings of the gate rule were tried first and reverted: dropping the out-of-stock example moved the absent case from 0.22 to 0.45; a "yes when" clause moved it to 0.48 | **330/330 (100.0%)** | 25/25 | 35/35 | 45/45 | 30/30 | 15/15 |
+
+Step 4's two misses before the head rule were a single-candidate detail link
+(`P(gold)` 0.49 to 0.54 against `none`), the shape of the original group
+complaint, fixed by step 5's rule, and two transport failures on one run.
+Mean batch wall at step 6: 347 ms; five repeats of the whole bank cost $0.019.
+
 ## Where the bank stands
 
 See the table in `docs/measurements.md` for the end-to-end numbers per

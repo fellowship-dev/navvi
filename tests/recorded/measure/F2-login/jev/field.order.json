@@ -1,0 +1,14 @@
+{
+  "id": "field.order",
+  "index": 0,
+  "probabilities": [
+    0.74,
+    0,
+    0,
+    0.18
+  ],
+  "kind": "choice",
+  "inputTokens": 447,
+  "outputTokens": 51,
+  "chooser": "jev"
+}

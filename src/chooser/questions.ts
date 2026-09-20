@@ -154,6 +154,12 @@ export const jevFraming = {
         return "The right candidate shows the field's value and nothing else on every sample. A candidate showing a label (such as 'Price:'), a related record, a breadcrumb or a longer text that merely contains the value is not it.";
       case "heal_field_value":
         return "The page was redesigned; the field may still be shown. Earlier values come from other pages: they show the kind and shape of value to look for, not the value to find. The right candidate shows this page's own value of the field, not a label, a breadcrumb, or a value from a list of other records (several candidates on one path).";
+      case "list_group":
+        return "The right group has one record per item and its sample items read like the records described, each carrying the fields. A lone candidate that fits is the answer; none is only for a page with no such list.";
+      case "detail_page_link":
+        return "The detail link is the per-item link whose targets differ per item and open a page of that item's own. A lone candidate that fits is the answer; none is only for records with no page of their own (an anchor within the page, a link shared by every item).";
+      case "next_page_link":
+        return "The next-page control continues the same listing (next, more, older, a page number one higher). Sorting, filters, a search page, the previous page or a section anchor are not it.";
       default:
         return undefined;
     }

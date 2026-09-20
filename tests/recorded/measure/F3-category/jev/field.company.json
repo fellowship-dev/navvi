@@ -1,0 +1,16 @@
+{
+  "id": "field.company",
+  "index": 2,
+  "probabilities": [
+    0,
+    0,
+    0.99,
+    0,
+    0,
+    0
+  ],
+  "kind": "choice",
+  "inputTokens": 640,
+  "outputTokens": 82,
+  "chooser": "jev"
+}

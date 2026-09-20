@@ -1,0 +1,8 @@
+{
+  "id": "nav.3.op",
+  "index": 3,
+  "kind": "choice",
+  "inputTokens": 10,
+  "outputTokens": 609,
+  "chooser": "claude"
+}

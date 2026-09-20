@@ -21,7 +21,7 @@
           "main/article/div/div/p = Ibuprofeno 400 mg de Mintlab. Medicamento de venta directa.…",
           "main/section/h2 = Productos relacionados"
         ],
-        "state": "Healing on http://127.0.0.1:55170/demo/pharmacy/producto/ibuprofeno-400-mg.html\nFields whose compiled selectors no longer resolve: price\nEarlier price values: \"$ 6.990\" | \"$ 12.990\" | \"$ 5.290\"",
+        "state": "Healing on http://127.0.0.1:56321/demo/pharmacy/producto/ibuprofeno-400-mg.html\nFields whose compiled selectors no longer resolve: price\nEarlier price values: \"$ 6.990\" | \"$ 12.990\" | \"$ 5.290\"",
         "context": {
           "decision": "heal_field_value",
           "field": {
@@ -34,7 +34,7 @@
           "shape": "money",
           "shared": {
             "healing": "the compiled selectors no longer resolve on this page",
-            "page": "http://127.0.0.1:55170/demo/pharmacy/producto/ibuprofeno-400-mg.html",
+            "page": "http://127.0.0.1:56321/demo/pharmacy/producto/ibuprofeno-400-mg.html",
             "mode": "record",
             "fields": [
               "name",
