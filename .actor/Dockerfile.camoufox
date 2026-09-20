@@ -30,7 +30,8 @@ RUN npm --quiet set progress=false \
 COPY --chown=myuser . ./
 
 RUN npm run build:actor \
-    && npm prune --omit=dev --omit=optional \
+    # Only dev: camoufox-js is optional in package.json but this image needs it at run time.
+    && npm prune --omit=dev \
     && echo "Installed NPM packages:" && (npm list --omit=dev --all || true)
 
 CMD ["npm", "start", "--silent"]
