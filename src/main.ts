@@ -3,12 +3,14 @@ import { ZodError } from "zod";
 import { parseInput, defaultChooser, defaultBrowser, type RunInput } from "./input/schema.js";
 import { promptToInput } from "./input/prompt.js";
 import { NavviError, NeedsHumanError } from "./billing/budget.js";
+import { zeroCharges, type ChargeCounts } from "./billing/charge.js";
 import { createChooser } from "./chooser/index.js";
 import { runCrawl, type CrawlDeps } from "./replay/crawler.js";
 import { redactRunInput } from "./secrets/resolve.js";
 
 import type { Status } from "./scraper/schema.js";
 import type { HealingEvent, UnmappedCandidate } from "./replay/heal.js";
+import type { ZeroDataRetentionState } from "./chooser/chooser.js";
 
 export type { Status };
 
@@ -31,6 +33,12 @@ export interface RunSummary {
   blockedRequests: number;
   /** Pages whose fingerprint check failed and no healer repaired. */
   unhealed: number;
+  /** The scraper to pin next time: the given `scriptId`, else the one scraper this run used, else null (several templates). */
+  scriptId: string | null;
+  /** R20: events charged this run; all zero off the platform. */
+  charges: ChargeCounts;
+  /** Zero-data-retention state the chooser reported; null when no chooser ran. */
+  zeroDataRetention: ZeroDataRetentionState | null;
   /** Why the run stopped short, for every status but succeeded. */
   message?: string;
   /** needs_human: how to resume once the questions are answered. */
@@ -68,6 +76,9 @@ export function summaryFor(status: Status, input: RunInput | null, message: stri
     traceReplays: 0,
     blockedRequests: 0,
     unhealed: 0,
+    scriptId: input?.scriptId ?? null,
+    charges: zeroCharges(),
+    zeroDataRetention: null,
     message,
   };
 }
