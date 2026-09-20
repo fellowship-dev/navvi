@@ -120,7 +120,7 @@ function panel(lane: Lane, now: number): string {
   return `<div class="lane">
     <div class="model-heading"><strong style="color:${lane.color}">${esc(lane.label)}</strong><span class="clock" style="color:${lane.finishedAt ? "#7ee787" : "#e6edf3"}">${secs(elapsed)}</span></div>
     <div class="status">${esc(lane.status)}</div>
-    <div class="browser"><div class="chrome"><span class="dots"><span></span><span></span><span></span></span><span class="badge">${lane.key === "claude" ? "Claude Code · Haiku" : "Jev · text fallback"}</span></div><div class="view">${shot}</div></div>
+    <div class="browser"><div class="chrome"><span class="dots"><span></span><span></span><span></span></span><span class="badge">${lane.key === "claude" ? "Claude Code · Haiku" : "Jev · Haiku writer"}</span></div><div class="view">${shot}</div></div>
     <div class="side">
       <div class="log">${log}</div>
       ${rows}
@@ -170,7 +170,8 @@ async function main(): Promise<void> {
   startUrlShown = startUrl;
   const env: NodeJS.ProcessEnv = { ...process.env, NAVVI_BROWSER: "chromium", NAVVI_CLAUDE_MODEL: "haiku" };
   delete env.DEMO_EXPECT_SOURCE;
-  const freshChooser = (key: "jev" | "claude") => createChooser({ chooser: key, env, cli: { timeoutMs: 180_000, model: "haiku" } });
+  // Both lanes use the same explicit writer; only the structured decider differs.
+  const freshChooser = (key: "jev" | "claude") => createChooser({ decider: key, writer: "claude", env, cli: { timeoutMs: 180_000, model: "haiku" } });
   const selected = process.env.DEMO_CHOOSERS ?? "claude,jev";
   if (!["jev", "jev,claude", "claude,jev"].includes(selected)) throw new Error("DEMO_CHOOSERS must be jev, jev,claude or claude,jev");
   const phases = process.env.DEMO_PHASES ?? "compile,replay";
@@ -187,7 +188,7 @@ async function main(): Promise<void> {
   const composePage = await (await composer.newContext({ viewport: { width: WIDTH, height: HEIGHT }, deviceScaleFactor: 1 })).newPage();
   const receipt = () => writeFileSync(join(output, "receipt.json"), JSON.stringify({
     recordedAt: new Date().toISOString(), startUrl, prompt: PROMPT, phases,
-    laneOrder: keys, providerPaths: { haiku: "Claude Code CLI pinned to haiku", jev: env.AI_GATEWAY_API_KEY ? "Vercel Gateway; text fallback per configured model" : "TypeSafe direct; text fallback per configured model or CLI" },
+    laneOrder: keys, providerPaths: { haiku: "Claude Code CLI pinned to haiku; decider and writer", jev: env.AI_GATEWAY_API_KEY ? "Jev via Vercel Gateway; Claude Code Haiku writer" : "Jev via TypeSafe direct; Claude Code Haiku writer" },
     acceptance: { expectedSource: EXPECT_SOURCE ?? null },
     commit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
     workingTree: execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim(),
@@ -204,7 +205,7 @@ async function main(): Promise<void> {
   async function tick(): Promise<void> {
     const now = performance.now();
     for (const lane of lanes) {
-      if (lane.page && !lane.blank) {
+      if (lane.page && !lane.blank && lane.finishedAt === null) {
         try {
           const png = await lane.page.screenshot({ type: "png", clip: { x: 0, y: 0, width: SHOT_W, height: SHOT_H }, timeout: 400, animations: "disabled" });
           lane.shot = `data:image/png;base64,${png.toString("base64")}`;
@@ -215,6 +216,7 @@ async function main(): Promise<void> {
     }
     await composePage.setContent(frame(lanes, now, phase));
     await composePage.screenshot({ path: join(framesDir, `${String(frameIndex).padStart(4, "0")}.png`), type: "png", clip: { x: 0, y: 0, width: WIDTH, height: HEIGHT } });
+    appendFileSync(join(output, "frame-times.jsonl"), JSON.stringify({ frame: frameIndex, phase, lanes: lanes.map((lane) => ({ key: lane.key, phase: lane.phase, started: lane.startedAt > 0, finished: lane.finishedAt !== null, elapsedMs: lane.startedAt ? (lane.finishedAt ?? now) - lane.startedAt : 0 })) }) + "\n");
     durations.push((now - lastFrameAt) / 1000);
     lastFrameAt = now;
     frameIndex += 1;

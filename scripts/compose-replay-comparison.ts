@@ -36,6 +36,8 @@ const rawReceipt = readFileSync(join(source, "receipt.json"));
 const receipt = JSON.parse(rawReceipt.toString());
 const lane = receipt.lanes.find((lane: { key: string }) => lane.key === "jev");
 if (!lane) throw new Error("Source has no Jev lane");
+const laneIndex = receipt.lanes.findIndex((lane: { key: string }) => lane.key === "jev");
+const laneOffset = laneIndex === 0 ? 0 : 635;
 for (const phase of ["compile", "replay"]) {
   const report = lane.reports.find((report: { phase: string }) => report.phase === phase);
   if (!report || report.error || report.summary.status !== "succeeded" || report.rows.length === 0 || report.rows.length !== report.summary.items) throw new Error(`${phase}: unsuccessful source`);
@@ -91,10 +93,10 @@ try {
       *{box-sizing:border-box}body{margin:0;width:1280px;height:800px;background:#0b0e14;color:#e6edf3;font-family:-apple-system,Arial,sans-serif;overflow:hidden}
       header{height:80px;padding:10px 16px;border-bottom:1px solid #30363d;font-size:20px;line-height:27px}header b{color:#7ee787}header span{color:#adbac7;font-size:18px}
       .panels{display:flex;gap:8px}.panel{width:632px}.label{height:32px;padding:4px 10px;font-size:20px;font-weight:700;color:#79c0ff}.repeat{color:#7ee787}
-      .raw{position:relative;width:632px;height:474px;overflow:hidden}.raw img{position:absolute;left:0;top:-80px;width:1280px;height:800px;max-width:none}
+      .raw{position:relative;width:632px;height:474px;overflow:hidden}.raw img{position:absolute;left:-${laneOffset}px;top:-80px;width:1280px;height:800px;max-width:none}
       .results{padding:12px 12px;font:18px/1.45 Menlo,monospace}.results table{width:100%;table-layout:fixed;border-collapse:collapse}.results td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-top:1px solid #30363d;padding:2px 5px 2px 0}.results b{display:block;color:#7ee787;margin-top:8px}
       footer{position:absolute;bottom:0;left:0;width:1280px;height:38px;padding:9px 16px;font-size:16px;color:#adbac7;border-top:1px solid #30363d;background:#0b0e14}
-      </style></head><body><header><b>Navvi</b> · ${esc(receipt.prompt)}<br><span>Same prompt · Remote OK · fresh browser for each run</span></header>
+      </style></head><body><header><b>Navvi</b> · ${esc(receipt.prompt)}<br><span>Same prompt · ${esc(new URL(receipt.startUrl).hostname)} · fresh browser for each run</span></header>
       <div class="panels"><section class="panel"><div class="label">First run · Jev + text fallback</div><div class="raw"><img src="${image(compileIndex)}"></div>${results(compileReport, elapsed)}</section>
       <section class="panel"><div class="label repeat">Repeat · saved scraper</div><div class="raw"><img src="${image(replayIndex)}"></div>${results(replayReport, elapsed)}</section></div>
       <footer>Two sequential real runs, aligned for comparison · original rounded timers · faster run freezes when complete</footer></body></html>`);
