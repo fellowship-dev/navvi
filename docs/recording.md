@@ -24,6 +24,10 @@ Use a full ffmpeg installation supporting palette GIFs and H.264 MP4. Playwright
 
 The shared demo layout is 960×600 at 6 fps. The race uses 1280×800, GIF at 4 fps and MP4 at 8 fps. Preserve actual event timestamps for timers; the scripted holds in the illustrative clips are not end-to-end performance measurements.
 
+## Launch order: compile first, replay second
+
+The opening clip is Haiku on the left and Jev on the right, both compiling the same real task with empty caches. Use `DEMO_PHASES=compile` to export only that comparison. The second clip demonstrates saved replay with zero model calls. Keep these as separate assets. A faster run does not establish better accuracy; both datasets need review.
+
 ## Next cut: Remote OK
 
 First prove this exact prompt through the CLI from the public homepage:
@@ -46,6 +50,7 @@ The real-site race uses the same recording pipeline:
 DEMO_URL=https://remoteok.com/ \
 DEMO_EXPECT_SOURCE=https://remoteok.com/remote-python-jobs \
 DEMO_PROMPT='Search Remote OK for Python jobs and extract up to 10 results with job title, company, location and job link. Exclude ads.' \
+DEMO_PHASES=compile \
 DEMO_OUT=/tmp/navvi-recordings \
 npx tsx scripts/record-race.ts
 ```
@@ -54,7 +59,7 @@ Provide TypeSafe credentials and an authenticated Claude Code harness through th
 
 Both lanes pass only the natural-language prompt plus the URL and common browser/page/item limits. Their first-run caches are isolated. Replay reuses each lane's own storage with a new chooser and a new crawler browser. Each crawler uses a 1200×700 desktop viewport, scaled to a 600×350 panel to preserve the site layout. The `CrawlDeps.onPage` hook captures the actual page for compile and replay; there is no separately navigated preview. Timers include prompt parsing, data retrieval and capture overhead. This is a recorded workflow measurement, not an isolated provider benchmark.
 
-Each run directory retains `receipt.json` (commit, dirty-file list, input, phase timings, usage and summaries), four `*-rows.json` outputs, per-phase `*-questions.jsonl` diagnostics (question state, options, answers, errors and timestamps), storage and PNG frames. These diagnostic files are intended for public-site demo inputs only. If either lane returns no rows, missing fields or empty requested values in any row, an unexpected `_source` when configured, a blocked/error status or mismatched saved-row count, the script saves the evidence and exits without encoding a success clip. A successful replay only says “zero model calls” when its fresh chooser reports zero questions. Nonzero replay questions stay visible. Successful status does **not** establish semantic correctness: compare the saved rows against the displayed jobs before publishing.
+Each run directory retains `receipt.json` (commit, dirty-file list, input, phase timings, usage and summaries), per-lane, per-phase `*-rows.json` outputs, per-phase `*-questions.jsonl` diagnostics (question state, options, answers, errors and timestamps), storage and PNG frames. These diagnostic files are intended for public-site demo inputs only. If either lane returns no rows, missing fields or empty requested values in any row, an unexpected `_source` when configured, a blocked/error status or mismatched saved-row count, the script saves the evidence and exits without encoding a success clip. A successful replay only says “zero model calls” when its fresh chooser reports zero questions. Nonzero replay questions stay visible. Successful status does **not** establish semantic correctness: compare the saved rows against the displayed jobs before publishing.
 
 Do not present the existing `record-live.ts` recorded-answer flow as live model decision-making.
 
@@ -66,7 +71,7 @@ Inspect the first frame, form interaction, first real results, both timer stops,
 
 ## First run versus saved replay from an existing recording
 
-When the useful claim is reuse, compose the validated Jev lane's two sequential runs. To capture a new source without requiring the optional Haiku comparison, run the real-site command above with `DEMO_CHOOSERS=jev`. The recorder then requires only Jev's compile and replay to pass; it still enforces fields and expected source. It keeps the Jev pane in the same location for this compositor. The default `DEMO_CHOOSERS=jev,claude` retains the two-model race. This does not repeat model calls or show an invalid competitor lane. Preserve the original run directory. Verify the start/end frame indices and displayed elapsed clock values visually before supplying anchors:
+When the useful claim is reuse, compose the validated Jev lane's two sequential runs. To capture a new source without requiring the optional Haiku comparison, run the real-site command above with `DEMO_CHOOSERS=jev`. The recorder then requires only Jev's compile and replay to pass; it still enforces fields and expected source. It keeps the Jev pane in the same location for this compositor. The default `DEMO_CHOOSERS=claude,jev` puts Haiku left and Jev right. `DEMO_PHASES` defaults to `compile,replay`; use `compile` for the opening clip. This does not repeat model calls or show an invalid competitor lane. Preserve the original run directory. Verify the start/end frame indices and displayed elapsed clock values visually before supplying anchors:
 
 ```sh
 DEMO_OUT=/tmp/navvi-publishable npx tsx scripts/compose-replay-comparison.ts \
@@ -79,3 +84,7 @@ DEMO_OUT=/tmp/navvi-publishable npx tsx scripts/compose-replay-comparison.ts \
 Those indices are specific to the cited recording, not defaults for future runs. Each `*-start` is the first active frame, each `*-end` the first frame showing the final timer, and each `*-anchor` its start frame's displayed elapsed seconds. The tool uses the existing `frames/frames.txt` durations to align the runs; it preserves original browser and timer pixels, freezes completed frames, and labels the comparison as two sequential real runs. Tenths-of-a-second source clocks imply ±0.05-second anchor rounding uncertainty, plus video sampling precision. No runtime value is invented.
 
 The source must contain successful Jev compile/replay reports, complete requested fields, matching source URLs and zero replay questions. The resulting unique directory contains MP4, GIF, frames, selected rows and `provenance.json` with source hashes, source commit/dirty state, verified lane reports, alignment anchors and every output-to-input frame mapping. A dirty source capture is identified as such; a subsequent clean-commit validation must be reported separately. Review the original and derived keyframes before publishing. Do not claim a universal speedup from one example.
+
+## Latest real-site attempt
+
+The September 20 compile-only trial is **not accepted for publication**: Haiku returned `blocked_no_progress` with zero rows after 110.4 seconds; Jev returned ten rows after 61.8 seconds. Both reached the Python-filter URL, but the visible page includes unrelated-looking jobs. That is not evidence of a clean semantic match or a fair speed win. Review site filtering and extracted membership before accepting either dataset. The recorder correctly withheld the success GIF. Next work: inspect Haiku’s repeated rejected completion judgments and validate result membership beyond URL equality.

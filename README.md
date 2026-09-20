@@ -1,6 +1,18 @@
-# Navvi
+<p align="center">
+  <img src="https://raw.githubusercontent.com/fellowship-dev/navvi/main/docs/navvi-logo.png" alt="Navvi fairy sticker" width="160" />
+</p>
 
-**Turn a browser task into a scraper you can run again.**
+<h1 align="center">Navvi</h1>
+
+<p align="center"><strong>Turn a browser task into a scraper you can run again.</strong></p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/navvi"><img src="https://img.shields.io/npm/v/navvi" alt="npm version" /></a>
+  <a href="https://github.com/fellowship-dev/navvi/actions/workflows/ci.yml"><img src="https://github.com/fellowship-dev/navvi/actions/workflows/ci.yml/badge.svg" alt="Tests" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/fellowship-dev/navvi" alt="MIT license" /></a>
+</p>
+
+<p align="center"><a href="#see-it-work">Demo</a> · <a href="#install-and-run">Install</a> · <a href="#choosers">Choose a model</a> · <a href="#development-and-tests">Contribute</a></p>
 
 Navvi uses a model to choose among controls and fields found by code, then saves
 a scraper with selectors, fingerprints and a navigation trace. Healthy repeat
@@ -11,6 +23,49 @@ still require a person or recompilation.
 Jev supplies fast typed decisions. Navvi adds persistence, structured extraction,
 replay and repair around those decisions. Jev also uses a text-capable fallback
 for prompt interpretation and values to type; those calls are included in usage.
+
+## See it work
+
+### 1. Compile: Haiku versus Jev
+
+Same task, separate empty caches, Haiku on the left and Jev on the right.
+The real-site comparison is pending: the latest Remote OK trial stalled in the
+Haiku lane, and result relevance still needs review. No speed or accuracy win is
+claimed. This slot will lead with the comparison once both outputs pass.
+
+### 2. Reuse: the saved scraper
+
+![Remote OK first run and saved replay](https://raw.githubusercontent.com/fellowship-dev/navvi/main/docs/remoteok-replay.gif)
+
+[Watch the video](docs/remoteok-replay.mp4): ten records from a real Remote OK
+search, then the same prompt in a fresh browser with **zero model calls**.
+The two sequential runs are aligned, with original clocks (42.6 s / 3.7 s).
+This demonstrates reuse; browser execution still has a cost.
+
+<details>
+<summary>Recording evidence, healing demo and limitations</summary>
+
+The controlled fixture below demonstrates compile, deliberately changed markup,
+and replay. Its answers are recorded fixtures: it shows behavior, not live model
+latency or a production-site guarantee. [Video](docs/demo.mp4), `npm run demo`.
+
+![Controlled compile, healing and replay fixture](docs/demo.gif)
+
+The older [search-form comparison](docs/race.mp4) is a fixture recording, not
+Remote OK. Current capture instructions and the two-run real-site recorder are in
+[`docs/recording.md`](docs/recording.md). Failed recordings retain evidence and do
+not export a success clip.
+
+The historical [measurement table](docs/measurements.md) and
+[Jev question-bank hillclimb](docs/jev-hillclimb.md) report a tuned scenario set.
+Their cell counts are harness checks, not independent semantic accuracy. They do
+not establish universal speedups, unseen-site accuracy or current prompt-to-output
+costs. A new live demo must retain its own rows, timings and revision.
+
+[Remote OK capture provenance](docs/remoteok-replay-provenance.json) ·
+[Separate source verification](docs/remoteok-proof.json).
+
+</details>
 
 ## Install and run
 
@@ -44,36 +99,6 @@ text-capable fallback. A Gateway account must have access to the configured text
 model as well as Jev; access to Jev alone does not cover prompt interpretation
 or typed text. Browser time and subscription/API charges still apply.
 Agents: read [`SKILL.md`](SKILL.md); [`llms.txt`](llms.txt) indexes the docs.
-
-## Demos and evidence
-
-![Real Remote OK first run and saved replay](docs/remoteok-replay.gif)
-
-[Watch the 45-second clip](docs/remoteok-replay.mp4): two real sequential runs,
-aligned for comparison with their original timers (42.6 s / 3.7 s). Both produce
-ten records from the selected results page; replay makes zero model questions.
-The clip demonstrates healthy reuse. It does not demonstrate healing or establish
-a general speed ratio. [Capture provenance](docs/remoteok-replay-provenance.json)
-and [separate final-revision source proof](docs/remoteok-proof.json) preserve the
-evidence. The attempted Jev-versus-Haiku race was withheld because equivalent
-search completion was inconsistent.
-
-The controlled fixture below demonstrates compile, deliberately changed markup,
-and replay. Its answers are recorded fixtures: it shows behavior, not live model
-latency or a production-site guarantee. [Video](docs/demo.mp4), `npm run demo`.
-
-![Controlled compile, healing and replay fixture](docs/demo.gif)
-
-The older [search-form comparison](docs/race.mp4) is a fixture recording, not
-Remote OK. Current capture instructions and the two-run real-site recorder are in
-[`docs/recording.md`](docs/recording.md). Failed recordings retain evidence and do
-not export a success clip.
-
-The historical [measurement table](docs/measurements.md) and
-[Jev question-bank hillclimb](docs/jev-hillclimb.md) report a tuned scenario set.
-Their cell counts are harness checks, not independent semantic accuracy. They do
-not establish universal speedups, unseen-site accuracy or current prompt-to-output
-costs. A new live demo must retain its own rows, timings and revision.
 
 ## What you get
 
@@ -234,6 +259,20 @@ paragraph is updated with the observed numbers.
 
 With and without Jev on the same pages: questions, wait time, cost and heal
 rate live in [`docs/measurements.md`](docs/measurements.md).
+
+## Development and tests
+
+```bash
+npm run typecheck
+npm test
+npm run build
+```
+
+CI runs the same offline suite with Chromium and recorded model answers; it
+needs no model key. Live model tests are separate: `npm run test:live`.
+[Testing and CI explained](docs/testing.md) · [Recording guide](docs/recording.md).
+Report a failing URL and a redacted summary in [an issue](https://github.com/fellowship-dev/navvi/issues).
+Never include browser profiles, cookies or API keys.
 
 ## License
 

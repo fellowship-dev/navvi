@@ -5,9 +5,10 @@ on:
   pull_request:
 jobs:
   test:
+    name: Offline tests and build (Chromium)
     runs-on: ubuntu-latest
     env:
-      CI: "1"
+      # Tests use the browser installed below; GitHub already sets CI=true.
       NAVVI_BROWSER: chromium
     steps:
       - uses: actions/checkout@v4
@@ -15,11 +16,18 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - run: node scripts/check-image-pins.mjs
-      - run: npx playwright install --with-deps chromium
-      - run: npm run typecheck
-      - run: npm test
+      - name: Install dependencies
+        run: npm ci
+      - name: Validate actor browser image pins
+        run: node scripts/check-image-pins.mjs
+      - name: Install test browser
+        run: npx playwright install --with-deps chromium
+      - name: Check TypeScript
+        run: npm run typecheck
+      - name: Run offline tests
+        run: npm test
+      - name: Build package and copy browser assets
+        run: npm run build
   push-actor:
     # The beta build on Apify follows every green main; `latest` stays a manual promote.
     # Needs the APIFY_TOKEN repository secret; without it the job is skipped, not failed.

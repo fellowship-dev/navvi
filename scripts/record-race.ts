@@ -25,7 +25,7 @@ const SHOT_SCALE = 0.5; // Preserve desktop layout: 1200×700 captured, rendered
 const SHOT_W = Math.round(PAGE_W / SHOT_SCALE);
 const SHOT_H = Math.round(PAGE_H / SHOT_SCALE);
 const TICK_MS = 250;
-const LOG_LINES = 3;
+const LOG_LINES = 2;
 
 // Acceptance oracle only: never passed to Navvi or its chooser.
 const EXPECT_SOURCE = process.env.DEMO_EXPECT_SOURCE;
@@ -118,9 +118,9 @@ function panel(lane: Lane, now: number): string {
       : "";
   const shot = lane.blank || !lane.shot ? "" : `<img src="${lane.shot}">`;
   return `<div class="lane">
-    <div class="clock" style="color:${lane.finishedAt ? "#7ee787" : "#e6edf3"}">${secs(elapsed)}</div>
+    <div class="model-heading"><strong style="color:${lane.color}">${esc(lane.label)}</strong><span class="clock" style="color:${lane.finishedAt ? "#7ee787" : "#e6edf3"}">${secs(elapsed)}</span></div>
     <div class="status">${esc(lane.status)}</div>
-    <div class="browser"><div class="chrome"><span class="dots"><span></span><span></span><span></span></span><span class="badge" style="background:${lane.color}">${esc(lane.label)}</span></div><div class="view">${shot}</div></div>
+    <div class="browser"><div class="chrome"><span class="dots"><span></span><span></span><span></span></span><span class="badge">${lane.key === "claude" ? "Claude Code · Haiku" : "Jev · text fallback"}</span></div><div class="view">${shot}</div></div>
     <div class="side">
       <div class="log">${log}</div>
       ${rows}
@@ -144,13 +144,14 @@ function frame(lanes: Lane[], now: number, phase: string): string {
   .badge { margin-left: auto; padding: 2px 8px; border-radius: 10px; font-weight: 700; font-size: 18px; color: #fff }
   .view { width: ${PAGE_W}px; height: ${PAGE_H}px; background: #fff } .view img { display: block; width: ${PAGE_W}px; height: ${PAGE_H}px }
   .side { display: flex; flex-direction: column; gap: 4px; padding: 2px 4px; min-width: 0 }
+  .model-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:34px }
   .clock { font: 700 42px/1 Menlo, Consolas, monospace; letter-spacing: -1px }
   .status { font-size: 20px; color: #8b949e; min-height: 16px }
-  .log { font: 16px/1.4 Menlo, Consolas, monospace; color: #adbac7; flex: 1 } .l { white-space: pre-wrap; word-break: break-word; margin-bottom: 2px }
+  .log { font: 16px/1.4 Menlo, Consolas, monospace; color: #adbac7; max-height: 46px; overflow: hidden } .l { white-space: pre-wrap; word-break: break-word; margin-bottom: 2px }
   table { border-collapse: collapse; table-layout: fixed; width: 100%; font: 18px/1.3 Menlo, Consolas, monospace; color: #e6edf3 } td { padding: 1px 6px 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-top: 1px solid #21262d }
   .more { font-size: 18px; color: #7ee787; font-weight: 700; margin-top: 2px }
 </style></head><body>
-  <div class="head"><div><span class="p">$</span> <span class="c">npx navvi ${esc(JSON.stringify(PROMPT))} ${esc(startUrlShown)}</span></div><div class="phase">${esc(phase)}</div></div>
+  <div class="head"><div><span class="p">One task.</span> <span class="c">${esc(PROMPT)}</span></div><div class="phase">${esc(phase)}</div></div>
   <div class="lanes">${lanes.map((l) => panel(l, now)).join("")}</div>
 </body></html>`;
 }
@@ -170,12 +171,14 @@ async function main(): Promise<void> {
   const env: NodeJS.ProcessEnv = { ...process.env, NAVVI_BROWSER: "chromium", NAVVI_CLAUDE_MODEL: "haiku" };
   delete env.DEMO_EXPECT_SOURCE;
   const freshChooser = (key: "jev" | "claude") => createChooser({ chooser: key, env, cli: { timeoutMs: 180_000, model: "haiku" } });
-  const selected = process.env.DEMO_CHOOSERS ?? "jev,claude";
-  if (selected !== "jev" && selected !== "jev,claude") throw new Error("DEMO_CHOOSERS must be jev or jev,claude");
-  const keys: Array<"jev" | "claude"> = selected === "jev" ? ["jev"] : ["jev", "claude"];
+  const selected = process.env.DEMO_CHOOSERS ?? "claude,jev";
+  if (!["jev", "jev,claude", "claude,jev"].includes(selected)) throw new Error("DEMO_CHOOSERS must be jev, jev,claude or claude,jev");
+  const phases = process.env.DEMO_PHASES ?? "compile,replay";
+  if (!["compile", "compile,replay"].includes(phases)) throw new Error("DEMO_PHASES must be compile or compile,replay");
+  const keys: Array<"jev" | "claude"> = selected === "jev" ? ["jev"] : selected === "claude,jev" ? ["claude", "jev"] : ["jev", "claude"];
   const lanes: Lane[] = keys.map((key) => ({
-    key, label: key === "jev" ? "Navvi + Jev" : "Navvi + Haiku",
-    color: key === "jev" ? "#1f6feb" : "#a371f7", chooser: freshChooser(key),
+    key, label: key === "jev" ? "Jev" : "Haiku",
+    color: key === "jev" ? "#7ee787" : "#c9a7ff", chooser: freshChooser(key),
     page: null, shot: "", blank: true, log: [], status: "waiting", rows: [], startedAt: 0,
     finishedAt: null, phase: "compile", compileMs: 0, compileQuestions: 0,
     replayMs: 0, replayQuestions: 0, reports: [],
@@ -183,7 +186,8 @@ async function main(): Promise<void> {
   const composer: Browser = await chromium.launch({ headless: true });
   const composePage = await (await composer.newContext({ viewport: { width: WIDTH, height: HEIGHT }, deviceScaleFactor: 1 })).newPage();
   const receipt = () => writeFileSync(join(output, "receipt.json"), JSON.stringify({
-    recordedAt: new Date().toISOString(), startUrl, prompt: PROMPT,
+    recordedAt: new Date().toISOString(), startUrl, prompt: PROMPT, phases,
+    laneOrder: keys, providerPaths: { haiku: "Claude Code CLI pinned to haiku", jev: env.AI_GATEWAY_API_KEY ? "Vercel Gateway; text fallback per configured model" : "TypeSafe direct; text fallback per configured model or CLI" },
     acceptance: { expectedSource: EXPECT_SOURCE ?? null },
     commit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
     workingTree: execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim(),
@@ -294,7 +298,7 @@ async function main(): Promise<void> {
   try {
     const stores = lanes.map((lane) => { const path = join(output, `${lane.key}-profiles`); mkdirSync(path); return path; });
     const actors = lanes.map((lane) => new Actor({ storageClient: new MemoryStorage({ localDataDirectory: join(output, `${lane.key}-storage`), persistStorage: true }) }));
-    for (const replay of [false, true]) {
+    for (const replay of phases === "compile" ? [false] : [false, true]) {
       phase = replay ? "run 2 · saved scraper, fresh browser" : "run 1 · prompt → scraper";
       for (const lane of lanes) {
         lane.blank = true;
