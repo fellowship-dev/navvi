@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "comment": "The actor build. The measurement harness and the recording scripts import the test fixture server, and tests/ is not in the image build context, so neither is compiled here.",
+  "include": ["src/**/*.ts", "bin/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tests", "storage", "demo", "src/measure"]
+}

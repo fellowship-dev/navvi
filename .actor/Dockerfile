@@ -8,19 +8,28 @@ ENV NAVVI_BROWSER=chromium \
     NAVVI_SKIP_BROWSER_DOWNLOAD=1 \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
+# better-sqlite3 (via camoufox-js) has no prebuild here and compiles with node-gyp.
+# camoufox-js is installed only so its types resolve during the build; the prune below drops it.
+USER root
+RUN apt update \
+    && apt install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt clean -y
+USER myuser
+
 COPY --chown=myuser package*.json ./
 # npm runs the postinstall script during `npm ci`, so it has to be in place first.
 COPY --chown=myuser scripts/postinstall.mjs ./scripts/postinstall.mjs
 
 # Dev dependencies are needed for the TypeScript build, then pruned.
 RUN npm --quiet set progress=false \
-    && npm ci --omit=optional \
+    && npm ci \
     && echo "Node.js version:" && node --version \
     && echo "NPM version:" && npm --version
 
 COPY --chown=myuser . ./
 
-RUN npm run build \
+RUN npm run build:actor \
     && npm prune --omit=dev --omit=optional \
     && echo "Installed NPM packages:" && (npm list --omit=dev --all || true)
 

@@ -36,7 +36,8 @@
     "demo": "tsx scripts/demo.ts",
     "measure": "tsx src/measure/run.ts",
     "postinstall": "node scripts/postinstall.mjs",
-    "hillclimb": "tsx src/measure/hillclimb.ts"
+    "hillclimb": "tsx src/measure/hillclimb.ts",
+    "build:actor": "tsc -p tsconfig.actor.json && node scripts/copy-assets.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.58",
