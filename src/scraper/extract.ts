@@ -249,12 +249,20 @@ interface EvaluateResult {
 /** Runs inside the page. Self-contained: Playwright serializes it, so nothing from module scope is referenced. */
 function extractInPage(arg: EvaluateArg): EvaluateResult {
   const squashText = (s: string | null | undefined): string => String(s ?? "").replace(/\s+/g, " ").trim();
-  const ownText = (el: Element): string => {
+  const textFragments = (el: Element): string => {
     let s = "";
     el.childNodes.forEach((n) => {
-      if (n.nodeType === 3) s += (n.textContent ?? "") + " ";
+      if (n.nodeType === 3) s += n.textContent ?? "";
+      else if (n instanceof Element && /^(em|mark|strong|b|i|u|sub|sup)$/.test(n.localName)
+        && !n.closest('[aria-hidden="true"],[inert]')
+        && n.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) s += textFragments(n);
+      else s += " ";
     });
-    return squashText(s);
+    return s;
+  };
+  const ownText = (el: Element): string => {
+    if (!Array.from(el.childNodes).some((n) => n.nodeType === 3 && squashText(n.textContent))) return "";
+    return squashText(textFragments(el));
   };
   const fullText = (el: Element): string => {
     const html = el as HTMLElement;

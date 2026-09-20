@@ -54,10 +54,21 @@
   function normalize(text) {
     return squash(String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase());
   }
-  function ownText(el) {
+  function textFragments(el) {
     var s = "";
-    for (var n of el.childNodes) if (n.nodeType === 3) s += n.textContent + " ";
-    return squash(s).slice(0, LEAF_TEXT_CHARS);
+    // Emphasis/highlight markup belongs to the surrounding text, not a separate field.
+    // Preserve adjacency inside words; do not absorb unrelated links or containers.
+    for (var n of el.childNodes) {
+      if (n.nodeType === 3) s += n.textContent;
+      else if (n.nodeType === 1 && /^(em|mark|strong|b|i|u|sub|sup)$/.test(n.localName) && visible(n)) s += textFragments(n);
+      else s += " ";
+    }
+    return s;
+  }
+  function ownText(el) {
+    // Wrapper-only fields still use the existing full-text/composite fallback.
+    if (!Array.from(el.childNodes).some((n) => n.nodeType === 3 && squash(n.textContent))) return "";
+    return squash(textFragments(el)).slice(0, LEAF_TEXT_CHARS);
   }
   function fullText(el, n) {
     var t = el.innerText != null ? el.innerText : el.textContent;

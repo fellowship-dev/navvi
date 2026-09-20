@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Page } from "playwright";
 import { launch, type LaunchedBrowser } from "../src/browser/launch.js";
+import { getCandidates, resolveLeaf } from "../src/browser/snapshot.js";
 import { extractPage, fingerprintMatches, resolveUrl, shapeOf } from "../src/scraper/extract.js";
 import { validateScraper, type CompiledScraper } from "../src/scraper/schema.js";
 import { startFixtureServer, type FixtureServer } from "./server.js";
@@ -110,6 +111,26 @@ describe("resolveUrl (R4)", () => {
 });
 
 describe("extractPage", () => {
+  it.each(["Sunsetting <em>Py<strong>th</strong>on</em> 2", "Sunsetting <mark>Python </mark>2"])("preserves highlighted words in snapshot candidates, compile resolution and replay: %s", async (markup) => {
+    await withPage("/fixtures/search-form.html", async (page) => {
+      await page.setContent(`<h1>${markup}<mark hidden>hidden</mark><a href="/other">Other story</a></h1>`);
+      const candidates = await getCandidates(page);
+      const title = candidates.leaves.find((leaf) => leaf.selector === "h1" && !leaf.attr);
+      expect(title?.text).toBe("Sunsetting Python 2");
+      expect(await resolveLeaf(page, { selector: "h1" })).toBe("Sunsetting Python 2");
+      const result = await extractPage(page, scraper({}));
+      expect(result.values.name).toBe("Sunsetting Python 2");
+    });
+  });
+
+  it("keeps full-text fallback when every word is wrapped", async () => {
+    await withPage("/fixtures/search-form.html", async (page) => {
+      await page.setContent(`<h1><strong>Python</strong><span> 2 release</span></h1>`);
+      expect(await resolveLeaf(page, { selector: "h1" })).toBe("Python 2 release");
+      expect((await extractPage(page, scraper({}))).values.name).toBe("Python 2 release");
+    });
+  });
+
   it("record mode extracts document-scoped fields, tries alternatives in order and null-fills missing fields", async () => {
     const doc = scraper({
       fields: {
