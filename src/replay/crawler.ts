@@ -385,6 +385,21 @@ function stopFromError(state: RunState, crawler: PlaywrightCrawler, error: unkno
   return false;
 }
 
+/**
+ * A critical section for a concurrent crawl: the calls handed to the returned
+ * function run one at a time, in call order, and a rejection never breaks the
+ * chain. Two of them exist per run — healing a template (R33) and claiming the
+ * item budget (R20) — because both read shared state, await, and then write it.
+ */
+function serialize(): <T>(fn: () => Promise<T>) => Promise<T> {
+  let chain: Promise<unknown> = Promise.resolve();
+  return <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = chain.then(fn, fn);
+    chain = run.catch(() => undefined);
+    return run;
+  };
+}
+
 // ---------------------------------------------------------------- the run
 
 export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<RunSummary> {
@@ -689,12 +704,9 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   }
 
   /** Healing runs one page at a time, so concurrent pages share the first repair instead of each asking (R33). */
-  let healChain: Promise<unknown> = Promise.resolve();
-  function withHealLock<T>(fn: () => Promise<T>): Promise<T> {
-    const run = healChain.then(fn, fn);
-    healChain = run.catch(() => undefined);
-    return run;
-  }
+  const withHealLock = serialize();
+  /** R20: one page at a time claims rows — reads the room, charges it and counts them (see `pushItems`). */
+  const withItemLock = serialize();
 
   function noteUnmapped(found: readonly UnmappedCandidate[] | undefined): void {
     for (const candidate of found ?? []) {
@@ -786,7 +798,11 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     return `hash:${createHash("sha256").update(JSON.stringify(names.map((n) => [n, item.values[n]]))).digest("hex")}`;
   }
 
-  /** R18: compiles the detail template on first use, then merges each item's detail page; every detail page is a scraped page. */
+  /**
+   * R18: compiles the detail template on first use, then merges each item's
+   * detail page; every detail page is a scraped page. Always returns one row
+   * per item given, in order — `pushItems` has already charged for them.
+   */
   async function mergeDetails(ctx: PlaywrightCrawlingContext, plan: TemplatePlan, scraper: CompiledScraper, items: ItemExtraction[]): Promise<ItemExtraction[]> {
     let live = scraper;
     const samples = new Map<string, ItemExtraction>();
@@ -818,14 +834,19 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     }
     const out: ItemExtraction[] = [];
     let detailPage: Page | null = null;
+    /** The page budget ran out mid-merge: no further detail page is opened. */
+    let pagesSpent = false;
     try {
       for (const [i, item] of items.entries()) {
         const link = links[i] ?? null;
         let detail = link ? (samples.get(link) ?? null) : null;
-        if (link && !detail && state.pages < input.maxPages && !state.stop) {
+        if (link && !detail && !pagesSpent && state.pages < input.maxPages && !state.stop) {
           detailPage ??= await ctx.page.context().newPage();
-          if (!(await countPages(1, link))) break;
-          detail = await extractDetail(detailPage, live, link, detailFieldNames);
+          // A row already charged as a `result-item` is never dropped for want of a
+          // detail page: past either budget it goes out with its detail columns
+          // empty, exactly as it does past `maxPages`.
+          if (await countPages(1, link)) detail = await extractDetail(detailPage, live, link, detailFieldNames);
+          else pagesSpent = true;
         }
         out.push(mergeDetail(item, detail, detailFieldNames));
       }
@@ -865,11 +886,28 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       }
       fresh.push(item);
     }
-    // R20 / AE13: rows beyond the charge room are never pushed; the run ends charge_limit with the rows before them.
-    const itemRoom = input.maxItems - state.items;
-    const chargeRoom = charger.room("result-item");
-    const room = Math.max(0, Math.min(itemRoom, chargeRoom));
-    let rows = fresh.slice(0, room);
+    // R20 / AE13: the rows are claimed before any of them is pushed — charged
+    // first, counted second, pushed last — so a row reaches the dataset only
+    // when it was paid for, and a push can never have to be retracted.
+    //
+    // The claim is one critical section. Reading the room, spending it and
+    // counting the rows against `maxItems` must not interleave with another
+    // page doing the same, or two pages both slice a room only one of them can
+    // have. Even so, the room is only a forecast: the Apify budget is a single
+    // pot, so a `page-scraped` charged meanwhile (a detail page of another
+    // listing) can shrink it. The charge's own count is therefore the
+    // authority on how many rows may go out. Detail merging and the push stay
+    // outside the lock: concurrency loses one charge call, never a page.
+    const claim = await withItemLock(async () => {
+      const itemRoom = input.maxItems - state.items;
+      const chargeRoom = charger.room("result-item");
+      const want = Math.max(0, Math.min(itemRoom, chargeRoom, fresh.length));
+      const outcome = await charger.charge("result-item", want);
+      const granted = charger.enabled ? Math.min(want, outcome.charged) : want;
+      state.items += granted;
+      return { granted, limitReached: outcome.limitReached || (fresh.length > granted && chargeRoom < itemRoom) };
+    });
+    let rows = fresh.slice(0, claim.granted);
     if (live.mode === "list" && live.detail && detailFieldNames.length > 0 && rows.length > 0) rows = await mergeDetails(ctx, plan, live, rows);
     for (const item of rows) {
       if (Object.keys(live.fields).some((n) => item.values[n] === null)) state.failedItems += 1;
@@ -884,10 +922,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
         }),
       );
     }
-    state.items += rows.length;
-    const charged = await charger.charge("result-item", rows.length);
-    const droppedByCharge = fresh.length > rows.length && chargeRoom < itemRoom;
-    if (droppedByCharge || charged.limitReached) {
+    if (claim.limitReached) {
       stopWith(state, crawler, { status: "charge_limit", message: `charge limit reached after ${state.items} items on ${sourceUrl}` });
     }
     return rows.length;
