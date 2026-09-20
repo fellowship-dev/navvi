@@ -1,0 +1,26 @@
+{
+  "actorSpecification": 1,
+  "title": "Navvi records",
+  "description": "One item per record: the requested fields (typed when a type was declared), plus _source, the page it came from.",
+  "fields": {
+    "type": "object",
+    "properties": {
+      "_source": { "type": "string", "description": "The URL of the page the record was extracted from." }
+    },
+    "required": ["_source"],
+    "additionalProperties": true
+  },
+  "views": {
+    "overview": {
+      "title": "Records",
+      "description": "The extracted records with their source page.",
+      "transformation": { "fields": ["_source"] },
+      "display": {
+        "component": "table",
+        "properties": {
+          "_source": { "label": "Source", "format": "link" }
+        }
+      }
+    }
+  }
+}

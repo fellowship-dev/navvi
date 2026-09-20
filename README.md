@@ -125,10 +125,35 @@ is only ever asked to pick among options the code enumerated.
 
 ## Local and Apify
 
-Today Navvi runs locally through the CLI: Camoufox by default, Chromium with
+Locally Navvi runs through the CLI: Camoufox by default, Chromium with
 `--browser chromium`, profiles and compiled scrapers under `--storage`
-(default `./storage`). An Apify actor with the same input contract is
-coming; the compiled scraper format is the same in both.
+(default `./storage`).
+
+On Apify the same code is the actor under `.actor/`: the manifest, the input
+schema (the CLI flags as fields, with section captions and descriptions
+written for a model reading them through Apify's MCP server), the dataset
+schema and two Dockerfiles. `Dockerfile` is the default build on
+`apify/actor-node-playwright-chrome`; `Dockerfile.camoufox` builds on
+`apify/actor-node-playwright-camoufox` and is the switch for a site that
+challenges Chromium. Both image tags carry the Playwright version and must
+equal the `playwright` pin in `package.json`; `node scripts/check-image-pins.mjs`
+fails CI when they disagree. CI pushes every green `main` to the `beta` build
+tag through `apify/push-actor-action` when the `APIFY_TOKEN` repository
+secret is present; `latest` is a manual promote.
+
+The actor input differs from the CLI in three places: `startUrls` takes
+`{ url }` and `{ requestsFromUrl }` entries (Apify's request-list editor);
+`profile` is `store` only and `chooser` is `jev` or `model`; a caller key
+comes as a secret input (`typesafeApiKey`, `gatewayApiKey`,
+`anthropicApiKey`) and is used for that run only. `scriptId` pins a compiled
+scraper by key, with `scraperStore` naming the key-value store when the key
+is bare (default `scraper-cache` in your account). Locally,
+
+```sh
+npx apify run --input-file input.json   # runs dist/src/main.js with local storage
+```
+
+runs the actor entry with the same input.
 
 ### Pay-per-event
 
@@ -147,7 +172,9 @@ pin next time, the charged event counts and the zero-data-retention state.
 When the run's charge limit is reached the items pushed so far stay in the
 dataset and the run ends `charge_limit`. Off the platform nothing is charged
 and every count in the summary is zero; a local run with
-`ACTOR_TEST_PAY_PER_EVENT=1` writes the charging log instead.
+`ACTOR_TEST_PAY_PER_EVENT=1 ACTOR_USE_CHARGING_LOG_DATASET=1` charges at $1
+per event against `ACTOR_MAX_TOTAL_CHARGE_USD` and writes the charging log to
+the `charging_log` dataset instead.
 
 Who pays what under pay-per-event, per Apify's pricing docs: the caller pays
 the events; the actor's platform usage (compute, residential proxy, storage)

@@ -16,6 +16,26 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: node scripts/check-image-pins.mjs
       - run: npx playwright install --with-deps chromium
       - run: npm run typecheck
       - run: npm test
+  push-actor:
+    # The beta build on Apify follows every green main; `latest` stays a manual promote.
+    # Needs the APIFY_TOKEN repository secret; without it the job is skipped, not failed.
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for the Apify token
+        id: token
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: echo "present=$([ -n "$APIFY_TOKEN" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - name: Push the beta build
+        if: steps.token.outputs.present == 'true'
+        uses: apify/push-actor-action@5cc259c1492e59394a1e3db984b966e16a3d026c # v1.1.4
+        with:
+          token: ${{ secrets.APIFY_TOKEN }}
+          build-tag: beta
