@@ -10,7 +10,7 @@ import { parseArgs, usage, type CliArgs } from "../src/cli/args.js";
 import { NotifyConfigurationError, createNotifier } from "../src/cli/notify.js";
 import { formatRows, type OutputFormat, type Row } from "../src/cli/output.js";
 import { createChooser, findOnPath, HARNESS_LABEL, loadAnswersFile, mergeAnswers, missingCredentialsMessage, NavviError, NeedsHumanError, readQuestionsFile, resolveDefaultChooser, type Chooser, type StoredAnswer } from "../src/chooser/index.js";
-import { defaultBrowser, parseFieldSpecs, type Chooser as ChooserId } from "../src/input/schema.js";
+import { defaultBrowser, parseFieldSpecs, type Chooser as ChooserId, type SourceSelection } from "../src/input/schema.js";
 import { run as runNavvi, type RunSummary } from "../src/main.js";
 import type { Notifier } from "../src/prestep/human.js";
 import type { CrawlActor, CrawlDeps } from "../src/replay/crawler.js";
@@ -164,7 +164,7 @@ function defaultSecretPrompt(io: CliIo): (name: string) => Promise<string | null
 // ---------------------------------------------------------------- input
 
 /** The raw run input: run() validates it and parses a prompt-only input through the chooser (KTD11). */
-function rawInput(args: CliArgs, io: CliIo, secrets: Record<string, string>, chooser: ChooserId): Record<string, unknown> {
+function rawInput(args: CliArgs, io: CliIo, secrets: Record<string, string>, sources: SourceSelection): Record<string, unknown> {
   const hasSecrets = Object.keys(secrets).length > 0;
   const structured = Boolean(args.mode && args.fields && args.fields.length > 0);
   const base: Record<string, unknown> = {
@@ -177,9 +177,14 @@ function rawInput(args: CliArgs, io: CliIo, secrets: Record<string, string>, cho
     headed: args.headed,
     forceRecompile: args.forceRecompile,
     secrets,
-    chooser,
+    // U14: `chooser` keeps carrying the resolved decider, so an input dumped from
+    // a summary still replays on a build that only knows the old field.
+    chooser: sources.decider,
+    decider: sources.decider,
     browser: args.browser ?? defaultBrowser(io.env),
   };
+  if (sources.writer) base.writer = sources.writer;
+  if (sources.deciderTransport) base.deciderTransport = sources.deciderTransport;
   if (args.prompt) base.prompt = args.prompt;
   // With --mode and --fields the prompt is not parsed; it still names the records for the compile questions.
   if (args.prompt && structured) base.description = args.prompt;
@@ -250,6 +255,9 @@ function summaryBlock(summary: RunSummary, dataLine: string): string {
   lines.push(`  items ${summary.items}  pages ${summary.pages}  templates ${summary.templates}  cache hit ${summary.cacheHit ? "yes" : "no"}`);
   const c = summary.chooser;
   lines.push(c ? `  chooser ${c.name}: ${c.questions} questions, ${c.inputTokens} input tokens, ${fmtMs(c.waitMs)} waiting, $${c.costUsd.toFixed(4)}` : "  chooser: none (no model call)");
+  // U14: the totals above are the run's; name the second source and its share when one answered the text.
+  const w = c?.writer;
+  if (w) lines.push(`  writer ${w.name}: ${w.textQuestions} text questions, ${w.inputTokens} input tokens, ${fmtMs(w.waitMs)} waiting, $${w.costUsd.toFixed(4)} (included above)`);
   lines.push(`  healing events ${summary.healingEvents.length}  unmapped candidates ${summary.unmappedCandidates.length}  unhealed ${summary.unhealed}`);
   if (summary.fieldsNotFound.length > 0) lines.push(`  fields not found: ${summary.fieldsNotFound.join(", ")}`);
   if (dataLine) lines.push(`  ${dataLine}`);
@@ -310,16 +318,26 @@ export async function main(argv: readonly string[], io: CliIo): Promise<number> 
   }
 }
 
-function chooserFor(name: ChooserId, args: CliArgs, io: CliIo, storageDir: string): Chooser {
+/**
+ * The decider must be usable before the browser opens. A writer is checked the
+ * same way, against the flag that selected it; a `model` writer takes either
+ * metered key, since that is what the derived writer already does.
+ */
+function requireBackend(name: ChooserId, io: CliIo, flag: "--chooser" | "--writer"): void {
   if (name === "jev" && !io.env.AI_GATEWAY_API_KEY && !io.env.TYPESAFE_API_KEY) {
     throw new CliError(`${missingCredentialsMessage("jev")} On the command line that is \`--chooser agent\`.`);
   }
-  if (name === "model" && !io.env.ANTHROPIC_API_KEY) {
-    throw new CliError(`${missingCredentialsMessage("model")} On the command line that is \`--chooser agent\`.`);
+  if (name === "model" && !io.env.ANTHROPIC_API_KEY && !(flag === "--writer" && io.env.AI_GATEWAY_API_KEY)) {
+    throw new CliError(`${missingCredentialsMessage("model")} On the command line that is \`${flag} agent\`.`);
   }
   if ((name === "claude" || name === "codex") && !findOnPath(name, io.env)) {
-    throw new CliError(`${HARNESS_LABEL[name]} is not installed (\`${name}\` not found on PATH). Install it and sign in, set an API key, or use \`--chooser agent\`.`);
+    throw new CliError(`${HARNESS_LABEL[name]} is not installed (\`${name}\` not found on PATH). Install it and sign in, set an API key, or use \`${flag} agent\`.`);
   }
+}
+
+function chooserFor(sources: SourceSelection, args: CliArgs, io: CliIo, storageDir: string): Chooser {
+  requireBackend(sources.decider, io, "--chooser");
+  if (sources.writer && sources.writer !== sources.decider) requireBackend(sources.writer, io, "--writer");
   const questionsDir = join(storageDir, "questions");
   let answers: StoredAnswer[] | undefined;
   if (args.answers) {
@@ -339,7 +357,7 @@ function chooserFor(name: ChooserId, args: CliArgs, io: CliIo, storageDir: strin
     answers = mergeAnswers(parked.answered ?? [], answers);
   }
   return createChooser({
-    chooser: name,
+    ...sources,
     env: io.env,
     agent: {
       stdin: io.stdin,
@@ -358,6 +376,24 @@ async function announceChooser(io: CliIo, quiet: boolean): Promise<ChooserId> {
   return resolved.name;
 }
 
+/**
+ * U14: the run's two sources. `--decider` wins over `--chooser`, which still
+ * names the decider alone; with neither the probe decides and prints why. The
+ * writer is only ever what `--writer` says: unset leaves it derived inside
+ * `createChooser`, so a run with no new flag behaves exactly as before and
+ * prints exactly the same line.
+ */
+async function resolveCliSources(args: CliArgs, io: CliIo): Promise<SourceSelection> {
+  const decider = args.decider ?? args.chooser ?? (await announceChooser(io, args.quiet));
+  const sources: SourceSelection = { decider };
+  if (args.writer) {
+    sources.writer = args.writer;
+    if (!args.quiet) io.stderr.write(`writer: ${args.writer} (--writer)\n`);
+  }
+  if (args.deciderTransport) sources.deciderTransport = args.deciderTransport;
+  return sources;
+}
+
 async function execute(args: CliArgs, io: CliIo): Promise<number> {
   const storageDir = resolve(io.cwd, args.storage);
   let notify: Notifier;
@@ -370,9 +406,9 @@ async function execute(args: CliArgs, io: CliIo): Promise<number> {
   const secrets = await collectSecrets(args, io);
   if (!args.prompt && !(args.mode && args.fields && args.fields.length > 0)) throw new CliError("give a prompt, or both --mode and --fields.");
   // Resolved once here and passed in the input: run() never re-resolves differently.
-  const name = args.chooser ?? (await announceChooser(io, args.quiet));
-  const chooser = chooserFor(name, args, io, storageDir);
-  const input = rawInput(args, io, secrets, name);
+  const sources = await resolveCliSources(args, io);
+  const chooser = chooserFor(sources, args, io, storageDir);
+  const input = rawInput(args, io, secrets, sources);
 
   const storage = await openStorage(storageDir);
   const deps: CrawlDeps = { chooser, actor: storage.actor, notify, attended: args.headed, storageDir, env: io.env };

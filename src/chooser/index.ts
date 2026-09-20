@@ -1,4 +1,4 @@
-import { defaultChooser, hasChooserKey, type AvailableClis, type Chooser as ChooserId } from "../input/schema.js";
+import { defaultChooser, hasChooserKey, type AvailableClis, type Chooser as ChooserId, type Decider, type Transport, type Writer } from "../input/schema.js";
 import { Budget } from "../billing/budget.js";
 import { AgentChooser, type AgentChooserOptions } from "./agent.js";
 import { CliChooser, CliUnavailableError, HARNESS_LABEL, SIGN_IN_COMMAND, findOnPath, probeCli, type CliChooserOptions, type CliHarness, type CliProbe } from "./cli.js";
@@ -16,8 +16,22 @@ export { RecordedChooser, RecordingChooser, DEFAULT_RECORDED_DIR, type RecordedC
 export { Budget, BudgetExhaustedError, ModelUnavailableError, NeedsHumanError, NavviError } from "../billing/budget.js";
 
 export interface CreateChooserOptions {
-  /** R37: who answers. Defaults to `defaultChooser(env)` (KTD17: agent without a key or a signed-in CLI). */
+  /**
+   * R37 / U14 compatibility: the single-source field. It names the decider and
+   * nothing else; `decider` wins when both are given. Defaults to
+   * `defaultChooser(env)` (KTD17: agent without a key or a signed-in CLI).
+   */
   chooser?: ChooserId;
+  /** U14: who answers the structured questions (choice, boolean, score). */
+  decider?: Decider;
+  /**
+   * U14: who answers the free-text questions. Unset derives today's behaviour:
+   * the decider writes its own text, unless it is Jev, which cannot, and then
+   * the ordered chain below answers (subscription CLIs before a metered model).
+   */
+  writer?: Writer;
+  /** U14: which API the decider is reached over; Jev's `gateway` or `typesafe` today. */
+  deciderTransport?: Transport;
   env?: NodeJS.ProcessEnv;
   budget?: Budget;
   /** Caller key for jev or model (R23). */
@@ -29,21 +43,54 @@ export interface CreateChooserOptions {
   cli?: Omit<CliChooserOptions, "budget" | "env">;
 }
 
-/** One factory for the run: the selected backend, sharing one budget. */
+/**
+ * One factory for the run: the decider, the writer it hands text to, and one
+ * shared budget. The returned chooser is still the run's single `Chooser`; a
+ * configured writer rides inside it as the decider's `textFallback`, so every
+ * caller (and every usage total) keeps working unchanged.
+ */
 export function createChooser(options: CreateChooserOptions = {}): Chooser {
   const env = options.env ?? process.env;
   const budget = options.budget ?? new Budget();
-  const name = options.chooser ?? defaultChooser(env);
+  const name = options.decider ?? options.chooser ?? defaultChooser(env);
+  const writer = writerFor(options, env, budget, name);
+  switch (name) {
+    case "agent":
+      return new AgentChooser({ ...options.agent, budget, env, ...(writer ? { textFallback: writer } : {}) });
+    case "jev": {
+      // Jev cannot write: text questions (a typed search query) go to the configured writer, else to an installed CLI on the user's subscription, and only then to a metered model key.
+      const provider = options.deciderTransport ?? options.jev?.provider;
+      return new JevChooser({ ...options.jev, ...(provider ? { provider } : {}), apiKey: options.apiKey, budget, env, textFallback: writer });
+    }
+    case "model":
+      return new ModelChooser({ ...options.model, apiKey: options.apiKey, budget, env, ...(writer ? { textFallback: writer } : {}) });
+    case "claude":
+    case "codex":
+      return new CliChooser(name, { ...options.cli, budget, env, ...(writer ? { textFallback: writer } : {}) });
+  }
+}
+
+/**
+ * U14: the writer, as a chooser the decider delegates `text` questions to.
+ *
+ * An explicit `writer` wins, and naming the decider itself means "no second
+ * source" — the decider answers its own text, as it always has. Unset is the
+ * old derivation: every backend but Jev writes for itself, and Jev gets the
+ * ordered chain below. `options.jev.textFallback` stays an escape hatch for
+ * callers that build the writer themselves (tests, `src/measure`).
+ */
+function writerFor(options: CreateChooserOptions, env: NodeJS.ProcessEnv, budget: Budget, decider: Decider): Chooser | undefined {
+  if (options.writer) return options.writer === decider ? undefined : buildWriter(options.writer, options, env, budget);
+  if (options.jev?.textFallback && decider === "jev") return options.jev.textFallback;
+  return decider === "jev" ? textFallbackFor(options, env, budget) : undefined;
+}
+
+function buildWriter(name: Writer, options: CreateChooserOptions, env: NodeJS.ProcessEnv, budget: Budget): Chooser {
   switch (name) {
     case "agent":
       return new AgentChooser({ ...options.agent, budget, env });
-    case "jev": {
-      // Jev cannot write: text questions (a typed search query) go to an installed CLI on the user's subscription, and only then to a metered model key.
-      const text = options.jev?.textFallback ?? textFallbackFor(options, env, budget);
-      return new JevChooser({ ...options.jev, apiKey: options.apiKey, budget, env, textFallback: text });
-    }
     case "model":
-      return new ModelChooser({ ...options.model, apiKey: options.apiKey, budget, env });
+      return new ModelChooser({ ...options.model, budget, env });
     case "claude":
     case "codex":
       return new CliChooser(name, { ...options.cli, budget, env });
@@ -56,7 +103,31 @@ interface TextFallbackCandidate {
 }
 
 /**
- * Who writes the text Jev cannot (R23 / KTD11). Subscription before metering:
+ * SEAM — a locally-run open-source model, designed and not implemented.
+ *
+ * Both roles are already reduced to one interface: a `Chooser` with `name`,
+ * `ask(batch)` and `usage()`. A local backend is therefore one more `case` in
+ * `buildWriter` and in `createChooser`'s switch, plus one constructor. Its
+ * configuration is two values, the pair every local runtime (llama.cpp,
+ * Ollama, vLLM, LM Studio) exposes:
+ *
+ *   - an OpenAI-compatible **base URL** (`http://127.0.0.1:11434/v1`), and
+ *   - a **model id** (`qwen3:8b`).
+ *
+ * As a writer it is an `@ai-sdk/openai-compatible` provider behind
+ * `ModelChooser` (same JSON-schema-of-indices prompt, `costUsd` 0, billing
+ * neither `api` nor `subscription`). As a decider it needs the local model to
+ * answer the same structured shape: either an evaluation model like
+ * `TypeSafeEvaluationModel` in `jev.ts` pointed at the local URL, or the
+ * `ModelChooser` path, in which case `deciderTransport: "local"` is the third
+ * transport and `LIMITS.chooserInputTokens` is the only budget that still
+ * applies. Nothing accepts a `local` value yet — deliberately, so no input can
+ * select a backend that would throw at run time.
+ */
+
+/**
+ * Who writes the text Jev cannot (R23 / KTD11), when no `writer` was
+ * configured — the derived writer. Subscription before metering:
  * an installed Claude Code or Codex answers on the user's plan at no cost,
  * while every API path bills per token — `AI_GATEWAY_API_KEY` is free for
  * Jev's structured questions but metered for a text model, so it must not

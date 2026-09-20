@@ -236,7 +236,7 @@
     "chooser": {
       "title": "Chooser",
       "type": "string",
-      "description": "Who answers the compile questions. jev: TypeSafe's System One model through Vercel AI Gateway or a TypeSafe key, the measured default. model: a text model (Claude Haiku) answering a JSON schema of indices. Leave empty to follow the key: jev with a TypeSafe or Gateway key, model with an Anthropic key.",
+      "description": "Both roles at once, the older single field: it sets the Decider and leaves the Writer derived. jev: TypeSafe's System One model through Vercel AI Gateway or a TypeSafe key, the measured default. model: a text model (Claude Haiku) answering a JSON schema of indices. Leave empty to follow the key: jev with a TypeSafe or Gateway key, model with an Anthropic key. Decider and Writer win over it.",
       "editor": "select",
       "enum": [
         "jev",
@@ -247,7 +247,50 @@
         "model (text model)"
       ],
       "sectionCaption": "Your key",
-      "sectionDescription": "Bring your own key and the operator pays no model cost on your run; without one the actor uses the operator key and the actor-start price covers it. Keys are used for this run only, never stored.",
+      "sectionDescription": "Two sources, chosen independently: a decider for the structured questions and a writer for the free text. Bring your own key and the operator pays no model cost on your run; without one the actor uses the operator key and the actor-start price covers it. Keys are used for this run only, never stored.",
+      "nullable": true
+    },
+    "decider": {
+      "title": "Decider",
+      "type": "string",
+      "description": "Which source answers the structured questions: pick one of the candidates Navvi enumerated, yes/no, or a score. jev: TypeSafe's System One model, the measured default. model: a text model (Claude Haiku) answering a JSON schema of indices. Wins over Chooser when both are set; leave empty to follow Chooser, then the key.",
+      "editor": "select",
+      "enum": [
+        "jev",
+        "model"
+      ],
+      "enumTitles": [
+        "jev (TypeSafe)",
+        "model (text model)"
+      ],
+      "nullable": true
+    },
+    "writer": {
+      "title": "Writer",
+      "type": "string",
+      "description": "Which source answers the free-text questions, such as the search query to type into a box. Jev judges but cannot write. On the platform only the metered API model can write: the Claude Code and Codex CLIs are a local-only feature and no CLI is installed in the actor image. Leave empty to let the decider write, or, under jev, the API model.",
+      "editor": "select",
+      "enum": [
+        "model"
+      ],
+      "enumTitles": [
+        "model (text model)"
+      ],
+      "nullable": true
+    },
+    "deciderTransport": {
+      "title": "Decider transport",
+      "type": "string",
+      "description": "Which API the jev decider is reached over: typesafe is the official TypeSafe API (api.typesafe.ai), gateway is the Vercel AI Gateway route. Leave empty to follow the key, gateway first when both are given; set typesafe to force the TypeSafe API even with a Gateway key.",
+      "editor": "select",
+      "enum": [
+        "gateway",
+        "typesafe"
+      ],
+      "enumTitles": [
+        "gateway (Vercel AI Gateway)",
+        "typesafe (TypeSafe API)"
+      ],
       "nullable": true
     },
     "typesafeApiKey": {

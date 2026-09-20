@@ -5,9 +5,10 @@ import { ACTOR_ONLY_KEYS, actorInput } from "../src/main.js";
 import { BaseInputSchema, LIMITS, parseInput } from "../src/input/schema.js";
 
 /**
- * U2 / R3, master plan R21, R22, R26, R28, KTD13: the actor input schema
+ * U2 / R3, master plan R21, R22, R26, R28, KTD13, U14: the actor input schema
  * agrees with the Zod input, restricts the published surface (store profile,
- * jev or model choosers), carries the limits, and its prefill is a valid run.
+ * jev or model deciders, a model writer since the image has no CLI), carries
+ * the limits, and its prefill is a valid run.
  */
 
 const ROOT = join(__dirname, "..");
@@ -32,6 +33,12 @@ describe(".actor/input_schema.json", () => {
     expect(schema.properties.profile?.enum).not.toContain("local");
     expect(schema.properties.chooser?.enum).toEqual(["jev", "model"]);
     expect(schema.properties.chooser?.enum).not.toContain("agent");
+    // U14: the two sources are restricted the same way, and the platform has no CLI installed, so it cannot write on a subscription.
+    expect(schema.properties.decider?.enum).toEqual(["jev", "model"]);
+    expect(schema.properties.decider?.enum).not.toContain("agent");
+    expect(schema.properties.writer?.enum).toEqual(["model"]);
+    for (const name of ["jev", "agent", "claude", "codex"]) expect(schema.properties.writer?.enum).not.toContain(name);
+    expect(schema.properties.deciderTransport?.enum).toEqual(["gateway", "typesafe"]);
     for (const key of ["typesafeApiKey", "gatewayApiKey", "anthropicApiKey"]) expect(schema.properties[key]?.isSecret, key).toBe(true);
     expect(schema.properties.scriptId?.pattern).toBeTruthy();
     expect(new RegExp(schema.properties.scriptId!.pattern!).test("scraper-cache/python.org-jobs-abc")).toBe(true);

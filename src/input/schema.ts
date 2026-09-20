@@ -4,6 +4,39 @@ import { credentialMessage, findCredential } from "./credentials.js";
 /** Structured run input. `prompt` alone is accepted and parsed later (U16). */
 
 export const CHOOSERS = ["agent", "jev", "model", "claude", "codex"] as const;
+
+/**
+ * U14: a run has two configurable intelligence sources, chosen independently.
+ *
+ * - The **decider** answers the structured questions (choice, boolean, score).
+ *   Every backend can do that: Jev is the measured default, an API model or a
+ *   signed-in CLI does it too, and `agent` means the host coding agent (or the
+ *   human) answers them.
+ * - The **writer** answers the free-text questions (KTD11: "what search query
+ *   would you type here"). Jev judges, it cannot write, so it is not a writer.
+ *
+ * `chooser` is the one field these two replace and stays the compatibility
+ * surface: it sets the decider, and the writer keeps being derived exactly as
+ * it is today. An explicit `decider` or `writer` wins over it.
+ */
+export const DECIDERS = CHOOSERS;
+export const WRITERS = ["agent", "model", "claude", "codex"] as const;
+
+/**
+ * How the decider is reached. Today this is Jev's two APIs: `typesafe` is the
+ * official TypeSafe API (`api.typesafe.ai`) and `gateway` is the Vercel AI
+ * Gateway route. Unset keeps the inference from which key is set.
+ *
+ * SEAM (not implemented): a locally-run open-source model would be a third
+ * transport, `local`, reached over an OpenAI-compatible base URL plus a model
+ * id — the two values any of llama.cpp, Ollama, vLLM or LM Studio exposes —
+ * carried as `NAVVI_LOCAL_BASE_URL` / `NAVVI_LOCAL_MODEL` or as a `local`
+ * object on this input, and usable for either role. Nothing here accepts
+ * `local` yet: the value is documented, not enumerated, so no configuration
+ * can select a backend that would throw at run time.
+ */
+export const TRANSPORTS = ["gateway", "typesafe"] as const;
+
 export const PROFILES = ["store", "local"] as const;
 export const BROWSERS = ["camoufox", "chromium"] as const;
 export const MODES = ["list", "record"] as const;
@@ -116,7 +149,14 @@ export const BaseInputSchema = z
     proxy: z.object({ useApifyProxy: z.boolean().optional(), proxyUrls: z.array(z.string()).optional() }).optional(),
     scriptId: z.string().optional(),
     forceRecompile: z.boolean().default(false),
+    /** U14: the single field the two sources replace; still honoured, see `resolveSources`. */
     chooser: z.enum(CHOOSERS).optional(),
+    /** U14: who answers the structured questions. Wins over `chooser`. */
+    decider: z.enum(DECIDERS).optional(),
+    /** U14: who answers the free-text questions. Jev cannot write, so it is not offered. */
+    writer: z.enum(WRITERS).optional(),
+    /** U14: which API the decider is reached over (Jev today); unset infers it from the keys. */
+    deciderTransport: z.enum(TRANSPORTS).optional(),
     profile: z.enum(PROFILES).default("store"),
     secrets: z.record(z.string(), z.string()).default({}),
     allowMutations: z.array(z.string()).default([]),
@@ -160,9 +200,18 @@ export const InputSchema = z.preprocess(splitStartUrls, BaseInputSchema);
 
 export type RunInput = z.infer<typeof BaseInputSchema>;
 export type Chooser = (typeof CHOOSERS)[number];
+/** U14: a backend that can answer structured questions; every chooser can. */
+export type Decider = (typeof DECIDERS)[number];
+/** U14: a backend that can answer free text; every chooser but Jev. */
+export type Writer = (typeof WRITERS)[number];
+/** U14: how the decider is reached. */
+export type Transport = (typeof TRANSPORTS)[number];
 
 export function isChooserId(name: string): name is Chooser {
   return (CHOOSERS as readonly string[]).includes(name);
+}
+export function isWriterId(name: string): name is Writer {
+  return (WRITERS as readonly string[]).includes(name);
 }
 export type Profile = (typeof PROFILES)[number];
 export type BrowserName = (typeof BROWSERS)[number];
@@ -189,6 +238,39 @@ export function defaultChooser(env: NodeJS.ProcessEnv = process.env, available: 
   if (available.claude) return "claude";
   if (available.codex) return "codex";
   return "agent";
+}
+
+/** U14: the two sources a run actually uses, plus the decider's transport. */
+export interface SourceSelection {
+  decider: Decider;
+  /**
+   * Explicitly configured writer. `undefined` means "derive it": the decider
+   * writes its own text, unless it is Jev, which cannot, and then the ordered
+   * chain in `createChooser` (subscription CLIs, then a metered model) does.
+   */
+  writer?: Writer;
+  deciderTransport?: Transport;
+}
+
+/** The fields of a run input `resolveSources` reads; `RunInput` satisfies it. */
+export interface SourceInput {
+  chooser?: Chooser | undefined;
+  decider?: Decider | undefined;
+  writer?: Writer | undefined;
+  deciderTransport?: Transport | undefined;
+}
+
+/**
+ * U14 compatibility: `chooser` names the decider, and only the decider. When
+ * `decider` is also given the explicit field wins; `writer` has no old
+ * equivalent, so leaving it unset reproduces today's derivation exactly. With
+ * neither field the decider is `defaultChooser(env, available)`, unchanged.
+ */
+export function resolveSources(input: SourceInput = {}, env: NodeJS.ProcessEnv = process.env, available: AvailableClis = {}): SourceSelection {
+  const selection: SourceSelection = { decider: input.decider ?? input.chooser ?? defaultChooser(env, available) };
+  if (input.writer) selection.writer = input.writer;
+  if (input.deciderTransport) selection.deciderTransport = input.deciderTransport;
+  return selection;
 }
 
 /** True when a key selects the chooser and no CLI probe is needed. */

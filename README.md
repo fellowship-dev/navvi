@@ -126,17 +126,21 @@ Agents: read [`SKILL.md`](SKILL.md); [`llms.txt`](llms.txt) indexes the docs.
 ## Choosers
 
 Navvi never lets a model write a selector or a script. It enumerates the
-candidates itself and asks a *chooser* to pick. Five choosers, one contract:
+candidates itself and asks a *chooser* to pick. A run picks two of them,
+independently: the **decider** (`--decider`) answers the structured questions —
+which of these candidates, yes or no, score this — and the **writer**
+(`--writer`) answers the occasional free-text one, the search query to type
+into a box. Five backends, one contract, and only Jev is limited to one role:
 
-| `--chooser` | Who answers | Needs | Best for |
-| --- | --- | --- | --- |
-| `claude` | Claude Code (`claude -p`) on your subscription | `claude` installed and signed in | Out of the box, no key |
-| `codex` | Codex (`codex exec`) on your subscription | `codex` installed and signed in | Out of the box, no key |
-| `jev` | Jev by TypeSafe, through Vercel AI Gateway or direct | `AI_GATEWAY_API_KEY` or `TYPESAFE_API_KEY` | Speed, cost and unattended healing in cron or CI |
-| `model` | Any AI SDK model | `ANTHROPIC_API_KEY` | A key you already have |
-| `agent` | The coding agent running the command, over stdio | Nothing | Any tool that can keep stdin open or rerun with `--answers --resume` |
+| name | Who answers | Needs | Decider | Writer |
+| --- | --- | --- | :-: | :-: |
+| `claude` | Claude Code (`claude -p`) on your subscription | `claude` installed and signed in | yes | yes |
+| `codex` | Codex (`codex exec`) on your subscription | `codex` installed and signed in | yes | yes |
+| `jev` | Jev by TypeSafe, through Vercel AI Gateway or direct | `AI_GATEWAY_API_KEY` or `TYPESAFE_API_KEY` | yes | no |
+| `model` | Any AI SDK model | `ANTHROPIC_API_KEY`, or the Gateway | yes | yes |
+| `agent` | The coding agent running the command, over stdio | Nothing | yes | yes |
 
-Without `--chooser` the order is: a key (`jev`, then `model`); else Claude
+Without `--decider` the order is: a key (`jev`, then `model`); else Claude
 Code, then Codex, when installed and signed in (an installed CLI that is not
 signed in never wins; the run says so and names `claude` or `codex login`);
 else `agent`. The choice and its reason print on stderr unless `--quiet`.
@@ -144,18 +148,41 @@ else `agent`. The choice and its reason print on stderr unless `--quiet`.
 model. CLI usage reports `$0.0000` with billing `subscription`; Claude Code's
 own cost figure is kept as `reportedCostUsd` in the usage.
 
-Jev answers choices, booleans and scores but cannot *write*, so the occasional
-text question (the search query to type into a box) goes to a second backend —
-and there the order is the other way round, subscription before metering:
-`claude`, then `codex` when on PATH, and only then a metered API key
-(`ANTHROPIC_API_KEY` first, since a dedicated key is a deliberate choice, then
-`AI_GATEWAY_API_KEY`). So `AI_GATEWAY_API_KEY` routes Jev's structured
-questions over Vercel, which is free for Jev, while the text questions still
-prefer a signed-in CLI on your subscription; the Gateway text model is used
-only when no CLI is installed. Sign-in cannot be checked without running the
-CLI, so an installed but signed-out CLI is tried once, says so, and the run
-moves to the next backend instead of failing. An explicit `--chooser model`
-always means the API model, whatever is installed.
+Without `--writer` the decider writes its own text — every backend but Jev
+can. Jev answers choices, booleans and scores but cannot *write*, so its text
+questions go to a second backend, and there the order is the other way round,
+subscription before metering: `claude`, then `codex` when on PATH, and only
+then a metered API key (`ANTHROPIC_API_KEY` first, since a dedicated key is a
+deliberate choice, then `AI_GATEWAY_API_KEY`). So `AI_GATEWAY_API_KEY` routes
+Jev's structured questions over Vercel, which is free for Jev, while the text
+questions still prefer a signed-in CLI on your subscription; the Gateway text
+model is used only when no CLI is installed. Sign-in cannot be checked without
+running the CLI, so an installed but signed-out CLI is tried once, says so, and
+the run moves to the next backend instead of failing. An explicit `--writer
+model` (or `--chooser model`) always means the API model, whatever is installed.
+
+`--decider-transport gateway|typesafe` says which API Jev is reached over.
+Unset, it is inferred from the keys, the Gateway first when both are present;
+`--decider-transport typesafe` forces the official TypeSafe API
+(`api.typesafe.ai`) even with `AI_GATEWAY_API_KEY` in the environment, and
+refuses the run rather than routing the other way when the matching key is
+missing.
+
+`--chooser` is the one flag those three replace, and it keeps working exactly
+as before: it names the decider and leaves the writer derived. `--decider` and
+`--writer` win over it, so `--chooser jev --decider claude` runs Claude Code.
+The stderr summary reports the run under `chooser`, plus a `writer` line naming
+the second source and its share of the tokens and cost when one answered the
+text, so a run is attributable per role.
+
+**A locally-run open-source model** is a designed seam, not a shipped backend.
+Either role would take an OpenAI-compatible base URL plus a model id — the two
+values llama.cpp, Ollama, vLLM and LM Studio all expose — as a `local` writer
+and a third `--decider-transport`. Nothing accepts `local` today: it is
+documented rather than enumerated, so no flag can select a backend that would
+throw mid-run. The interface it must satisfy is `Chooser` in
+`src/chooser/chooser.ts` (`name`, `ask(batch)`, `usage()`); the comment above
+`textFallbackFor` in `src/chooser/index.ts` spells out the rest.
 
 With the agent chooser, the CLI prints each question batch on stdout between
 `---NAVVI-QUESTIONS---` and `---END---` and reads one JSON answer line from
@@ -198,7 +225,8 @@ Camoufox build under the `beta-camoufox` tag of the same version.
 
 The actor input differs from the CLI in three places: `startUrls` takes
 `{ url }` and `{ requestsFromUrl }` entries (Apify's request-list editor);
-`profile` is `store` only and `chooser` is `jev` or `model`; a caller key
+`profile` is `store` only, `chooser` and `decider` are `jev` or `model` and
+`writer` is `model` (the image has no CLI to run on a subscription); a caller key
 comes as a secret input (`typesafeApiKey`, `gatewayApiKey`,
 `anthropicApiKey`) and is used for that run only. `scriptId` pins a compiled
 scraper by key, with `scraperStore` naming the key-value store when the key

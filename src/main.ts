@@ -1,6 +1,6 @@
 import { Actor } from "apify";
 import { ZodError } from "zod";
-import { parseInput, defaultChooser, defaultBrowser, type RunInput } from "./input/schema.js";
+import { parseInput, defaultBrowser, resolveSources, type RunInput } from "./input/schema.js";
 import { promptToInput } from "./input/prompt.js";
 import { NavviError, NeedsHumanError } from "./billing/budget.js";
 import { zeroCharges, type ChargeCounts } from "./billing/charge.js";
@@ -23,7 +23,21 @@ export interface RunSummary {
   healingEvents: HealingEvent[];
   unmappedCandidates: UnmappedCandidate[];
   fieldsNotFound: string[];
-  chooser: { name: string; questions: number; inputTokens: number; waitMs: number; costUsd: number } | null;
+  /**
+   * U14: the run's chooser usage. `name` and the totals are the whole run (the
+   * decider plus anything it delegated); `writer` is the second source's share
+   * of those totals, present only when a different source answered the
+   * free-text questions, so each kind of question is attributable.
+   */
+  chooser: {
+    name: string;
+    questions: number;
+    inputTokens: number;
+    waitMs: number;
+    costUsd: number;
+    textQuestions?: number;
+    writer?: { name: string; textQuestions: number; inputTokens: number; waitMs: number; costUsd: number };
+  } | null;
   input: RunInput | null;
   /** Requests the crawler ran, by handler. */
   requests: { compile: number; list: number; record: number };
@@ -97,8 +111,9 @@ export async function run(raw: unknown, deps: CrawlDeps = {}): Promise<RunSummar
     throw error;
   }
   const env = deps.env ?? process.env;
-  const chooserId = input.chooser ?? defaultChooser(env);
-  const chooser = deps.chooser ?? createChooser({ chooser: chooserId, env });
+  // U14: `chooser` names the decider and only the decider; `decider`/`writer` win over it.
+  const sources = resolveSources(input, env);
+  const chooser = deps.chooser ?? createChooser({ ...sources, env });
 
   if (input.prompt && (!input.mode || !input.fields?.length)) {
     // The validated raw input (not the defaulted one) is the base, so the prompt may still set profile, pagination and detail pages.
@@ -114,7 +129,8 @@ export async function run(raw: unknown, deps: CrawlDeps = {}): Promise<RunSummar
       throw error;
     }
   }
-  input.chooser ??= chooserId;
+  input.chooser ??= sources.decider;
+  input.decider ??= sources.decider;
   input.browser ??= defaultBrowser(env);
   return runCrawl(input, { ...deps, chooser });
 }

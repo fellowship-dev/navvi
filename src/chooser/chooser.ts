@@ -70,6 +70,25 @@ export interface ChooserUsage {
   billing?: "api" | "subscription";
   /** What the CLI itself reported (Claude Code's `total_cost_usd`); informational on a subscription. */
   reportedCostUsd?: number;
+  /**
+   * U14: the writer's share of the totals above, when a second source answered
+   * the free-text questions. Absent when one source answered everything, so
+   * the run's cost is attributable per role: these numbers minus this object
+   * is what the decider itself spent.
+   */
+  writer?: WriterUsage;
+}
+
+/** U14: the part of a `ChooserUsage` a delegated writer is responsible for. */
+export interface WriterUsage {
+  chooser: ChooserName;
+  questions: number;
+  textQuestions: number;
+  batches: number;
+  inputTokens: number;
+  outputTokens: number;
+  waitMs: number;
+  costUsd: number;
 }
 
 export interface Chooser {
@@ -321,6 +340,13 @@ export abstract class BaseChooser implements Chooser {
   private observedZeroDataRetention: ZeroDataRetentionState | undefined;
   private delegated = { questions: 0, textQuestions: 0, batches: 0, inputTokens: 0, outputTokens: 0, waitMs: 0, costUsd: 0 };
   private delegatedZeroDataRetention: ZeroDataRetentionState | undefined;
+  /** U14: the writer that actually answered, set the first time text work is delegated. */
+  private writerName: ChooserName | undefined;
+
+  /** U14: what a delegated writer cost, for backends whose own tokens are free. */
+  protected get delegatedCostUsd(): number {
+    return this.delegated.costUsd;
+  }
 
   constructor(options: BaseChooserOptions = {}) {
     this.budget = options.budget ?? new Budget();
@@ -339,12 +365,15 @@ export abstract class BaseChooser implements Chooser {
     const hasOwnUsage = USAGE_COUNTERS.some((key) => this.counters[key] > 0);
     const zeroDataRetention = this.delegatedZeroDataRetention === undefined ? ownRetention
       : combineRetention(hasOwnUsage ? ownRetention : undefined, this.delegatedZeroDataRetention);
-    return {
+    const usage: ChooserUsage = {
       chooser: this.name,
       ...totals,
       costUsd: (inputTokens * this.price.inputPerMillion + outputTokens * this.price.outputPerMillion) / 1_000_000 + this.delegated.costUsd,
       zeroDataRetention,
     };
+    // U14: name the second source only once it has answered something.
+    if (this.writerName !== undefined) usage.writer = { chooser: this.writerName, ...this.delegated };
+    return usage;
   }
 
   private async askTextFallback(text: Question[]): Promise<Answer[]> {
@@ -377,7 +406,11 @@ export abstract class BaseChooser implements Chooser {
         used ||= delta > 0;
       }
       this.delegated.costUsd += after.costUsd - before.costUsd;
-      if (used) this.delegatedZeroDataRetention = combineRetention(this.delegatedZeroDataRetention, after.zeroDataRetention);
+      if (used) {
+        this.delegatedZeroDataRetention = combineRetention(this.delegatedZeroDataRetention, after.zeroDataRetention);
+        // A chain reports the member currently answering, which is the one that just did.
+        this.writerName = after.chooser;
+      }
     }
   }
 

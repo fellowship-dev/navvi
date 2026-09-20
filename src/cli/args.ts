@@ -1,4 +1,4 @@
-import { BROWSERS, CHOOSERS, MODES, PROFILES, type BrowserName, type Chooser, type Mode, type Profile } from "../input/schema.js";
+import { BROWSERS, CHOOSERS, DECIDERS, MODES, PROFILES, TRANSPORTS, WRITERS, type BrowserName, type Chooser, type Decider, type Mode, type Profile, type Transport, type Writer } from "../input/schema.js";
 
 /**
  * U17: the hand-rolled argv contract of `navvi`. No parser dependency; every
@@ -35,6 +35,12 @@ export interface CliArgs {
   forceRecompile: boolean;
   scriptId: string | undefined;
   chooser: Chooser | undefined;
+  /** U14: who answers the structured questions; wins over `chooser`. */
+  decider: Decider | undefined;
+  /** U14: who answers the free-text questions. */
+  writer: Writer | undefined;
+  /** U14: which API the decider is reached over (Jev's today). */
+  deciderTransport: Transport | undefined;
   answers: string | undefined;
   resume: string | undefined;
   agentMode: (typeof AGENT_MODES)[number] | undefined;
@@ -62,7 +68,7 @@ const BOOLEAN_FLAGS: ReadonlyArray<[string, keyof CliArgs]> = [
 const VALUE_FLAGS = [
   "--mode", "--fields", "--goal", "--from-url", "--out", "--max-pages", "--max-items", "--detail-fields", "--browser", "--profile",
   "--allow-domain", "--allow-private-host", "--secret", "--secrets-file", "--allow-mutation", "--script-id", "--chooser", "--answers",
-  "--resume", "--agent-mode", "--notify", "--storage",
+  "--resume", "--agent-mode", "--notify", "--storage", "--decider", "--writer", "--decider-transport",
 ] as const;
 
 function isUrl(value: string): boolean {
@@ -114,6 +120,9 @@ export function defaultArgs(): CliArgs {
     forceRecompile: false,
     scriptId: undefined,
     chooser: undefined,
+    decider: undefined,
+    writer: undefined,
+    deciderTransport: undefined,
     answers: undefined,
     resume: undefined,
     agentMode: undefined,
@@ -231,6 +240,15 @@ function apply(args: CliArgs, flag: (typeof VALUE_FLAGS)[number], value: string)
     case "--chooser":
       args.chooser = oneOf(flag, value, CHOOSERS);
       break;
+    case "--decider":
+      args.decider = oneOf(flag, value, DECIDERS);
+      break;
+    case "--writer":
+      args.writer = oneOf(flag, value, WRITERS);
+      break;
+    case "--decider-transport":
+      args.deciderTransport = oneOf(flag, value, TRANSPORTS);
+      break;
     case "--answers":
       args.answers = value;
       break;
@@ -275,11 +293,22 @@ Output
   --json                    Compact JSON (default is pretty).   --csv  CSV instead of JSON.
   --quiet                   No summary block on stderr.
 
-Chooser (who answers the compile questions)
-  --chooser <name>          Default: jev with AI_GATEWAY_API_KEY or TYPESAFE_API_KEY; model with ANTHROPIC_API_KEY;
-                            else claude or codex when that CLI is installed and signed in (your subscription); else agent.
+Sources (who answers the compile questions)
+  --decider <name>          Who answers the structured questions (pick one of N, yes/no, a score):
+                            agent, jev, model, claude, codex. Default: jev with AI_GATEWAY_API_KEY or
+                            TYPESAFE_API_KEY; model with ANTHROPIC_API_KEY; else claude or codex when that CLI
+                            is installed and signed in (your subscription); else agent.
                             claude: Claude Code (NAVVI_CLAUDE_MODEL, default haiku).  codex: Codex (NAVVI_CODEX_MODEL).
                             agent: the host coding agent over stdio, no key.
+  --writer <name>           Who answers the free-text questions (the search query to type into a box):
+                            agent, model, claude, codex. Jev judges but cannot write. Default: the decider
+                            itself, except under jev, which hands text to claude, then codex when on PATH,
+                            then a metered model (ANTHROPIC_API_KEY before AI_GATEWAY_API_KEY).
+  --decider-transport <t>   gateway|typesafe: which API the jev decider is reached over. Default: gateway when
+                            AI_GATEWAY_API_KEY is set, else typesafe. Give typesafe to force api.typesafe.ai
+                            even with a Gateway key.
+  --chooser <name>          The older single flag: it sets the decider and leaves the writer derived, exactly
+                            as before. --decider and --writer win over it.
   --agent-mode stdio|file   stdio: batches on stdout between ${"---NAVVI-QUESTIONS---"} and ${"---END---"}, answers on stdin.
                             file: write storage/questions/<token>.json and exit 3.
   --answers <file>          Answer batch JSON for a parked run.   --resume <token>  Its token.

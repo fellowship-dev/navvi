@@ -154,6 +154,23 @@ describe("argument parsing", () => {
     expect(parsed.args.out).toBe("o.csv");
   });
 
+  it("parses the two U14 sources and their transport, and still parses --chooser", () => {
+    const parsed = parseArgs(["--decider", "jev", "--writer", "claude", "--decider-transport", "typesafe", "https://a.example/x"]);
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(parsed.args.decider).toBe("jev");
+    expect(parsed.args.writer).toBe("claude");
+    expect(parsed.args.deciderTransport).toBe("typesafe");
+    expect(parsed.args.chooser).toBeUndefined();
+    const old = parseArgs(["--chooser", "jev", "https://a.example/x"]);
+    if (!old.ok) throw new Error(old.error);
+    expect(old.args.chooser).toBe("jev");
+    expect(old.args.decider).toBeUndefined();
+    expect(old.args.writer).toBeUndefined();
+    // Jev judges but cannot write, so it is not offered as a writer, and the transport is a closed set.
+    expect(parseArgs(["--writer", "jev"]).ok).toBe(false);
+    expect(parseArgs(["--decider-transport", "local"]).ok).toBe(false);
+  });
+
   it("rejects unknown flags, bad enums and a second prompt", () => {
     expect(parseArgs(["--bogus"]).ok).toBe(false);
     expect(parseArgs(["--chooser", "gpt"]).ok).toBe(false);

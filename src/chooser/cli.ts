@@ -304,7 +304,8 @@ export class CliChooser extends BaseChooser {
   }
 
   usage(): ChooserUsage {
-    return { ...super.usage(), costUsd: 0, billing: "subscription", reportedCostUsd: this.reportedCostUsd };
+    // The harness runs on the user's subscription, so its own tokens cost nothing; a writer it delegated to still bills (U14).
+    return { ...super.usage(), costUsd: this.delegatedCostUsd, billing: "subscription", reportedCostUsd: this.reportedCostUsd };
   }
 
   protected async callBackend(batch: Question[]): Promise<BackendResult> {

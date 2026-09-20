@@ -21,6 +21,7 @@ import {
   type ZeroDataRetentionState,
 } from "./chooser.js";
 import { jevFraming, NONE_OPTION } from "./questions.js";
+import type { Transport } from "../input/schema.js";
 import { wellFormed } from "../util/text.js";
 
 /**
@@ -39,12 +40,18 @@ export const JEV_DIRECT_MODEL_ID = "jev-latest";
 export const TYPESAFE_API_URL = "https://api.typesafe.ai/v1/systemone";
 export const JEV_TIMEOUT_MS = 15_000;
 
-export type JevProvider = "gateway" | "typesafe";
+/** U14: the decider's transport. Named `deciderTransport` on the run input. */
+export type JevProvider = Transport;
 
 export interface JevChooserOptions extends BaseChooserOptions {
   /** Caller key (R23). Wins over the environment. */
   apiKey?: string;
-  /** Which API the key belongs to; defaults to gateway for an explicit key. */
+  /**
+   * Which API the key belongs to (`deciderTransport` on the run input).
+   * Explicit wins: `typesafe` forces the official TypeSafe API even when a
+   * Gateway key is also set. Unset infers it from the keys, Gateway first.
+   * Defaults to gateway for an explicit caller key.
+   */
   provider?: JevProvider;
   env?: NodeJS.ProcessEnv;
   /** Injected model for tests and custom providers. */

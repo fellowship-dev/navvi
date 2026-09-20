@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { Experimental_EvaluationMockModelV4, MockLanguageModelV4 } from "ai/test";
 import { APICallError } from "@ai-sdk/provider";
 import type { Experimental_EvaluationModelV4CallOptions } from "@ai-sdk/provider";
-import { LIMITS } from "../src/input/schema.js";
+import { LIMITS, resolveSources } from "../src/input/schema.js";
 import {
   BaseChooser,
   ConfigurationError,
@@ -898,5 +898,146 @@ describe("text fallback precedence: subscription before metered", () => {
     await expect(chooser.ask([textQuestion()])).rejects.toBeInstanceOf(ModelUnavailableError);
     expect(cli.calls).toEqual(["claude"]);
     expect(lm.calls).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------- U14: two configurable sources
+
+/**
+ * U14: a run picks its two intelligence sources independently — a *decider*
+ * for the structured questions (choice, boolean, score) and a *writer* for the
+ * free text Jev cannot produce. `chooser` is the single field they replace and
+ * keeps working: it names the decider alone and leaves the writer derived.
+ */
+describe("decider and writer (U14)", () => {
+  it("chooser alone is unchanged: it names the decider and the writer stays derived", async () => {
+    const jev = jevMock();
+    const cli = cliRunner("answers");
+    const urls: string[] = [];
+    const chooser = createChooser({
+      chooser: "jev",
+      env: { AI_GATEWAY_API_KEY: "g", PATH: fakeBin(["claude"]) },
+      jev: { evaluationModel: jev.model },
+      cli: { runner: cli },
+      model: { fetch: recordingFetch(urls), maxAttempts: 1 },
+    });
+    const answers = await chooser.ask([batch()[0]!, textQuestion()]);
+    expect(chooser.name).toBe("jev");
+    expect(answers[0]?.index).toBe(1);
+    expect(answers[1]?.text).toBe("from the subscription");
+    expect(cli.calls).toEqual(["claude"]);
+    expect(urls).toEqual([]);
+  });
+
+  it("decider and writer are set independently: Jev decides, the metered model writes past an installed CLI", async () => {
+    const jev = jevMock();
+    const cli = cliRunner("answers");
+    const lm = languageMock(MODEL_ANSWER);
+    const chooser = createChooser({
+      decider: "jev",
+      writer: "model",
+      env: { ANTHROPIC_API_KEY: "a", PATH: fakeBin(["claude", "codex"]) },
+      jev: { evaluationModel: jev.model },
+      cli: { runner: cli },
+      model: { model: lm.model },
+    });
+    const answers = await chooser.ask([batch()[0]!, textQuestion()]);
+    expect(chooser.name).toBe("jev");
+    expect(answers[0]?.index).toBe(1);
+    expect(answers[1]?.text).toBe("from the api");
+    // Both CLIs are installed and would have been the derived writer; the explicit field overrules them.
+    expect(cli.calls).toEqual([]);
+    expect(lm.calls).toHaveLength(1);
+  });
+
+  it("the explicit fields win over chooser, for both roles", async () => {
+    const jev = jevMock();
+    const cli = cliRunner("answers");
+    const lm = languageMock(MODEL_ANSWER);
+    const chooser = createChooser({
+      chooser: "model",
+      decider: "jev",
+      writer: "model",
+      env: { ANTHROPIC_API_KEY: "a", PATH: fakeBin(["claude"]) },
+      jev: { evaluationModel: jev.model },
+      cli: { runner: cli },
+      model: { model: lm.model },
+    });
+    expect(chooser.name).toBe("jev");
+    expect((await chooser.ask([textQuestion()]))[0]?.text).toBe("from the api");
+    expect(jev.calls).toHaveLength(0);
+    expect(cli.calls).toEqual([]);
+  });
+
+  it("a writer takes the text even from a decider that could write it, and the usage says who answered what", async () => {
+    const cli = cliRunner("answers");
+    const lm = languageMock(MODEL_ANSWER);
+    const chooser = createChooser({
+      decider: "claude",
+      writer: "model",
+      env: { ANTHROPIC_API_KEY: "a", PATH: fakeBin(["claude"]) },
+      cli: { runner: cli },
+      model: { model: lm.model },
+    });
+    expect(chooser.name).toBe("claude");
+    expect((await chooser.ask([textQuestion()]))[0]?.text).toBe("from the api");
+    expect(cli.calls).toEqual([]);
+    const usage = chooser.usage();
+    expect(usage.chooser).toBe("claude");
+    expect(usage.textQuestions).toBe(1);
+    expect(usage.writer?.chooser).toBe("model");
+    expect(usage.writer?.textQuestions).toBe(1);
+    // The harness is free; what the writer billed survives into the run total.
+    expect(usage.writer?.costUsd).toBeGreaterThan(0);
+    expect(usage.costUsd).toBeCloseTo(usage.writer!.costUsd);
+  });
+
+  it("naming the decider as the writer is one source: nothing is delegated and no writer is reported", async () => {
+    const lm = languageMock(MODEL_ANSWER);
+    const chooser = createChooser({ decider: "model", writer: "model", env: { ANTHROPIC_API_KEY: "a", PATH: fakeBin(["claude"]) }, model: { model: lm.model } });
+    expect(chooser.name).toBe("model");
+    expect((await chooser.ask([textQuestion()]))[0]?.text).toBe("from the api");
+    expect(chooser.usage().writer).toBeUndefined();
+    expect(chooser.usage().textQuestions).toBe(1);
+  });
+
+  it("deciderTransport typesafe forces the official TypeSafe API even with a Gateway key", async () => {
+    const urls: string[] = [];
+    const chooser = createChooser({
+      decider: "jev",
+      deciderTransport: "typesafe",
+      env: { AI_GATEWAY_API_KEY: "g", TYPESAFE_API_KEY: "t", PATH: fakeBin([]) },
+      jev: { fetch: recordingFetch(urls), maxAttempts: 1 },
+    });
+    await expect(chooser.ask([batch()[0]!])).rejects.toBeInstanceOf(ModelUnavailableError);
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain("api.typesafe.ai");
+  });
+
+  it("unset, the transport is still inferred from the keys: the Gateway wins when both are set", async () => {
+    const urls: string[] = [];
+    const chooser = createChooser({
+      decider: "jev",
+      env: { AI_GATEWAY_API_KEY: "g", TYPESAFE_API_KEY: "t", PATH: fakeBin([]) },
+      jev: { fetch: recordingFetch(urls), maxAttempts: 1 },
+    });
+    await expect(chooser.ask([batch()[0]!])).rejects.toBeInstanceOf(ModelUnavailableError);
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain("ai-gateway.vercel.sh");
+  });
+
+  it("a forced transport with no key for it is refused rather than quietly routed the other way", () => {
+    expect(() => createChooser({ decider: "jev", deciderTransport: "typesafe", env: { AI_GATEWAY_API_KEY: "g" } })).toThrow(ConfigurationError);
+  });
+
+  it("resolveSources maps the old field onto the pair and lets the new ones win", () => {
+    expect(resolveSources({ chooser: "jev" }, {})).toEqual({ decider: "jev" });
+    expect(resolveSources({ chooser: "model", decider: "jev" }, {})).toEqual({ decider: "jev" });
+    expect(resolveSources({ chooser: "jev", writer: "claude", deciderTransport: "typesafe" }, {})).toEqual({ decider: "jev", writer: "claude", deciderTransport: "typesafe" });
+    // No field at all: the decider is defaultChooser, the writer stays derived.
+    expect(resolveSources({}, { AI_GATEWAY_API_KEY: "g" })).toEqual({ decider: "jev" });
+    expect(resolveSources({}, { ANTHROPIC_API_KEY: "a" })).toEqual({ decider: "model" });
+    expect(resolveSources({}, {}, { claude: true })).toEqual({ decider: "claude" });
+    expect(resolveSources({}, {})).toEqual({ decider: "agent" });
   });
 });

@@ -8,7 +8,7 @@ import { buildCrawleeLaunchContext, restoreProfileCookies, saveProfileCookies } 
 import { hostOf, isAllowedRequestUrl, registrableDomain } from "../browser/policy.js";
 import { createChooser, NavviError, NeedsHumanError, type Chooser } from "../chooser/index.js";
 import { compile, type CompileResult } from "../compile/index.js";
-import { LIMITS, isAllowedUrl, type FieldType, type Profile, type RunInput } from "../input/schema.js";
+import { LIMITS, isAllowedUrl, resolveSources, type FieldType, type Profile, type RunInput } from "../input/schema.js";
 import type { RunSummary } from "../main.js";
 import { dismissConsent, runPreSteps, type Notifier } from "../prestep/index.js";
 import { coerceValues, extractPage, fieldTypesOf, fingerprintMatches, type ItemExtraction } from "../scraper/extract.js";
@@ -329,7 +329,20 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
     healingEvents: state.healingEvents,
     unmappedCandidates: state.unmappedCandidates,
     fieldsNotFound: [...state.fieldsNotFound].sort(),
-    chooser: usage ? { name: usage.chooser, questions: usage.questions, inputTokens: usage.inputTokens, waitMs: usage.waitMs, costUsd: usage.costUsd } : null,
+    // U14: the totals are the run's; `writer` names the second source and its share of them.
+    chooser: usage
+      ? {
+          name: usage.chooser,
+          questions: usage.questions,
+          inputTokens: usage.inputTokens,
+          waitMs: usage.waitMs,
+          costUsd: usage.costUsd,
+          textQuestions: usage.textQuestions,
+          ...(usage.writer
+            ? { writer: { name: usage.writer.chooser, textQuestions: usage.writer.textQuestions, inputTokens: usage.writer.inputTokens, waitMs: usage.writer.waitMs, costUsd: usage.writer.costUsd } }
+            : {}),
+        }
+      : null,
     // R39: every secret value and proxy credential masked
     input: redactRunInput(input),
     requests: { ...state.requests },
@@ -377,7 +390,7 @@ function stopFromError(state: RunState, crawler: PlaywrightCrawler, error: unkno
 export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<RunSummary> {
   const env = deps.env ?? process.env;
   const actor: CrawlActor = deps.actor ?? Actor;
-  const chooser = deps.chooser ?? createChooser({ chooser: input.chooser, env });
+  const chooser = deps.chooser ?? createChooser({ ...resolveSources(input, env), env });
   const navigator: NavigatorHook = deps.navigator ?? defaultNavigator;
   const healer: HealerHook = deps.healer ?? createHealer();
   const paginateHook: PaginateHook = deps.paginate ?? defaultPaginate;
