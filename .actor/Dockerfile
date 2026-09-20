@@ -9,6 +9,8 @@ ENV NAVVI_BROWSER=chromium \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 COPY --chown=myuser package*.json ./
+# npm runs the postinstall script during `npm ci`, so it has to be in place first.
+COPY --chown=myuser scripts/postinstall.mjs ./scripts/postinstall.mjs
 
 # Dev dependencies are needed for the TypeScript build, then pruned.
 RUN npm --quiet set progress=false \
