@@ -103,8 +103,10 @@ class RoutingRecordedChooser implements Chooser {
   }
 }
 
+// Route by the known fixture page, not batch size: concurrent healing can leave
+// only price broken on an in-stock page, and no-stock pages contain related prices.
 function recordedChooser(): Chooser {
-  return new RoutingRecordedChooser((batch) => (isHealBatch(batch) && batch.every((q) => q.id === "heal.price") ? "heal/pharmacy-nostock" : "heal/pharmacy"));
+  return new RoutingRecordedChooser((batch) => (isHealBatch(batch) && batch.every((q) => q.id === "heal.price" && /^Healing on \S+\/(?:ibuprofeno-400-mg|losartan-50-mg)\.html(?:\n|$)/.test(q.state)) ? "heal/pharmacy-nostock" : "heal/pharmacy"));
 }
 
 function liveChooser(env: NodeJS.ProcessEnv): Chooser {

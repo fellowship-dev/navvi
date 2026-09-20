@@ -166,7 +166,9 @@ describe("typed fields in the input and the compiled scraper", () => {
     expect(replayed.items).toBe(3);
     expect(empty.usage().questions).toBe(0);
     const again = await datasetItems(actor);
-    expect(again.slice(3).map((i) => [i.price, i.stock])).toEqual(items.map((i) => [i.price, i.stock]));
+    // Concurrent pages can finish in a different order; compare each source's values.
+    const bySource = (rows: Record<string, unknown>[]) => rows.map((i) => [i._source, i.price, i.stock]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    expect(bySource(again.slice(3))).toEqual(bySource(items));
   }, 60_000);
 
   it("untyped fields behave exactly as before: strings in the dataset", async () => {
