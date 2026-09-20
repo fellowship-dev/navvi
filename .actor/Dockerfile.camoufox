@@ -8,10 +8,20 @@ ENV NAVVI_BROWSER=camoufox \
     NAVVI_SKIP_BROWSER_DOWNLOAD=1 \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
+# better-sqlite3 (via camoufox-js) has no prebuild for this platform and compiles
+# with node-gyp, which the base image lacks a toolchain for.
+USER root
+RUN apt update \
+    && apt install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt clean -y
+USER myuser
+
 COPY --chown=myuser package*.json ./
 
+# Optional dependencies are needed here: camoufox-js drives the browser this image ships.
 RUN npm --quiet set progress=false \
-    && npm ci --omit=optional \
+    && npm ci \
     && echo "Node.js version:" && node --version \
     && echo "NPM version:" && npm --version
 

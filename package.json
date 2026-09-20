@@ -3,9 +3,14 @@
   "version": "3.0.0",
   "description": "Scraper compiler with cached prompts, model-free healthy replay and targeted repair.",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/fellowship-dev/navvi.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fellowship-dev/navvi.git"
+  },
   "homepage": "https://github.com/fellowship-dev/navvi#readme",
-  "bugs": { "url": "https://github.com/fellowship-dev/navvi/issues" },
+  "bugs": {
+    "url": "https://github.com/fellowship-dev/navvi/issues"
+  },
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -38,7 +43,6 @@
     "@ai-sdk/gateway": "4.0.87",
     "ai": "7.0.107",
     "apify": "3.7.2",
-    "camoufox-js": "0.12.0",
     "crawlee": "3.18.1",
     "playwright": "1.60.0",
     "zod": "^4.1.8"
@@ -51,5 +55,8 @@
   },
   "allowScripts": {
     "esbuild@0.28.2": true
+  },
+  "optionalDependencies": {
+    "camoufox-js": "0.12.0"
   }
 }
