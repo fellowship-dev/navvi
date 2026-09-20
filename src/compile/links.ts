@@ -4,7 +4,7 @@ import type { Answer, Question } from "../chooser/chooser.js";
 import { premises } from "../chooser/questions.js";
 import type { Pagination } from "../scraper/schema.js";
 import { clip } from "../util/text.js";
-import type { FieldCandidate } from "./fields.js";
+import { sharedContext, type FanOutContext, type FieldCandidate } from "./fields.js";
 
 /**
  * Link choices for list mode (R7, R25): the next-page link among the page's
@@ -24,8 +24,16 @@ export function linkLabel(link: LinkCandidate): string {
   return `"${clip(link.text, 60)}" -> ${clip(link.href, 120)}`;
 }
 
-export function buildNextLinkQuestion(links: readonly LinkCandidate[], state: string, suffix = ""): Question {
-  return { id: `${NEXT_LINK_QUESTION_ID}${suffix}`, kind: "choice", premise: premises.nextLinkChoice(), options: links.map(linkLabel), state };
+export function buildNextLinkQuestion(links: readonly LinkCandidate[], state: string, suffix = "", shared?: FanOutContext): Question {
+  return {
+    id: `${NEXT_LINK_QUESTION_ID}${suffix}`,
+    kind: "choice",
+    premise: premises.nextLinkChoice(),
+    options: links.map(linkLabel),
+    state,
+    context: { decision: "next_page_link", ...(shared ? { shared: sharedContext(shared) } : {}) },
+    optionContext: links.map((l) => ({ text: clip(l.text, 60), href: clip(l.href, 120) })),
+  };
 }
 
 /** Detail-link candidates: href leaves that resolve on every sample row, on-domain on every sample. */
@@ -42,13 +50,15 @@ export function detailLinkCandidates(candidates: readonly FieldCandidate[], base
   });
 }
 
-export function buildDetailLinkQuestion(candidates: readonly FieldCandidate[], description: string, state: string, suffix = ""): Question {
+export function buildDetailLinkQuestion(candidates: readonly FieldCandidate[], description: string, state: string, suffix = "", shared?: FanOutContext): Question {
   return {
     id: `${DETAIL_LINK_QUESTION_ID}${suffix}`,
     kind: "choice",
     premise: premises.detailLinkChoice(description),
     options: candidates.map((c) => `${c.path} = ${c.values.map((v) => clip(v, 80)).join(" | ")}`),
     state,
+    context: { decision: "detail_page_link", records: description, ...(shared ? { shared: sharedContext(shared) } : {}) },
+    optionContext: candidates.map((c) => ({ path: c.path, hrefs: c.values.map((v) => clip(v, 80)) })),
   };
 }
 

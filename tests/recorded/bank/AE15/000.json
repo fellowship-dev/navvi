@@ -1,0 +1,54 @@
+{
+  "scenario": "AE15",
+  "batch": 0,
+  "entries": [
+    {
+      "question": {
+        "id": "heal.step.2",
+        "kind": "choice",
+        "premise": "The recorded click step targeted the control \"Log in\", which no longer matches on this page. Which control should the click step use instead? Pick none when no control fits.",
+        "options": [
+          "button \"Sign in\" in \"Email Password Sign in\"",
+          "link \"Forgot your password?\" -> http://127.0.0.1:55170/login/ in \"Forgot your password?\""
+        ],
+        "state": "Trace step 3 of 3: click\nPage: http://127.0.0.1:55170/login/\nFailure: no visible control matched button \"Log in\"",
+        "context": {
+          "decision": "heal_trace_step",
+          "step": {
+            "index": 3,
+            "of": 3,
+            "operation": "click",
+            "secret": false,
+            "recorded_control": {
+              "role": "button",
+              "name": "Log in"
+            }
+          },
+          "shared": {
+            "page": "http://127.0.0.1:55170/login/",
+            "failure": "no visible control matched button \"Log in\""
+          }
+        },
+        "optionContext": [
+          {
+            "role": "button",
+            "name": "Sign in",
+            "input_type": "submit",
+            "scope": "Email Password Sign in",
+            "form": {
+              "method": "post",
+              "action": "/login"
+            }
+          },
+          {
+            "role": "link",
+            "name": "Forgot your password?",
+            "href": "http://127.0.0.1:55170/login/",
+            "scope": "Forgot your password?"
+          }
+        ]
+      },
+      "gold": 0
+    }
+  ]
+}

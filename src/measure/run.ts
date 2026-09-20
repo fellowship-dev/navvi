@@ -5,6 +5,7 @@ import { Actor } from "apify";
 import { MemoryStorage } from "crawlee";
 import { CHOOSERS, isChooserId, type Chooser as ChooserId } from "../input/schema.js";
 import { createChooser, estimateTokens, findOnPath, RecordingChooser, type Answer, type Chooser, type ChooserUsage, type Question } from "../chooser/index.js";
+import { BankingChooser } from "./bank.js";
 import { renderTable, replaceSection, type MeasurementRow } from "./report.js";
 import { grade, isLiveSite, liveScenario, LIVE_SITES, RoutedRecordedChooser, SCENARIOS, type LiveSite, type Scenario } from "./scenarios.js";
 import { startFixtureServer } from "../../tests/server.js";
@@ -40,9 +41,11 @@ export interface MeasureOptions {
   log?: (line: string) => void;
   /** Root of the recorded answers; live runs record under `<root>/measure/`. */
   recordDir?: string;
+  /** Write every question the agent replay answers, with its gold answer, into the question bank. */
+  bank?: boolean;
 }
 
-const USAGE = `usage: npm run measure -- [--choosers agent,jev,model] [--live python.org|hackernews] [--offline] [--agent-live] [--out docs/measurements.md]`;
+const USAGE = `usage: npm run measure -- [--choosers agent,jev,model] [--live <site>] [--offline] [--agent-live] [--bank] [--out docs/measurements.md]`;
 
 /** Parses the CLI flags; unknown choosers and sites fail with the accepted names. */
 export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): MeasureOptions {
@@ -78,6 +81,9 @@ export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = proc
         break;
       case "--agent-live":
         options.agentLive = true;
+        break;
+      case "--bank":
+        options.bank = true;
         break;
       case "--out":
         options.out = value(flag);
@@ -122,7 +128,7 @@ function buildChooser(name: ChooserId, scenario: Scenario, options: MeasureOptio
     case "agent":
       if (options.agentLive) return { chooser: record(createChooser({ chooser: "agent", env })) };
       if (!scenario.recordedFixture) return { skipped: "agent column is a recorded replay; pass --agent-live to measure a host agent on a live site" };
-      return { chooser: new MeteredChooser(new RoutedRecordedChooser(scenario.recordedFixture)) };
+      return { chooser: new MeteredChooser(options.bank ? new BankingChooser(new RoutedRecordedChooser(scenario.recordedFixture), scenario.id) : new RoutedRecordedChooser(scenario.recordedFixture)) };
     case "jev":
       if (!env.AI_GATEWAY_API_KEY && !env.TYPESAFE_API_KEY) return { skipped: "no key (set AI_GATEWAY_API_KEY or TYPESAFE_API_KEY)" };
       return { chooser: record(createChooser({ chooser: "jev", env })) };

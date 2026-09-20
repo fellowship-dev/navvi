@@ -1,5 +1,5 @@
 import type { GroupCandidate } from "../browser/snapshot.js";
-import type { Question } from "../chooser/chooser.js";
+import type { JsonValue, Question } from "../chooser/chooser.js";
 import { premises } from "../chooser/questions.js";
 import { clip, normalize } from "../util/text.js";
 
@@ -25,13 +25,27 @@ export function isDegenerateGroup(group: GroupCandidate): boolean {
   return group.itemCount < 1 || new Set(group.sampleTexts.map(normalize)).size <= 1;
 }
 
-export function buildGroupQuestion(groups: readonly GroupCandidate[], description: string, fields: readonly string[], state: string, suffix = ""): Question {
+/** The facts behind a group option, for structured backends. */
+export function groupContext(group: GroupCandidate): JsonValue {
+  const out: { [key: string]: JsonValue } = {
+    container: group.selector,
+    item: group.itemSelector,
+    item_count: group.itemCount,
+    sample_items: group.sampleTexts.map((t) => clip(t, SAMPLE_CHARS)),
+  };
+  if (group.anchorPlusRows) out.rows_per_item = group.anchorPlusRows.span;
+  return out;
+}
+
+export function buildGroupQuestion(groups: readonly GroupCandidate[], description: string, fields: readonly string[], state: string, suffix = "", page?: string): Question {
   return {
     id: `${GROUP_QUESTION_ID}${suffix}`,
     kind: "choice",
     premise: premises.listGroupChoice(description, fields),
     options: groups.map(groupLabel),
     state,
+    context: { decision: "list_group", shared: { records: description, fields: [...fields], ...(page ? { page } : {}) } },
+    optionContext: groups.map(groupContext),
   };
 }
 
