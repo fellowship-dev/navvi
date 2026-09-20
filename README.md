@@ -117,12 +117,15 @@ Agents: read [`SKILL.md`](SKILL.md); [`llms.txt`](llms.txt) indexes the docs.
 - A stderr summary with pages, items, chooser usage and healing events.
 - **Typed values when you ask for them**: `--fields name,price:money,stock:boolean`
   (or `type` on a field in the JSON input) coerces the extracted text after
-  the fingerprint check: `money` and `number` read `$ 6.990` as `6990` and
-  `12.990,50` as `12990.5`, `integer` takes a whole number, `boolean` maps
-  stock phrases in Spanish and English (`En stock`, `Agotado`, `Out of stock`),
-  `url` resolves to an absolute http(s) URL; a value that does not coerce is
-  `null`. The type is recorded in the compiled scraper, so a replay coerces the
-  same way with no model call. Untyped fields stay strings.
+  the fingerprint check: `money` and `number` read `$ 6.990` as `6990`,
+  `12.990,50` as `12990.5` and `12 990` as `12990`, `integer` takes a whole
+  number, `boolean` maps stock phrases in Spanish and English (`En stock`,
+  `Agotado`, `Out of stock`, `Disponible: No`), `url` resolves to an absolute
+  http(s) URL; a value that does not coerce is `null`. A bare `1.250` is 1250
+  under `money` and `integer`, where a three-decimal reading is impossible, and
+  `null` under `number`, where it is an ordinary weight and nothing in the text
+  settles it. The type is recorded in the compiled scraper, so a replay coerces
+  the same way with no model call. Untyped fields stay strings.
 - **A URL list as the start**: `--from-url <url>` (or a
   `{ "requestsFromUrl": "<url>" }` entry in `startUrls`) fetches a URL that
   answers the pages to scrape as newline text or JSON (an array of URLs or of

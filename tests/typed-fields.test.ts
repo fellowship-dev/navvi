@@ -81,12 +81,87 @@ describe("coerceValue (R5)", () => {
     expect(coerceValue("sin datos", "number")).toBeNull();
   });
 
+  it("a separator followed by three digits groups thousands only where that reading is admissible", () => {
+    // money caps decimals at two, so the three-digit tail is a thousands group
+    expect(coerceValue("$ 1.250", "money")).toBe(1250);
+    expect(coerceValue("$ 6.990", "money")).toBe(6990);
+    // integer cannot hold the decimal reading at all, so grouping is the only one left
+    expect(coerceValue("1.234", "integer")).toBe(1234);
+    expect(coerceValue("12.500", "integer")).toBe(12500);
+    // number has no such constraint: 1.250 is an ordinary weight or dosage
+    expect(coerceValue("1.250", "number")).toBeNull();
+    expect(coerceValue("3.141", "number")).toBeNull();
+    expect(coerceValue("6.990", "number")).toBeNull();
+    expect(coerceValue("12,500", "number")).toBeNull();
+    // a currency marker in the text settles it even for number
+    expect(coerceValue("$ 6.990", "number")).toBe(6990);
+    expect(coerceValue("CLP 12.990", "number")).toBe(12990);
+  });
+
+  it("a three-digit tail that cannot be a thousands group is read as decimals whatever the type", () => {
+    for (const type of ["money", "number"] as const) {
+      expect(coerceValue("0.750", type), type).toBe(0.75);
+      expect(coerceValue("0.123", type), type).toBe(0.123);
+      expect(coerceValue("-0.500", type), type).toBe(-0.5);
+      expect(coerceValue("1234.567", type), type).toBe(1234.567);
+      // three-decimal currencies: KWD, BHD, TND
+      expect(coerceValue("12.500 KWD", type), type).toBe(12.5);
+      expect(coerceValue("0,750 BHD", type), type).toBe(0.75);
+    }
+    expect(coerceValue("0.750", "integer")).toBeNull();
+    expect(coerceValue("1.2345", "number")).toBe(1.2345);
+  });
+
+  it("a space groups thousands instead of truncating the number, and a lone space still ends it", () => {
+    expect(coerceValue("12 990", "money")).toBe(12990);
+    expect(coerceValue("12 990,50", "money")).toBe(12990.5);
+    expect(coerceValue("$ 12 990,50", "money")).toBe(12990.5);
+    expect(coerceValue("1 234 567.89", "money")).toBe(1234567.89);
+    expect(coerceValue("12 990", "money")).toBe(12990);
+    expect(coerceValue("12 990", "number")).toBe(12990);
+    expect(coerceValue("12 990", "integer")).toBe(12990);
+    // spaces did the grouping, so the separator left over is the decimal one
+    expect(coerceValue("12 990,500", "number")).toBe(12990.5);
+    // a run that is not a group of three is a separate number; the first one wins
+    expect(coerceValue("98 comprimidos", "integer")).toBe(98);
+    expect(coerceValue("1 2345", "number")).toBe(1);
+    expect(coerceValue("500 mg 20 comprimidos", "integer")).toBe(500);
+  });
+
+  it("a writing no convention produces is null rather than a confident number", () => {
+    expect(coerceValue("1.2.3", "number")).toBeNull();
+    expect(coerceValue("1.2.3", "money")).toBeNull();
+    expect(coerceValue("192.168.0.1", "money")).toBeNull();
+    expect(coerceValue("1,23.5", "money")).toBeNull();
+    expect(coerceValue("1.234.567", "money")).toBe(1234567);
+  });
+
   it("boolean maps stock phrases in Spanish and English and leaves unrelated text null", () => {
     for (const yes of ["En Stock", "en stock", "Disponible", "Hay stock", "In Stock", "Available", "Sí", "yes", "true"]) expect(coerceValue(yes, "boolean"), yes).toBe(true);
     for (const no of ["Agotado", "AGOTADO", "Sin stock", "No disponible", "Out of stock", "Sold out", "Unavailable", "no", "false"]) expect(coerceValue(no, "boolean"), no).toBe(false);
     expect(coerceValue("Consultar en tienda", "boolean")).toBeNull();
     expect(coerceValue("Paracetamol 500 mg", "boolean")).toBeNull();
     expect(coerceValue(null, "boolean")).toBeNull();
+  });
+
+  it("a label cell answers with its value, not with the label", () => {
+    for (const no of ["Disponible: No", "Available: No", "In stock: 0", "Stock: No", "Disponibilidad: Agotado", "Disponible - No", "En stock | no", "Agotado: Sí"]) expect(coerceValue(no, "boolean"), no).toBe(false);
+    // a negative label inverts its answer: "sold out: no" is in stock
+    for (const yes of ["Stock: Disponible", "Disponible: Sí", "Stock: 1", "Agotado: No"]) expect(coerceValue(yes, "boolean"), yes).toBe(true);
+    // a value that answers nothing does not fall back to the label
+    expect(coerceValue("Stock: consultar", "boolean")).toBeNull();
+    expect(coerceValue("Stock: 12", "boolean")).toBeNull();
+  });
+
+  it("a negated stock phrase reads as its negation, and phrases match whole words only", () => {
+    for (const yes of ["no está agotado", "not out of stock", "no agotado"]) expect(coerceValue(yes, "boolean"), yes).toBe(true);
+    for (const no of ["no disponible", "no hay stock", "not available", "not in stock", "no se encuentra disponible", "no longer available", "sin stock"]) expect(coerceValue(no, "boolean"), no).toBe(false);
+    // "sin stock" must not be read through the substring "in stock"
+    expect(coerceValue("Sin stock en esta sucursal", "boolean")).toBe(false);
+    // a negator too far away negates nothing
+    expect(coerceValue("No sabemos si el producto está agotado", "boolean")).toBe(false);
+    // phrases that disagree say nothing a published row may rely on
+    expect(coerceValue("Disponible en tienda, agotado online", "boolean")).toBeNull();
   });
 
   it("url resolves to an absolute http(s) URL against the page and refuses other schemes; text is untouched", () => {

@@ -142,55 +142,192 @@ export function fingerprintMatches(value: string | null | undefined, fingerprint
 
 export type TypedValue = string | number | boolean | null;
 
+/**
+ * What the declared field type implies about how many decimals a value may
+ * have. `1.250` is 1250 on a Chilean price tag and 1.25 in a dosage table, and
+ * nothing in the string settles it, so the reading depends on the declaration:
+ *
+ * - `money`: currency amounts carry at most two decimals (the three-decimal
+ *   ISO codes are spelled out in the text and detected below), so a separator
+ *   followed by three digits groups thousands \u2014 `$ 6.990` is 6990.
+ * - `integer`: a decimal reading is inadmissible by declaration, so grouping is
+ *   the only interpretation that can produce a value at all \u2014 `1.234` is 1234.
+ * - `number`: weights, ratings and dosages make `1.250` an ordinary decimal and
+ *   nothing rules the grouped reading out either. Unresolvable, so null: this
+ *   feeds a price index, where a silently 1000x value is worse than no value.
+ */
+export type NumberHint = "money" | "integer" | "number";
+
 /** The first number in the text: sign, digits, one or two separators. */
 const NUMBER_TOKEN = /[-+]?\d[\d.,]*/;
+/** The same number grouped with spaces (French, Nordic, Polish, some Chilean sites): every group is exactly three digits. */
+const SPACE_GROUPED_TOKEN = /[-+]?\d{1,3}(?: \d{3}(?!\d))+(?:[.,]\d+)?/;
+
+/** ISO 4217 codes whose minor unit is three digits: `12.500 KWD` is twelve and a half dinars. */
+const THREE_DECIMAL_CURRENCY = /\b(KWD|BHD|TND|OMR|JOD|IQD|LYD)\b/i;
+/** ISO 4217 codes with no minor unit at all: `CLP 12.990` can only be grouped. */
+const ZERO_DECIMAL_CURRENCY = /\b(CLP|COP|PYG|JPY|KRW|ISK|VND|XOF|XAF)\b/i;
+
+/** Thousands grouping: one to three digits, then groups of exactly three. */
+const isGrouped = (parts: readonly string[]): boolean =>
+  parts.length > 1 && /^\d{1,3}$/.test(parts[0]!) && parts.slice(1).every((p) => /^\d{3}$/.test(p));
 
 /**
- * Reads a number the way a price is written: `6.990` and `12,990` are
- * thousands (Chilean dot grouping and the English comma), `12.990,50` and
- * `12,990.00` carry a decimal part after the last separator, `6.99` and
- * `12,5` are decimals. Null when there is no number.
+ * The digits of `token` as a plain JS number literal, or null when the writing
+ * is not a number any convention produces (`1.2.3`, `1,23.5`) or is ambiguous
+ * and the hint refuses to guess. `text` is the whole value, read for currency
+ * evidence; `spaceGrouped` says the spaces already did the thousands grouping.
  */
-export function parseNumber(text: string | null | undefined): number | null {
-  const match = NUMBER_TOKEN.exec(squash(text));
-  if (!match) return null;
-  let token = match[0];
-  const sign = token.startsWith("-") ? -1 : 1;
-  token = token.replace(/^[-+]/, "").replace(/[.,]$/, "");
+function normalizeDigits(token: string, spaceGrouped: boolean, hint: NumberHint, text: string): string | null {
   const dots = token.split(".").length - 1;
   const commas = token.split(",").length - 1;
-  let normalized: string;
+  if (dots + commas === 0) return /^\d+$/.test(token) ? token : null;
   if (dots > 0 && commas > 0) {
     // the last separator is the decimal one, the other groups thousands
     const decimal = token.lastIndexOf(".") > token.lastIndexOf(",") ? "." : ",";
     const grouping = decimal === "." ? "," : ".";
-    normalized = token.split(grouping).join("").replace(decimal, ".");
-  } else if (dots + commas === 0) {
-    normalized = token;
-  } else {
-    const sep = dots > 0 ? "." : ",";
-    const parts = token.split(sep);
-    // several separators, or one followed by exactly three digits: thousands grouping
-    const grouping = parts.length > 2 || (parts.length === 2 && parts[1]!.length === 3);
-    normalized = grouping ? parts.join("") : parts.join(".");
+    const cut = token.lastIndexOf(decimal);
+    const head = token.slice(0, cut);
+    const fraction = token.slice(cut + 1);
+    if (head.includes(decimal) || !/^\d+$/.test(fraction)) return null;
+    const parts = head.split(grouping);
+    return isGrouped(parts) ? `${parts.join("")}.${fraction}` : null;
   }
+  const parts = token.split(dots > 0 ? "." : ",");
+  if (parts.length > 2) return isGrouped(parts) ? parts.join("") : null;
+  const head = parts[0]!;
+  const tail = parts[1]!;
+  if (!/^\d+$/.test(head) || !/^\d+$/.test(tail)) return null;
+  // One separator. Only a three-digit tail can be a thousands group; anything
+  // else (6.99, 12,5, 1.2345) is a decimal part, whatever the declared type.
+  if (tail.length !== 3) return `${head}.${tail}`;
+  // Evidence in the string first, the declared type only when it stays silent.
+  if (spaceGrouped) return `${head}.${tail}`; // spaces grouped already; a dot or comma left over is the decimal
+  if (head.startsWith("0")) return `${head}.${tail}`; // no convention writes a thousands group of 0
+  if (head.length > 3) return `${head}.${tail}`; // grouping would have split the head too
+  if (THREE_DECIMAL_CURRENCY.test(text)) return `${head}.${tail}`;
+  if (ZERO_DECIMAL_CURRENCY.test(text)) return head + tail;
+  if (isMoney(text)) return head + tail; // a currency marker caps the decimals at two
+  return hint === "number" ? null : head + tail;
+}
+
+/**
+ * Reads a number the way a price is written: `6.990` and `12,990` are
+ * thousands (Chilean dot grouping and the English comma), `12 990` is the
+ * space grouping French, Nordic and Polish sites use, `12.990,50` and
+ * `12,990.00` carry a decimal part after the last separator, `6.99` and
+ * `12,5` are decimals. Null when there is no number, when the writing belongs
+ * to no convention, or when a three-digit tail stays ambiguous under `hint`
+ * (see NumberHint). The hint defaults to the conservative `number`.
+ */
+export function parseNumber(text: string | null | undefined, hint: NumberHint = "number"): number | null {
+  const t = squash(text);
+  const plain = NUMBER_TOKEN.exec(t);
+  if (!plain) return null;
+  const spaced = SPACE_GROUPED_TOKEN.exec(t);
+  // The first number in the text wins; a space-grouped match starting no later
+  // than the plain one is the same number, read whole instead of truncated.
+  const spaceGrouped = spaced !== null && spaced.index <= plain.index;
+  let token = (spaceGrouped ? spaced![0] : plain[0]).replace(/ /g, "");
+  const sign = token.startsWith("-") ? -1 : 1;
+  token = token.replace(/^[-+]/, "").replace(/[.,]+$/, "");
+  if (!token) return null;
+  const normalized = normalizeDigits(token, spaceGrouped, hint, t);
+  if (normalized === null) return null;
   const value = Number(normalized);
   return Number.isFinite(value) ? sign * value : null;
 }
 
 const NO_ACCENTS = (s: string): string => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-/** Phrases match anywhere in the text; the negatives go first because "no disponible" contains "disponible". Words match the whole text only. */
-const FALSE_PHRASES = ["agotado", "sin stock", "no disponible", "no hay stock", "out of stock", "sold out", "unavailable", "not available"];
-const TRUE_PHRASES = ["en stock", "hay stock", "disponible", "in stock", "available"];
+const wordsOf = (s: string): string[] => s.split(/[^a-z0-9]+/).filter(Boolean);
+
+/**
+ * Phrases match whole words in sequence, never as substrings: "sin stock" must
+ * not read as "in stock". Both lists hold only unnegated phrases \u2014 "no
+ * disponible" and "not available" are the TRUE phrase under a negator, which
+ * the negation scan below handles, so a real double negative ("no est\u00e1
+ * agotado" = not sold out) comes out true instead of inverted.
+ */
+const FALSE_PHRASES: readonly string[][] = ["agotado", "agotada", "agotados", "agotadas", "sin stock", "sin existencias", "fuera de stock", "out of stock", "sold out", "unavailable"].map(wordsOf);
+const TRUE_PHRASES: readonly string[][] = ["en stock", "hay stock", "disponible", "disponibles", "in stock", "available"].map(wordsOf);
+/** Words that answer a label cell on their own; they must be the whole value, never a word inside a sentence. */
 const FALSE_WORDS = new Set(["no", "false", "0"]);
 const TRUE_WORDS = new Set(["si", "yes", "true", "1"]);
+const NEGATORS = new Set(["no", "not", "nunca", "never"]);
+/** Copulas and adverbs a negator may reach across: "no se encuentra disponible", "no longer available". */
+const NEGATION_FILLERS = new Set(["es", "esta", "estan", "se", "encuentra", "ha", "han", "hemos", "sido", "actualmente", "aun", "todavia", "longer", "is", "are", "was", "were", "be", "been", "being", "currently", "yet", "any", "more"]);
+/** How far back a negator may sit, in filler words. */
+const NEGATION_REACH = 3;
+
+/** True when a negator sits just before word `i`, reaching across fillers only. */
+function negatedAt(words: readonly string[], i: number): boolean {
+  for (let j = i - 1; j >= 0 && j >= i - NEGATION_REACH; j--) {
+    if (NEGATORS.has(words[j]!)) return true;
+    if (!NEGATION_FILLERS.has(words[j]!)) return false;
+  }
+  return false;
+}
+
+/** Every phrase reading of the words, with negation applied. */
+function phraseVerdicts(words: readonly string[]): boolean[] {
+  const verdicts: boolean[] = [];
+  const scan = (phrases: readonly string[][], polarity: boolean): void => {
+    for (const phrase of phrases) {
+      for (let i = 0; i + phrase.length <= words.length; i++) {
+        if (phrase.every((w, k) => words[i + k] === w)) verdicts.push(negatedAt(words, i) ? !polarity : polarity);
+      }
+    }
+  };
+  scan(TRUE_PHRASES, true);
+  scan(FALSE_PHRASES, false);
+  return verdicts;
+}
+
+/** A bare yes/no cell value, or null when the text is not one. */
+function polarityWord(t: string): boolean | null {
+  const words = wordsOf(t);
+  if (words.length !== 1) return null;
+  if (FALSE_WORDS.has(words[0]!)) return false;
+  if (TRUE_WORDS.has(words[0]!)) return true;
+  return null;
+}
+
+/** The value answers the label, so a negative label inverts it: "Agotado: No" is in stock. */
+function answerTo(label: string, word: boolean): boolean {
+  const verdicts = phraseVerdicts(wordsOf(label));
+  const negative = verdicts.length > 0 && verdicts.every((v) => v === false);
+  return negative ? !word : word;
+}
+
+function booleanOf(t: string, depth: number): boolean | null {
+  if (!t) return null;
+  // A label cell answers with its value, not with its label: "Disponible: No"
+  // and "In stock: 0" are false, however positive the label reads.
+  const colon = t.indexOf(":");
+  if (depth < 2 && colon > 0) {
+    const value = t.slice(colon + 1).trim();
+    if (value) {
+      const word = polarityWord(value);
+      return word === null ? booleanOf(value, depth + 1) : answerTo(t.slice(0, colon), word);
+    }
+  }
+  const bare = polarityWord(t);
+  if (bare !== null) return bare;
+  // The same cell written with a dash or a pipe: "Disponible - No".
+  const trailing = /\s[-\u2013\u2014|/]\s*([a-z0-9]+)\.?$/.exec(t);
+  if (trailing) {
+    const word = polarityWord(trailing[1]!);
+    if (word !== null) return answerTo(t.slice(0, trailing.index), word);
+  }
+  const verdicts = phraseVerdicts(wordsOf(t));
+  if (verdicts.length === 0) return null;
+  // Disagreeing phrases ("disponible en tienda, agotado online") say nothing a
+  // published price row may rely on.
+  return verdicts.every((v) => v === verdicts[0]) ? verdicts[0]! : null;
+}
 
 export function parseBoolean(text: string | null | undefined): boolean | null {
-  const t = NO_ACCENTS(squash(text).toLowerCase());
-  if (!t) return null;
-  if (FALSE_WORDS.has(t) || FALSE_PHRASES.some((p) => t.includes(p))) return false;
-  if (TRUE_WORDS.has(t) || TRUE_PHRASES.some((p) => t.includes(p))) return true;
-  return null;
+  return booleanOf(NO_ACCENTS(squash(text).toLowerCase()), 0);
 }
 
 /** R5: the extracted text as the field's declared type; untyped and `text` fields are returned as they are. */
@@ -199,9 +336,9 @@ export function coerceValue(value: string | null, type: FieldType | undefined, b
   switch (type) {
     case "money":
     case "number":
-      return parseNumber(value);
+      return parseNumber(value, type);
     case "integer": {
-      const n = parseNumber(value);
+      const n = parseNumber(value, "integer");
       return n !== null && Number.isInteger(n) ? n : null;
     }
     case "boolean":
