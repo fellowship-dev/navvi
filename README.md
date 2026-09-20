@@ -28,15 +28,33 @@ use Playwright's Chromium instead. Agents: read [`SKILL.md`](SKILL.md) first;
 
 ## Measured, with and without Jev
 
-First live comparison, 2026-09-19, same scenarios per chooser (`npm run measure -- --choosers agent,jev,claude`). Full table in [`docs/measurements.md`](docs/measurements.md).
+Same scenarios per chooser, 2026-09-20, after the Jev hillclimb
+([`docs/jev-hillclimb.md`](docs/jev-hillclimb.md)): four fixture proofs, five
+navigation and form flows (a search form, a login with secrets, a category
+link, pagination, detail pages) and five live sites. Full table in
+[`docs/measurements.md`](docs/measurements.md); reproduce with
+`npm run measure -- --choosers agent,jev,claude --live python.org,hackernews,scrapethissite-search,quotes-login,books-category`.
 
-| chooser | list compile (AE1) | record compile (AE7) | field heal (AE8) | step heal (AE15) | chooser wait per scenario | cost |
-|---|---|---|---|---|---|---|
-| `jev` (TypeSafe, direct API) | flips on a single-candidate group: 125/125 or 0/125 | 48/48 | 13/48 | 10/10 | 0.5 to 2.6 s | under $0.001 |
-| `claude` (Claude Code, Haiku, subscription) | 125/125 | 48/48 | 46/48 | 10/10 | 8 to 62 s | $0 billed |
-| `agent` (recorded replay of a person's answers) | 125/125 | 48/48 | 48/48 | 10/10 | 0 | $0 |
+| chooser | scenarios right | fields correct | chooser wait per scenario | cost for all 14 |
+|---|---|---|---|---|
+| `jev` (TypeSafe, direct API) | 14 of 14 | 784/785 | 0.6 to 3.0 s | $0.008 |
+| `claude` (Claude Code, Haiku, subscription) | 14 of 14 | 782/785 | 4.9 to 59 s | $0 billed |
+| `agent` (recorded replay of the host agent's answers) | 9 of 9 fixture scenarios | 490/490 | 0 | $0 |
 
-Read it plainly: Jev is fast and cheap and reliable when the question is "which of these leaves is the price" on a record page. It is not yet reliable when asked to confirm the only item group on a listing, or to pick a replacement candidate during healing, where it prefers `none`. Those two questions need better state and premise engineering; the harness above is the eval for that work. Claude on a subscription gets every scenario right and costs time instead of money.
+The one cell both miss is a Hacker News story without a points count. Jev
+beats Claude on field healing (48/48 against 46/48) and is ten to thirty times
+faster on every scenario; Claude's one typed value (the search query) is also
+what Jev's lane uses, through the CLI fallback. Before the hillclimb Jev lost
+38 of 48 healing cells to `none` and flipped on single-candidate questions;
+what changed is how the questions are framed, not the chooser interface: the
+batch's facts as JSON state, each option as a structured criterion, one rule
+per decision, and a presence question that decides `none` separately.
+
+![Jev against Claude Haiku on the same prompt](docs/race.gif)
+
+The same search-form prompt under Jev and under Claude Haiku, live, in real
+time: Jev compiles in 12 s, Claude in 63 s, and the replay costs both 0.8 s
+and zero questions. Reproduce with `npx tsx scripts/record-race.ts`.
 
 ## What you get
 

@@ -2,10 +2,10 @@
   "id": "nav.1.click",
   "index": 0,
   "probabilities": [
-    0.66,
+    0.68,
     0,
     0,
-    0.01,
+    0,
     0,
     0,
     0,
@@ -37,7 +37,7 @@
     0
   ],
   "kind": "choice",
-  "inputTokens": 3388,
+  "inputTokens": 3423,
   "outputTokens": 215,
   "chooser": "jev"
 }
