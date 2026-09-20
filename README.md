@@ -68,6 +68,19 @@ and zero questions. Reproduce with `npx tsx scripts/record-race.ts`.
 - **Healing**: a moved field or a renamed button is repaired on the spot from
   the recorded alternatives and fingerprints; a real redesign is reported as
   `drift` rather than guessed at.
+- **Typed values when you ask for them**: `--fields name,price:money,stock:boolean`
+  (or `type` on a field in the JSON input) coerces the extracted text after
+  the fingerprint check: `money` and `number` read `$ 6.990` as `6990` and
+  `12.990,50` as `12990.5`, `integer` takes a whole number, `boolean` maps
+  stock phrases in Spanish and English (`En stock`, `Agotado`, `Out of stock`),
+  `url` resolves to an absolute http(s) URL; a value that does not coerce is
+  `null`. The type is recorded in the compiled scraper, so a replay coerces the
+  same way with no model call. Untyped fields stay strings.
+- **A URL list as the start**: `--from-url <url>` (or a
+  `{ "requestsFromUrl": "<url>" }` entry in `startUrls`) fetches a URL that
+  answers the pages to scrape as newline text or JSON (an array of URLs or of
+  `{ url }` objects, or an object whose `urls`, `data` or `items` is one), so
+  a backend endpoint can feed the daily target list directly.
 - **A summary on stderr**: status, items, pages, chooser usage, healing
   events, unmapped candidates. `--quiet` turns it off.
 

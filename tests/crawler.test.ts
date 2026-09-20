@@ -161,7 +161,7 @@ describe("list sources (R34)", () => {
       "/urls.txt": { type: "text/plain; charset=utf-8", body: "# comment\nhttps://example.org/c\n\nhttps://example.org/d\nftp://example.org/e\n" },
     });
     try {
-      const urls = await loadListSources([`${helper.baseUrl}/urls.json`, `${helper.baseUrl}/urls.txt`, "https://example.org/page.html"], ["127.0.0.1"]);
+      const urls = await loadListSources([`${helper.baseUrl}/urls.json`, `${helper.baseUrl}/urls.txt`, "https://example.org/page.html"], [], ["127.0.0.1"]);
       expect(urls).toEqual(["https://example.org/a", "https://example.org/b", "https://example.org/c", "https://example.org/d", "https://example.org/page.html"]);
     } finally {
       await helper.close();

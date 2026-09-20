@@ -10,7 +10,7 @@ import { parseArgs, usage, type CliArgs } from "../src/cli/args.js";
 import { NotifyConfigurationError, createNotifier } from "../src/cli/notify.js";
 import { formatRows, type OutputFormat, type Row } from "../src/cli/output.js";
 import { createChooser, findOnPath, HARNESS_LABEL, loadAnswersFile, mergeAnswers, missingCredentialsMessage, NavviError, NeedsHumanError, readQuestionsFile, resolveDefaultChooser, type Chooser, type StoredAnswer } from "../src/chooser/index.js";
-import { defaultBrowser, type Chooser as ChooserId } from "../src/input/schema.js";
+import { defaultBrowser, parseFieldSpecs, type Chooser as ChooserId } from "../src/input/schema.js";
 import { run as runNavvi, type RunSummary } from "../src/main.js";
 import type { Notifier } from "../src/prestep/human.js";
 import type { CrawlActor, CrawlDeps } from "../src/replay/crawler.js";
@@ -168,7 +168,8 @@ function rawInput(args: CliArgs, io: CliIo, secrets: Record<string, string>, cho
   const hasSecrets = Object.keys(secrets).length > 0;
   const structured = Boolean(args.mode && args.fields && args.fields.length > 0);
   const base: Record<string, unknown> = {
-    startUrls: [...args.fromUrls, ...args.urls],
+    startUrls: args.urls,
+    urlLists: args.fromUrls,
     allowedDomains: args.allowDomains,
     allowPrivateHosts: args.allowPrivateHosts,
     allowMutations: args.allowMutations,
@@ -183,12 +184,12 @@ function rawInput(args: CliArgs, io: CliIo, secrets: Record<string, string>, cho
   // With --mode and --fields the prompt is not parsed; it still names the records for the compile questions.
   if (args.prompt && structured) base.description = args.prompt;
   if (args.mode) base.mode = args.mode;
-  if (args.fields) base.fields = args.fields.map((name) => ({ name }));
+  if (args.fields) base.fields = parseFieldSpecs(args.fields);
   if (args.goal) base.goal = args.goal;
   if (args.maxPages !== undefined) base.maxPages = args.maxPages;
   if (args.maxItems !== undefined) base.maxItems = args.maxItems;
   if (args.followDetails) base.followDetailPages = true;
-  if (args.detailFields) base.detailFields = args.detailFields.map((name) => ({ name }));
+  if (args.detailFields) base.detailFields = parseFieldSpecs(args.detailFields);
   const profile = args.profile ?? (hasSecrets ? "local" : undefined);
   if (profile) base.profile = profile;
   if (args.scriptId) base.scriptId = args.scriptId;

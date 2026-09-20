@@ -7,6 +7,9 @@ export const CHOOSERS = ["agent", "jev", "model", "claude", "codex"] as const;
 export const PROFILES = ["store", "local"] as const;
 export const BROWSERS = ["camoufox", "chromium"] as const;
 export const MODES = ["list", "record"] as const;
+/** R5: output types a field may declare; replay coerces the extracted text to them. */
+export const FIELD_TYPES = ["text", "money", "integer", "number", "boolean", "url"] as const;
+export type FieldType = (typeof FIELD_TYPES)[number];
 
 export const LIMITS = {
   maxPages: 1000,
@@ -54,12 +57,50 @@ const urlField = z.string().url();
 export const FieldSchema = z.object({
   name: z.string().min(1).regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/, "field names are identifiers"),
   description: z.string().optional(),
+  type: z.enum(FIELD_TYPES).optional(),
 });
 
-export const InputSchema = z
+/** `--fields name:type`: a bare name, or a name with one of FIELD_TYPES after a colon. */
+export function parseFieldSpecs(specs: readonly string[]): Array<{ name: string; type?: FieldType }> {
+  return specs.map((spec) => {
+    const colon = spec.indexOf(":");
+    if (colon < 0) return { name: spec };
+    const name = spec.slice(0, colon);
+    const type = spec.slice(colon + 1);
+    if (!(FIELD_TYPES as readonly string[]).includes(type)) {
+      throw new Error(`unknown field type "${type}" in "${spec}"; one of ${FIELD_TYPES.join(", ")}`);
+    }
+    return { name, type: type as FieldType };
+  });
+}
+
+/**
+ * R34: a start entry is a URL, `{ url }` (Apify's request list editor) or
+ * `{ requestsFromUrl }`, a URL answering URLs as newline text or JSON. The
+ * lists are split out into `urlLists` before validation.
+ */
+function splitStartUrls(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || !Array.isArray((raw as { startUrls?: unknown }).startUrls)) return raw;
+  const input = raw as { startUrls: unknown[]; urlLists?: unknown };
+  const startUrls: unknown[] = [];
+  const urlLists: unknown[] = Array.isArray(input.urlLists) ? [...input.urlLists] : [];
+  for (const entry of input.startUrls) {
+    if (entry !== null && typeof entry === "object") {
+      const o = entry as { url?: unknown; requestsFromUrl?: unknown };
+      if (typeof o.requestsFromUrl === "string") urlLists.push(o.requestsFromUrl);
+      else if ("url" in o) startUrls.push(o.url);
+      else startUrls.push(entry);
+    } else startUrls.push(entry);
+  }
+  return { ...input, startUrls, urlLists };
+}
+
+const BaseInputSchema = z
   .object({
     prompt: z.string().min(1).optional(),
-    startUrls: z.array(urlField).min(1).optional(),
+    startUrls: z.array(urlField).optional(),
+    /** URLs answering a list of URLs (R34); merged into the start URLs at run time. */
+    urlLists: z.array(urlField).default([]),
     mode: z.enum(MODES).optional(),
     description: z.string().optional(),
     fields: z.array(FieldSchema).optional(),
@@ -82,8 +123,16 @@ export const InputSchema = z
     headed: z.boolean().default(false),
   })
   .superRefine((input, ctx) => {
-    if (!input.prompt && !input.startUrls) {
+    if (!input.prompt && !input.startUrls && input.urlLists.length === 0) {
       ctx.addIssue({ code: "custom", path: ["startUrls"], message: "startUrls is required when prompt is not given" });
+    }
+    if (input.startUrls && input.startUrls.length === 0 && input.urlLists.length === 0) {
+      ctx.addIssue({ code: "custom", path: ["startUrls"], message: "startUrls needs at least one URL or list" });
+    }
+    for (const [i, url] of input.urlLists.entries()) {
+      if (!isAllowedUrl(url, input.allowPrivateHosts)) {
+        ctx.addIssue({ code: "custom", path: ["urlLists", i], message: `not an allowed public http(s) URL: ${url}` });
+      }
     }
     if (!input.prompt && !input.mode) {
       ctx.addIssue({ code: "custom", path: ["mode"], message: "mode is required when prompt is not given" });
@@ -106,7 +155,9 @@ export const InputSchema = z
     }
   });
 
-export type RunInput = z.infer<typeof InputSchema>;
+export const InputSchema = z.preprocess(splitStartUrls, BaseInputSchema);
+
+export type RunInput = z.infer<typeof BaseInputSchema>;
 export type Chooser = (typeof CHOOSERS)[number];
 
 export function isChooserId(name: string): name is Chooser {
