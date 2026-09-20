@@ -4,13 +4,14 @@ import { NavviError } from "../billing/budget.js";
 import { TEXT_INPUT_CAP, type Chooser, type Question } from "../chooser/chooser.js";
 import { premises } from "../chooser/questions.js";
 import { isRecord } from "../util/text.js";
-import { credentialMessage, findCredential } from "./credentials.js";
+import type { ActorLike } from "../scraper/store.js";
+import { credentialMessage, findCredential, looksLikeCredential } from "./credentials.js";
 import { MODES, PROFILES, parseInput, type RunInput } from "./schema.js";
 
 /**
- * U16 / R1 / KTD11: `prompt` is the only required input. It is parsed once per
- * run into the structured schema through a single `text` question, validated
- * before use, and merged under whatever the caller set explicitly.
+ * U16 / R1 / KTD11: `prompt` is the only required input. A cache miss asks a
+ * single `text` question; the interpretation is validated before persistence
+ * and reuse, and merged under whatever the caller set explicitly.
  *
  * R27: a prompt, goal or description carrying a credential literal is refused
  * before any model call (the detector is ./credentials.ts; `InputSchema`
@@ -119,6 +120,7 @@ function parseStructured(text: string | undefined): Parsed {
     return { ok: false, problems: [`answer is not valid JSON (${err instanceof Error ? err.message : String(err)})`] };
   }
   if (!isRecord(json)) return { ok: false, problems: ["answer is not a JSON object"] };
+  refuseCredentialValues(json);
   const result = StructuredFromPromptSchema.safeParse(normalizeFields(json));
   if (!result.success) {
     return { ok: false, problems: result.error.issues.map((i) => `${i.path.length > 0 ? i.path.map(String).join(".") : "(root)"}: ${i.message}`) };
@@ -145,16 +147,44 @@ export interface PromptToInputResult {
  * (startUrls, maxPages, mode, ...). Invalid output is retried once with the
  * validation errors appended to the premise, then fails with `PromptParseError`.
  */
-export async function promptToInput(prompt: string, base: Partial<RunInput>, chooser: Chooser): Promise<PromptToInputResult> {
+export async function promptToInput(prompt: string, base: Partial<RunInput>, chooser: Chooser, actor?: ActorLike): Promise<PromptToInputResult> {
   const credential = findCredential({ prompt, goal: base.goal, description: base.description });
   if (credential) throw new CredentialInPromptError(credential.kind, credential.where);
+
+  // Validate the caller before inspecting storage; never let cached values hide invalid input.
+  parseInput({ ...base, prompt });
+  refuseCredentialValues(prompt);
+  const key = promptCacheKey(prompt, base.profile ?? "store");
+  const cache = actor ? await actor.openKeyValueStore("prompt-cache") : undefined;
+  if (cache && !base.forceRecompile) {
+    let cached: StructuredFromPrompt | undefined;
+    try {
+      const raw = await cache.getValue<unknown>(key);
+      if (isRecord(raw) && raw.version === PROMPT_CACHE_VERSION && raw.key === key) {
+        const parsed = parseStructured(JSON.stringify(raw.structured));
+        if (parsed.ok) {
+          validateInterpretation(prompt, parsed.structured);
+          cached = parsed.structured;
+        }
+      }
+    } catch {
+      // Malformed or obsolete records are cache misses, not run failures.
+    }
+    if (cached) return { input: merge(prompt, cached, base), structured: cached };
+  }
 
   let problems: string[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const question = buildPromptQuestion(prompt, problems);
     const [answer] = await chooser.ask([question]);
     const parsed = parseStructured(answer?.text);
-    if (parsed.ok) return { input: merge(prompt, parsed.structured, base), structured: parsed.structured };
+    if (parsed.ok) {
+      validateInterpretation(prompt, parsed.structured);
+      const input = merge(prompt, parsed.structured, base);
+      // Store only the interpretation; caller URLs, credentials and runtime policy never enter this record.
+      await cache?.setValue(key, { version: PROMPT_CACHE_VERSION, key, structured: parsed.structured });
+      return { input, structured: parsed.structured };
+    }
     problems = parsed.problems;
   }
   throw new PromptParseError(problems);
@@ -172,4 +202,42 @@ function merge(prompt: string, structured: StructuredFromPrompt, base: Partial<R
     maxPages: structured.paginate === false ? 1 : undefined,
   });
   return parseInput({ ...fromPrompt, ...defined(base), prompt });
+}
+
+/** Bump when normalization/merge semantics change. The schema and parsing premise are hashed too. */
+const PROMPT_CACHE_VERSION = 1;
+export function promptCacheKey(prompt: string, profile: string): string {
+  return "prompt-" + createHash("sha256").update(JSON.stringify({
+    version: PROMPT_CACHE_VERSION, prompt, profile,
+    premise: premises.promptToInput(), schema: STRUCTURED_JSON_SCHEMA, textCap: TEXT_INPUT_CAP,
+  })).digest("hex");
+}
+
+function validateInterpretation(prompt: string, structured: StructuredFromPrompt): void {
+  // Validate before explicit overrides can conceal an unsafe model-derived goal or description.
+  merge(prompt, structured, {});
+}
+
+/** Inspect original model strings before schema parsing can discard extra properties. */
+function refuseCredentialValues(value: unknown, path: string[] = []): void {
+  if (typeof value === "string") {
+    const kind = looksLikeCredential(value);
+    if (kind) throw new z.ZodError([{ code: "custom", path, message: credentialMessage(kind, path.join(".") || "prompt") }]);
+    for (const match of value.matchAll(/https?:\/\/[^\s]+/giu)) {
+      let url: URL;
+      try { url = new URL(match[0]); } catch { continue; }
+      if (url.username || url.password || [...url.searchParams.keys()].some((key) => /^(?:password|passwd|pwd|token|access_token|refresh_token|api[_-]?key|secret|authorization)$/i.test(key))) {
+        throw new z.ZodError([{ code: "custom", path, message: credentialMessage("URL credential", path.join(".") || "prompt") }]);
+      }
+    }
+  } else if (Array.isArray(value)) {
+    value.forEach((item, index) => refuseCredentialValues(item, [...path, String(index)]));
+  } else if (isRecord(value)) {
+    Object.entries(value).forEach(([key, item]) => {
+      if (/^(?:password|passwd|pwd|token|access_token|refresh_token|api[_-]?key|secret|authorization)$/i.test(key) && typeof item === "string" && item && !item.startsWith("{{secret:")) {
+        throw new z.ZodError([{ code: "custom", path: [...path, key], message: credentialMessage("credential value", [...path, key].join(".")) }]);
+      }
+      refuseCredentialValues(item, [...path, key]);
+    });
+  }
 }

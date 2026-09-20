@@ -537,3 +537,20 @@ describe("built binary", () => {
     expect(version.trim()).toBe("3.0.0");
   }, 150_000);
 });
+
+
+describe("persisted plain-English CLI replay", () => {
+  it("repeats the same command with zero chooser questions and verified extracted rows", async () => {
+    const storage = storageFor("prompt-replay");
+    const structured = JSON.stringify({ mode: "record", description: "pharmacy product", fields: ["name", "laboratory", "price", "stock"].map((name) => ({ name })) });
+    const args = ["get name laboratory price and stock for each product", "--allow-private-host", "127.0.0.1", "--browser", "chromium", "--chooser", "agent", "--agent-mode", "stdio", "--storage", storage, ...productUrls()];
+    const first = scriptedAgent({ "prompt-": structured });
+    expect(await main(args, makeIo({ stdin: first.stdin, stdout: first.stdout }))).toBe(0);
+    expect(first.batches.flat().filter((q) => q.kind === "text")).toHaveLength(1);
+    const second = scriptedAgent();
+    const io = makeIo({ stdin: second.stdin, stdout: second.stdout });
+    expect(await main(args, io)).toBe(0);
+    expect(second.batches).toHaveLength(0);
+    expectTwelveProducts(JSON.parse(second.stdout.text));
+  }, 60_000);
+});
