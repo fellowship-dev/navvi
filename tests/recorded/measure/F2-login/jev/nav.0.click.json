@@ -1,0 +1,12 @@
+{
+  "id": "nav.0.click",
+  "index": 0,
+  "probabilities": [
+    0.8,
+    0
+  ],
+  "kind": "choice",
+  "inputTokens": 528,
+  "outputTokens": 60,
+  "chooser": "jev"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "field.location",
+  "kind": "choice",
+  "index": 3,
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "chooser": "agent"
+}

@@ -222,13 +222,186 @@ export const AE15: Scenario = {
   },
 };
 
-/** The fixture set, in run order. */
-export const SCENARIOS: readonly Scenario[] = [AE1, AE7, AE8, AE15];
+// ---------------------------------------------------------------- complex flows (2026-09-19)
 
-export const LIVE_SITES = {
-  "python.org": { url: "https://www.python.org/jobs/", fields: ["title", "company", "location", "link"], description: "python job listing" },
-  hackernews: { url: "https://news.ycombinator.com/", fields: ["title", "link", "points"], description: "hacker news front page" },
-} as const;
+/**
+ * Flows with navigation and forms, not only URL lists: a search form to its
+ * results, a login to an account list, a category link, pagination, detail
+ * pages. Each has an expected field map so correctness is a fraction. Their
+ * recorded answers live under `tests/recorded/flows/<name>/` (one fixture per
+ * scenario: navigation, text and compile batches together).
+ */
+
+const RESULT_FIELDS = ["title", "company", "link"] as const;
+const FLOW_JOB_FIELDS = ["title", "company", "location", "link"] as const;
+const DETAIL_LIST_FIELDS = ["title", "company"] as const;
+const DETAIL_FIELDS = ["description"] as const;
+
+const jobLink = (baseUrl: string, row: Row): boolean => new RegExp(`^${baseUrl}/fixtures/jobs/\\d+\\.html$`).test(String(row.link));
+
+export const FLOW_SEARCH: Scenario = {
+  id: "F1-search",
+  title: "search form to results: type the query, submit, compile the results list",
+  fields: RESULT_FIELDS,
+  expectedRows: 6,
+  minFieldsCorrect: 1,
+  expectHealing: false,
+  live: false,
+  recordedFixture: () => "flows/search",
+  async run(ctx) {
+    const summary = await run(
+      baseInput({ startUrls: [`${ctx.server.baseUrl}/fixtures/search-form.html`], goal: "search for python jobs", mode: "list", fields: F(RESULT_FIELDS), description: "job search result" }),
+      deps(ctx),
+    );
+    return { summaries: [summary], rows: await datasetRows(ctx.actor) };
+  },
+  cellOk: (row, field, { baseUrl }) => (field === "link" ? jobLink(baseUrl, row) : row[field] != null),
+};
+
+export const FLOW_LOGIN: Scenario = {
+  id: "F2-login",
+  title: "login to an account page: secret username and password, submit, compile the orders list",
+  fields: LOGIN_FIELDS,
+  expectedRows: 5,
+  minFieldsCorrect: 1,
+  expectHealing: false,
+  live: false,
+  recordedFixture: () => "flows/login",
+  async run(ctx) {
+    const summary = await run(
+      baseInput({
+        startUrls: [`${ctx.server.baseUrl}/login/`],
+        goal: "log in with {{secret:username}} and {{secret:password}}, then open the orders",
+        mode: "list",
+        fields: F(LOGIN_FIELDS),
+        description: "order",
+        profile: "local",
+      }),
+      deps(ctx, { ...ctx.env, NAVVI_SECRET_USERNAME: "max@example.com", NAVVI_SECRET_PASSWORD: MEASURE_LOGIN_PASSWORD }),
+    );
+    return { summaries: [summary], rows: await datasetRows(ctx.actor) };
+  },
+  cellOk: (row, field) => (field === "total" ? /^\$ [\d.]+$/.test(String(row.total)) : /^Order #\d+$/.test(String(row.order))),
+};
+
+export const FLOW_CATEGORY: Scenario = {
+  id: "F3-category",
+  title: "category page: open the Python category, compile the listing behind it",
+  fields: FLOW_JOB_FIELDS,
+  expectedRows: 25,
+  minFieldsCorrect: 1,
+  expectHealing: false,
+  live: false,
+  recordedFixture: () => "flows/category",
+  async run(ctx) {
+    const summary = await run(
+      baseInput({ startUrls: [`${ctx.server.baseUrl}/fixtures/categories.html`], goal: "open the Python category", mode: "list", fields: F(FLOW_JOB_FIELDS), description: "python job listing" }),
+      deps(ctx),
+    );
+    return { summaries: [summary], rows: await datasetRows(ctx.actor) };
+  },
+  cellOk: (row, field, { baseUrl }) => (field === "link" ? jobLink(baseUrl, row) : row[field] != null),
+};
+
+export const FLOW_PAGINATE: Scenario = {
+  id: "F4-paginate",
+  title: "pagination: compile the next link, follow three pages, stop on the empty ones",
+  fields: FLOW_JOB_FIELDS,
+  expectedRows: 14,
+  minFieldsCorrect: 1,
+  expectHealing: false,
+  live: false,
+  recordedFixture: () => "flows/paginate",
+  async run(ctx) {
+    const summary = await run(
+      baseInput({ startUrls: [`${ctx.server.baseUrl}/fixtures/python-jobs-1.html`], mode: "list", fields: F(FLOW_JOB_FIELDS), description: "python job listing", paginate: true }),
+      deps(ctx),
+    );
+    return { summaries: [summary], rows: await datasetRows(ctx.actor) };
+  },
+  cellOk: (row, field, { baseUrl }) => (field === "link" ? jobLink(baseUrl, row) : row[field] != null),
+};
+
+export const FLOW_DETAIL: Scenario = {
+  id: "F5-detail",
+  title: "detail pages: compile the per-item link, then the description on three detail pages, merge into 25 rows",
+  fields: [...DETAIL_LIST_FIELDS, ...DETAIL_FIELDS],
+  expectedRows: 25,
+  minFieldsCorrect: 1,
+  expectHealing: false,
+  live: false,
+  recordedFixture: () => "flows/detail",
+  async run(ctx) {
+    const summary = await run(
+      baseInput({
+        startUrls: [`${ctx.server.baseUrl}/fixtures/python-jobs.html`],
+        mode: "list",
+        fields: F(DETAIL_LIST_FIELDS),
+        detailFields: F(DETAIL_FIELDS),
+        followDetailPages: true,
+        paginate: false,
+        description: "python job listing",
+        maxPages: 30,
+      }),
+      deps(ctx),
+    );
+    return { summaries: [summary], rows: await datasetRows(ctx.actor) };
+  },
+};
+
+export const FLOWS: readonly Scenario[] = [FLOW_SEARCH, FLOW_LOGIN, FLOW_CATEGORY, FLOW_PAGINATE, FLOW_DETAIL];
+
+/** The fixture set, in run order. */
+export const SCENARIOS: readonly Scenario[] = [AE1, AE7, AE8, AE15, ...FLOWS];
+
+interface LiveSiteSpec {
+  url: string;
+  fields: readonly string[];
+  description: string;
+  /** A navigation goal before the listing (a search, a login, a category). */
+  goal?: string;
+  profile?: "store" | "local";
+  /** Secrets the goal names, as `NAVVI_SECRET_<NAME>` values the harness sets (test accounts only). */
+  secrets?: Record<string, string>;
+  expectedRows: number;
+  maxPages?: number;
+}
+
+/**
+ * Public sites made for scraping practice, one per flow type. scrapethissite
+ * and toscrape.com are sandboxes published for exactly this; python.org and
+ * Hacker News are the plain lists of the first measurement.
+ */
+export const LIVE_SITES: Record<string, LiveSiteSpec> = {
+  "python.org": { url: "https://www.python.org/jobs/", fields: ["title", "company", "location", "link"], description: "python job listing", expectedRows: 20 },
+  hackernews: { url: "https://news.ycombinator.com/", fields: ["title", "link", "points"], description: "hacker news front page", expectedRows: 20 },
+  "scrapethissite-search": {
+    url: "https://www.scrapethissite.com/pages/forms/",
+    goal: "search for teams named Rangers",
+    fields: ["team", "year", "wins"],
+    description: "hockey team season",
+    expectedRows: 15,
+    maxPages: 1,
+  },
+  "quotes-login": {
+    url: "https://quotes.toscrape.com/login",
+    goal: "log in with the username {{secret:username}} and the password {{secret:password}}",
+    profile: "local",
+    secrets: { USERNAME: "navvi", PASSWORD: "navvi-measure" },
+    fields: ["quote", "author"],
+    description: "quote",
+    expectedRows: 10,
+    maxPages: 1,
+  },
+  "books-category": {
+    url: "https://books.toscrape.com/",
+    goal: "open the Travel category",
+    fields: ["title", "price"],
+    description: "book",
+    expectedRows: 11,
+    maxPages: 1,
+  },
+};
 
 export type LiveSite = keyof typeof LIVE_SITES;
 
@@ -236,20 +409,26 @@ export function isLiveSite(name: string): name is LiveSite {
   return Object.hasOwn(LIVE_SITES, name);
 }
 
-/** One AE1-like list run against a real site: at least 20 rows with every field filled. */
+/** One list run against a real site, with its navigation goal when the flow has one: the expected rows with every field filled. */
 export function liveScenario(site: LiveSite): Scenario {
-  const { url, fields, description } = LIVE_SITES[site];
+  const spec = LIVE_SITES[site]!;
+  const { url, fields, description } = spec;
   return {
     id: `live:${site}`,
-    title: `${url} list page over the network`,
+    title: `${url}${spec.goal ? ` then "${spec.goal}"` : ""} over the network`,
     fields,
-    expectedRows: 20,
+    expectedRows: spec.expectedRows,
     minFieldsCorrect: 0.9,
     expectHealing: false,
     live: true,
     recordedFixture: null,
     async run(ctx) {
-      const summary = await run({ browser: "chromium", startUrls: [url], mode: "list", fields: F(fields), description, maxPages: 1 }, deps(ctx));
+      const env = { ...ctx.env };
+      for (const [name, value] of Object.entries(spec.secrets ?? {})) env[`NAVVI_SECRET_${name}`] = value;
+      const input: Record<string, unknown> = { browser: "chromium", startUrls: [url], mode: "list", fields: F(fields), description, maxPages: spec.maxPages ?? 1 };
+      if (spec.goal) input.goal = spec.goal;
+      if (spec.profile) input.profile = spec.profile;
+      const summary = await run(input, deps(ctx, env));
       return { summaries: [summary], rows: await datasetRows(ctx.actor) };
     },
   };

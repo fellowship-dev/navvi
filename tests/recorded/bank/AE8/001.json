@@ -21,7 +21,7 @@
           "main/section/h2 = Productos relacionados",
           "main/section/ul/li/a = Losartán 50 mg x 30 comprimidos"
         ],
-        "state": "Healing on http://127.0.0.1:55170/demo/pharmacy/producto/amoxicilina-500-mg.html\nFields whose compiled selectors no longer resolve: name, laboratory, price, stock\nEarlier name values: \"Amoxicilina 500 mg x 21 cápsulas\" | \"Atorvastatina 20 mg x 30 comprimidos\" | \"Clotrimazol 1% crema 20 g\"\nEarlier laboratory values: \"Bagó\" | \"Abbott\" | \"Bayer\"\nEarlier price values: \"$ 6.990\" | \"$ 12.990\" | \"$ 5.290\"\nEarlier stock values: \"Disponible\" | \"Disponible\" | \"Disponible\"",
+        "state": "Healing on http://127.0.0.1:56321/demo/pharmacy/producto/amoxicilina-500-mg.html\nFields whose compiled selectors no longer resolve: name, laboratory, price, stock\nEarlier name values: \"Amoxicilina 500 mg x 21 cápsulas\" | \"Atorvastatina 20 mg x 30 comprimidos\" | \"Clotrimazol 1% crema 20 g\"\nEarlier laboratory values: \"Bagó\" | \"Abbott\" | \"Bayer\"\nEarlier price values: \"$ 6.990\" | \"$ 12.990\" | \"$ 5.290\"\nEarlier stock values: \"Disponible\" | \"Disponible\" | \"Disponible\"",
         "context": {
           "decision": "heal_field_value",
           "field": {
@@ -34,7 +34,7 @@
           "shape": "text",
           "shared": {
             "healing": "the compiled selectors no longer resolve on this page",
-            "page": "http://127.0.0.1:55170/demo/pharmacy/producto/amoxicilina-500-mg.html",
+            "page": "http://127.0.0.1:56321/demo/pharmacy/producto/amoxicilina-500-mg.html",
             "mode": "record",
             "fields": [
               "name",
@@ -166,7 +166,7 @@
           "main/section/ul/li/span = Sin stock",
           "main/section/ul/li/a = Metformina 850 mg x 60 comprimidos"
         ],
-        "state": "Healing on http://127.0.0.1:55170/demo/pharmacy/producto/amoxicilina-500-mg.html\nFields whose compiled selectors no longer resolve: name, laboratory, price, stock\nEarlier name values: \"Amoxicilina 500 mg x 21 cápsulas\" | \"Atorvastatina 20 mg x 30 comprimidos\" | \"Clotrimazol 1% crema 20 g\"\nEarlier laboratory values: \"Bagó\" | \"Abbott\" | \"Bayer\"\nEarlier price values: \"$ 6.990\" | \"$ 12.990\" | \"$ 5.290\"\nEarlier stock values: \"Disponible\" | \"Disponible\" | \"Disponible\"",
+        "state": "Healing on http://127.0.0.1:56321/demo/pharmacy/producto/amoxicilina-500-mg.html\nFields whose compiled selectors no longer resolve: name, laboratory, price, stock\nEarlier name values: \"Amoxicilina 500 mg x 21 cápsulas\" | \"Atorvastatina 20 mg x 30 comprimidos\" | \"Clotrimazol 1% crema 20 g\"\nEarlier laboratory values: \"Bagó\" | \"Abbott\" | \"Bayer\"\nEarlier price values: \"$ 6.990\" | \"$ 12.990\" | \"$ 5.290\"\nEarlier stock values: \"Disponible\" | \"Disponible\" | \"Disponible\"",
         "context": {
           "decision": "heal_field_value",
           "field": {
@@ -179,7 +179,7 @@
           "shape": "text",
           "shared": {
             "healing": "the compiled selectors no longer resolve on this page",
-            "page": "http://127.0.0.1:55170/demo/pharmacy/producto/amoxicilina-500-mg.html",
+            "page": "http://127.0.0.1:56321/demo/pharmacy/producto/amoxicilina-500-mg.html",
             "mode": "record",
             "fields": [
               "name",
@@ -311,7 +311,7 @@
           "main/article/div/p/span = FA-0005",
           "main/article/div/div/p = Amoxicilina 500 mg de Bagó. Medicamento de venta directa. L…"
         ],
-        "state": "Healing on http://127.0.0.1:55170/demo/pharmacy/producto/amoxicilina-500-mg.html\nFields whose compiled selectors no longer resolve: name, laboratory, price, stock\nEarlier name values: \"Amoxicilina 500 mg x 21 cápsulas\" | \"Atorvastatina 20 mg x 30 comprimidos\" | \"Clotrimazol 1% crema 20 g\"\nEarlier laboratory values: \"Bagó\" | \"Abbott\" | \"Bayer\"\nEarlier price values: \"$ 6.990\" | \"$ 12.990\" | \"$ 5.290\"\nEarlier stock values: \"Disponible\" | \"Disponible\" | \"Disponible\"",
+        "state": "Healing on http://127.0.0.1:56321/demo/pharmacy/producto/amoxicilina-500-mg.html\nFields whose compiled selectors no longer resolve: name, laboratory, price, stock\nEarlier name values: \"Amoxicilina 500 mg x 21 cápsulas\" | \"Atorvastatina 20 mg x 30 comprimidos\" | \"Clotrimazol 1% crema 20 g\"\nEarlier laboratory values: \"Bagó\" | \"Abbott\" | \"Bayer\"\nEarlier price values: \"$ 6.990\" | \"$ 12.990\" | \"$ 5.290\"\nEarlier stock values: \"Disponible\" | \"Disponible\" | \"Disponible\"",
         "context": {
           "decision": "heal_field_value",
           "field": {
@@ -324,7 +324,7 @@
           "shape": "money",
           "shared": {
             "healing": "the compiled selectors no longer resolve on this page",
-            "page": "http://127.0.0.1:55170/demo/pharmacy/producto/amoxicilina-500-mg.html",
+            "page": "http://127.0.0.1:56321/demo/pharmacy/producto/amoxicilina-500-mg.html",
             "mode": "record",
             "fields": [
               "name",
@@ -457,7 +457,7 @@
           "main/section/ul/li/span = Sin stock",
           "main/section/ul/li/a = Metformina 850 mg x 60 comprimidos"
         ],
-        "state": "Healing on http://127.0.0.1:55170/demo/pharmacy/producto/amoxicilina-500-mg.html\nFields whose compiled selectors no longer resolve: name, laboratory, price, stock\nEarlier name values: \"Amoxicilina 500 mg x 21 cápsulas\" | \"Atorvastatina 20 mg x 30 comprimidos\" | \"Clotrimazol 1% crema 20 g\"\nEarlier laboratory values: \"Bagó\" | \"Abbott\" | \"Bayer\"\nEarlier price values: \"$ 6.990\" | \"$ 12.990\" | \"$ 5.290\"\nEarlier stock values: \"Disponible\" | \"Disponible\" | \"Disponible\"",
+        "state": "Healing on http://127.0.0.1:56321/demo/pharmacy/producto/amoxicilina-500-mg.html\nFields whose compiled selectors no longer resolve: name, laboratory, price, stock\nEarlier name values: \"Amoxicilina 500 mg x 21 cápsulas\" | \"Atorvastatina 20 mg x 30 comprimidos\" | \"Clotrimazol 1% crema 20 g\"\nEarlier laboratory values: \"Bagó\" | \"Abbott\" | \"Bayer\"\nEarlier price values: \"$ 6.990\" | \"$ 12.990\" | \"$ 5.290\"\nEarlier stock values: \"Disponible\" | \"Disponible\" | \"Disponible\"",
         "context": {
           "decision": "heal_field_value",
           "field": {
@@ -470,7 +470,7 @@
           "shape": "text",
           "shared": {
             "healing": "the compiled selectors no longer resolve on this page",
-            "page": "http://127.0.0.1:55170/demo/pharmacy/producto/amoxicilina-500-mg.html",
+            "page": "http://127.0.0.1:56321/demo/pharmacy/producto/amoxicilina-500-mg.html",
             "mode": "record",
             "fields": [
               "name",

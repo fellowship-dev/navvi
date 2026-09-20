@@ -2,11 +2,11 @@
   "id": "heal.step.2",
   "index": 0,
   "probabilities": [
-    0.58,
-    0.01
+    0.84,
+    0
   ],
   "kind": "choice",
-  "inputTokens": 441,
+  "inputTokens": 583,
   "outputTokens": 47,
   "chooser": "jev"
 }

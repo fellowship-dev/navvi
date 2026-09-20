@@ -83,6 +83,15 @@ export interface EvaluationQuestionMapping {
 /** Question id of the presence gate that accompanies a gated choice. */
 export const gateId = (id: string): string => `${id}.present`;
 
+/**
+ * A gated choice stands when the value is on the page and the chosen candidate
+ * is it: P(present) x P(choice) at or above this. Measured on the AE8 healing
+ * batches (docs/jev-hillclimb.md, step 6): present fields score 0.37 to 0.49,
+ * the out-of-stock price 0.07; a plain P(present) < 0.5 veto flipped the
+ * stock field one run in five at 0.50 to 0.55.
+ */
+export const GATE_JOINT_THRESHOLD = 0.2;
+
 /** The question's own structured facts: its context without the batch-wide `shared` part. */
 function ownContext(q: Question): { [key: string]: JsonValue } | undefined {
   if (!q.context) return undefined;
@@ -207,9 +216,10 @@ export class JevChooser extends BaseChooser {
         const position = keys.indexOf(answer.choice);
         const probabilities = answer.probabilities ? keys.slice(0, options.length).map((k) => answer.probabilities?.[k] ?? 0) : undefined;
         let index = position < 0 || position >= options.length ? null : position;
-        if (gated.has(q.id)) {
+        if (gated.has(q.id) && index !== null) {
           const gate = result.answers[gateId(q.id)];
-          if (gate?.type === "boolean" && gate.probability < 0.5) index = null;
+          const chosen = answer.probabilities?.[answer.choice] ?? 1;
+          if (gate?.type === "boolean" && gate.probability * chosen < GATE_JOINT_THRESHOLD) index = null;
         }
         return { id: q.id, index, probabilities };
       }

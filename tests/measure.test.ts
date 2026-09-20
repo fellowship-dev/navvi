@@ -18,7 +18,7 @@ let rows: MeasurementRow[];
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "navvi-measure-"));
   rows = await runMeasurements({ choosers: ["agent", "jev", "model"], offline: true, env: {}, log: () => undefined });
-}, 180_000);
+}, 300_000);
 
 afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
@@ -33,7 +33,7 @@ const byScenario = (chooser: string, scenario: string): MeasurementRow => {
 describe("offline harness run", () => {
   it("writes one row per scenario for the agent chooser and skips jev and model with a named reason when no key is set", () => {
     const ids = SCENARIOS.map((s) => s.id);
-    expect(ids).toEqual(["AE1", "AE7", "AE8", "AE15"]);
+    expect(ids).toEqual(["AE1", "AE7", "AE8", "AE15", "F1-search", "F2-login", "F3-category", "F4-paginate", "F5-detail"]);
     const agent = rows.filter((r) => r.chooser === "agent");
     expect(agent.map((r) => r.scenario)).toEqual(ids);
     for (const row of agent) {
@@ -52,7 +52,19 @@ describe("offline harness run", () => {
         expect(row.skipped).toMatch(/no key/);
       }
     }
-    expect(rows).toHaveLength(12);
+    expect(rows).toHaveLength(27);
+  });
+
+  it("the complex flows fill every expected cell from the recorded answers: search 6x3, login 5x2, category 25x4, pagination 14x4, detail 25x3", () => {
+    const expected: Record<string, number> = { "F1-search": 18, "F2-login": 10, "F3-category": 100, "F4-paginate": 56, "F5-detail": 75 };
+    for (const [scenario, cells] of Object.entries(expected)) {
+      const row = byScenario("agent", scenario);
+      expect(row.cells, scenario).toEqual({ correct: cells, expected: cells });
+      expect(row.status, scenario).toBe("ok");
+    }
+    // navigation flows ask the operation, its targets, the text value and the done check before the compile questions
+    expect(byScenario("agent", "F1-search").questions).toBe(15);
+    expect(byScenario("agent", "F2-login").questions).toBe(15);
   });
 
   it("AE8 (v1 then v2 under the same URLs) reports at least one healing event and fieldsCorrect >= 0.9", () => {
@@ -133,7 +145,7 @@ describe("cli", () => {
   it("an unknown chooser fails with a clear error listing every chooser", () => {
     expect(() => parseArgs(["--choosers", "agent,gpt"])).toThrow(/unknown chooser "gpt".*agent, jev, model, claude, codex/);
     expect(parseArgs([]).choosers).toEqual(["agent"]);
-    expect(parseArgs(["--choosers", "jev,model", "--live", "hackernews", "--out", "x.md"])).toMatchObject({ choosers: ["jev", "model"], live: "hackernews", out: "x.md" });
+    expect(parseArgs(["--choosers", "jev,model", "--live", "hackernews", "--out", "x.md"])).toMatchObject({ choosers: ["jev", "model"], live: ["hackernews"], out: "x.md" });
     expect(() => parseArgs(["--live", "example.com"])).toThrow(/python\.org|hackernews/);
   });
 });

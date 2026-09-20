@@ -1,22 +1,22 @@
 {
   "id": "heal.laboratory",
-  "index": null,
+  "index": 0,
   "probabilities": [
-    0.01,
-    0.1,
-    0.22,
+    0.56,
     0,
     0.01,
     0,
     0,
-    0.19,
+    0,
+    0,
+    0.43,
     0,
     0,
     0,
     0
   ],
   "kind": "choice",
-  "inputTokens": 551,
-  "outputTokens": 134,
+  "inputTokens": 1688,
+  "outputTokens": 147,
   "chooser": "jev"
 }

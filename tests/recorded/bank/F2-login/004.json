@@ -1,0 +1,43 @@
+{
+  "scenario": "F2-login",
+  "batch": 4,
+  "entries": [
+    {
+      "question": {
+        "id": "nav.3.done",
+        "kind": "boolean",
+        "premise": "Judging only by the visible text and controls in the state, is the goal \"log in with {{secret:username}} and {{secret:password}}, then open the orders\" already visibly achieved on this page? Every requirement must be evidenced; a link that would lead there is not enough.",
+        "state": "GOAL: log in with {{secret:username}} and {{secret:password}}, then open the orders\nURL: http://127.0.0.1:56321/login/account.html\nTITLE: Acme Orders - Your orders\nVISIBLE TEXT:\nOrders\n\nSigned in as customer. Log out\n\nOrder #1001 Shipped $ 45.990\nOrder #1002 Delivered $ 12.500\nOrder #1003 Processing $ 89.900\nOrder #1004 Delivered $ 7.990\nOrder #1005 Cancelled $ 0\nCONTROLS (0)\nRECENT ACTIONS (oldest first)\n- type textbox \"Email\" = \"{{secret:username}}\" (page changed)\n- type textbox \"Password\" = \"{{secret:password}}\" (no visible change)\n- click button \"Log in\" (page changed)",
+        "context": {
+          "decision": "goal_achieved",
+          "shared": {
+            "goal": "log in with {{secret:username}} and {{secret:password}}, then open the orders",
+            "page": {
+              "url": "http://127.0.0.1:56321/login/account.html",
+              "title": "Acme Orders - Your orders",
+              "visible_text": "Orders\n\nSigned in as customer. Log out\n\nOrder #1001 Shipped $ 45.990\nOrder #1002 Delivered $ 12.500\nOrder #1003 Processing $ 89.900\nOrder #1004 Delivered $ 7.990\nOrder #1005 Cancelled $ 0"
+            },
+            "controls": [],
+            "recent_actions": [
+              {
+                "action": "type textbox \"Email\"",
+                "page_changed": true,
+                "text": "{{secret:username}}"
+              },
+              {
+                "action": "type textbox \"Password\"",
+                "page_changed": false,
+                "text": "{{secret:password}}"
+              },
+              {
+                "action": "click button \"Log in\"",
+                "page_changed": true
+              }
+            ]
+          }
+        }
+      },
+      "gold": 1
+    }
+  ]
+}

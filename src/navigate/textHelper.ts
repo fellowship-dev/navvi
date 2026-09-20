@@ -48,13 +48,26 @@ export function policyControl(c: SnapshotControl): Control {
 }
 
 /** KTD11: the JSON must contain exactly one key, `text`, a non-empty string (or null for "missing"). */
+/** Commentary rather than a value (R24): sentence punctuation followed by a space, a line break, or a long run of words. */
+function looksLikeProse(text: string): boolean {
+  return /[.!?:;]\s|\n/.test(text) || text.split(/\s+/).length > 8;
+}
+
+/**
+ * The helper's answer is `{"text": ...}`. A chooser that answers with the bare
+ * value instead (Claude Code did, 2026-09-19: `python jobs` for the query
+ * field) is read as that value: the contract is the value, not the envelope.
+ */
 export function parseTextAnswer(raw: string): { text: string } | { text: null } | { error: string } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return { error: "not valid JSON" };
+    const bare = raw.trim();
+    if (!bare || bare.startsWith("{") || bare.startsWith("[") || looksLikeProse(bare)) return { error: "not valid JSON" };
+    parsed = { text: bare };
   }
+  if (typeof parsed === "string") parsed = { text: parsed };
   if (!isRecord(parsed)) return { error: "not a JSON object" };
   const keys = Object.keys(parsed);
   if (keys.length !== 1 || keys[0] !== "text") return { error: `keys ${JSON.stringify(keys)} instead of exactly "text"` };

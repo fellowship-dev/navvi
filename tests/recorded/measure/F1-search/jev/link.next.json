@@ -1,0 +1,11 @@
+{
+  "id": "link.next",
+  "index": null,
+  "probabilities": [
+    0.01
+  ],
+  "kind": "choice",
+  "inputTokens": 396,
+  "outputTokens": 47,
+  "chooser": "jev"
+}

@@ -543,14 +543,14 @@
         "kind": "choice",
         "premise": "Which control leads to the next page of the same listing? Pick none when this is the last page or no control does.",
         "options": [
-          "\"Previous\" -> http://127.0.0.1:55170/fixtures/python-jobs.html?page=0",
-          "\"Next\" -> http://127.0.0.1:55170/fixtures/python-jobs.html?page=2",
-          "\"Python Jobs\" -> http://127.0.0.1:55170/fixtures/python-jobs.html",
-          "\"About\" -> http://127.0.0.1:55170/fixtures/python-jobs.html#about",
-          "\"RSS\" -> http://127.0.0.1:55170/fixtures/python-jobs.html#rss",
-          "\"Remote\" -> http://127.0.0.1:55170/fixtures/python-jobs.html?type=remote",
-          "\"On-site\" -> http://127.0.0.1:55170/fixtures/python-jobs.html?type=onsite",
-          "\"Search\" -> http://127.0.0.1:55170/fixtures/search-form.html"
+          "\"Previous\" -> http://127.0.0.1:56321/fixtures/python-jobs.html?page=0",
+          "\"Next\" -> http://127.0.0.1:56321/fixtures/python-jobs.html?page=2",
+          "\"Python Jobs\" -> http://127.0.0.1:56321/fixtures/python-jobs.html",
+          "\"About\" -> http://127.0.0.1:56321/fixtures/python-jobs.html#about",
+          "\"RSS\" -> http://127.0.0.1:56321/fixtures/python-jobs.html#rss",
+          "\"Remote\" -> http://127.0.0.1:56321/fixtures/python-jobs.html?type=remote",
+          "\"On-site\" -> http://127.0.0.1:56321/fixtures/python-jobs.html?type=onsite",
+          "\"Search\" -> http://127.0.0.1:56321/fixtures/search-form.html"
         ],
         "state": "Records: python job listing\nFields: title, company, location, date, link\nSamples: list mode, 3 sample rows of ul.jobs > li.job\nSample 1: Senior Python Engineer II Anaconda Remote 28 Aug 2026\nSample 2: Backend Developer (Django) Canonical Berlin, Germany 27 Aug 2026\nSample 3: Data Engineer Mozilla London, UK 26 Aug 2026",
         "context": {
@@ -585,35 +585,35 @@
         "optionContext": [
           {
             "text": "Previous",
-            "href": "http://127.0.0.1:55170/fixtures/python-jobs.html?page=0"
+            "href": "http://127.0.0.1:56321/fixtures/python-jobs.html?page=0"
           },
           {
             "text": "Next",
-            "href": "http://127.0.0.1:55170/fixtures/python-jobs.html?page=2"
+            "href": "http://127.0.0.1:56321/fixtures/python-jobs.html?page=2"
           },
           {
             "text": "Python Jobs",
-            "href": "http://127.0.0.1:55170/fixtures/python-jobs.html"
+            "href": "http://127.0.0.1:56321/fixtures/python-jobs.html"
           },
           {
             "text": "About",
-            "href": "http://127.0.0.1:55170/fixtures/python-jobs.html#about"
+            "href": "http://127.0.0.1:56321/fixtures/python-jobs.html#about"
           },
           {
             "text": "RSS",
-            "href": "http://127.0.0.1:55170/fixtures/python-jobs.html#rss"
+            "href": "http://127.0.0.1:56321/fixtures/python-jobs.html#rss"
           },
           {
             "text": "Remote",
-            "href": "http://127.0.0.1:55170/fixtures/python-jobs.html?type=remote"
+            "href": "http://127.0.0.1:56321/fixtures/python-jobs.html?type=remote"
           },
           {
             "text": "On-site",
-            "href": "http://127.0.0.1:55170/fixtures/python-jobs.html?type=onsite"
+            "href": "http://127.0.0.1:56321/fixtures/python-jobs.html?type=onsite"
           },
           {
             "text": "Search",
-            "href": "http://127.0.0.1:55170/fixtures/search-form.html"
+            "href": "http://127.0.0.1:56321/fixtures/search-form.html"
           }
         ]
       },

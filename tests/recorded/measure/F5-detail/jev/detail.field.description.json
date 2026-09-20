@@ -1,0 +1,17 @@
+{
+  "id": "detail.field.description",
+  "index": 2,
+  "probabilities": [
+    0,
+    0,
+    0.93,
+    0,
+    0.01,
+    0.01,
+    0
+  ],
+  "kind": "choice",
+  "inputTokens": 1029,
+  "outputTokens": 91,
+  "chooser": "jev"
+}

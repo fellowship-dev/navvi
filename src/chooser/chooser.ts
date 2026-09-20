@@ -204,6 +204,8 @@ function validateOne(q: Question, raw: Record<string, unknown>): Answer | string
       return answer;
     }
     case "text": {
+      // A JSON answer given as an object rather than a JSON string is the same answer.
+      if (q.schema !== undefined && isRecord(raw.text)) raw = { ...raw, text: JSON.stringify(raw.text) };
       if (typeof raw.text !== "string") return "text answer is not a string";
       const max = q.maxLength ?? DEFAULT_TEXT_MAX_LENGTH;
       if (raw.text.length > max) return `text answer is ${raw.text.length} characters, over ${max}`;

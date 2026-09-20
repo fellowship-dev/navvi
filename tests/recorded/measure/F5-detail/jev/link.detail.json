@@ -1,0 +1,11 @@
+{
+  "id": "link.detail",
+  "index": 0,
+  "probabilities": [
+    0.51
+  ],
+  "kind": "choice",
+  "inputTokens": 549,
+  "outputTokens": 72,
+  "chooser": "jev"
+}

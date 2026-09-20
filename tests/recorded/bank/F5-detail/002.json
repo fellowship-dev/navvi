@@ -1,0 +1,111 @@
+{
+  "scenario": "F5-detail",
+  "batch": 2,
+  "entries": [
+    {
+      "question": {
+        "id": "detail.field.description",
+        "kind": "choice",
+        "premise": "Which candidate holds the description value on every sample? Pick none when no candidate is right on all samples.",
+        "options": [
+          "main/article.job-detail/h1.title = Senior Python Engineer II | Backend Developer (Django) | Data Engineer",
+          "main/article.job-detail/p.company = Anaconda | Canonical | Mozilla",
+          "main/article.job-detail/p.description = Own the packaging pipeline for conda and lead a team of fou… | Build the Django services behind Ubuntu Pro subscriptions. | Design the telemetry warehouse that powers Firefox release …",
+          "main/article.job-detail/p.apply/a = Apply | Apply | Apply",
+          "main/article.job-detail/p.apply/a/@href = /fixtures/python-jobs.html#apply | /fixtures/python-jobs.html#apply | /fixtures/python-jobs.html#apply",
+          "header/a.brand = Python Jobs | Python Jobs | Python Jobs",
+          "header/a.brand/@href = /fixtures/python-jobs.html | /fixtures/python-jobs.html | /fixtures/python-jobs.html"
+        ],
+        "state": "Records: python job listing\nFields: description\nSamples: record mode, 3 sample pages\nSample 1: http://127.0.0.1:56321/fixtures/jobs/100.html\nSample 2: http://127.0.0.1:56321/fixtures/jobs/101.html\nSample 3: http://127.0.0.1:56321/fixtures/jobs/102.html",
+        "context": {
+          "decision": "field_value",
+          "field": {
+            "name": "description"
+          },
+          "shared": {
+            "records": "python job listing",
+            "mode": "record",
+            "fields": [
+              {
+                "name": "description"
+              }
+            ],
+            "samples": [
+              "http://127.0.0.1:56321/fixtures/jobs/100.html",
+              "http://127.0.0.1:56321/fixtures/jobs/101.html",
+              "http://127.0.0.1:56321/fixtures/jobs/102.html"
+            ]
+          }
+        },
+        "optionContext": [
+          {
+            "path": "main/article.job-detail/h1.title",
+            "shape": "text",
+            "values": [
+              "Senior Python Engineer II",
+              "Backend Developer (Django)",
+              "Data Engineer"
+            ]
+          },
+          {
+            "path": "main/article.job-detail/p.company",
+            "shape": "text",
+            "values": [
+              "Anaconda",
+              "Canonical",
+              "Mozilla"
+            ]
+          },
+          {
+            "path": "main/article.job-detail/p.description",
+            "shape": "text",
+            "values": [
+              "Own the packaging pipeline for conda and lead a team of fou…",
+              "Build the Django services behind Ubuntu Pro subscriptions.",
+              "Design the telemetry warehouse that powers Firefox release …"
+            ]
+          },
+          {
+            "path": "main/article.job-detail/p.apply/a",
+            "shape": "text",
+            "values": [
+              "Apply",
+              "Apply",
+              "Apply"
+            ]
+          },
+          {
+            "path": "main/article.job-detail/p.apply/a/@href",
+            "shape": "url",
+            "values": [
+              "/fixtures/python-jobs.html#apply",
+              "/fixtures/python-jobs.html#apply",
+              "/fixtures/python-jobs.html#apply"
+            ],
+            "attribute": "href"
+          },
+          {
+            "path": "header/a.brand",
+            "shape": "text",
+            "values": [
+              "Python Jobs",
+              "Python Jobs",
+              "Python Jobs"
+            ]
+          },
+          {
+            "path": "header/a.brand/@href",
+            "shape": "url",
+            "values": [
+              "/fixtures/python-jobs.html",
+              "/fixtures/python-jobs.html",
+              "/fixtures/python-jobs.html"
+            ],
+            "attribute": "href"
+          }
+        ]
+      },
+      "gold": 2
+    }
+  ]
+}

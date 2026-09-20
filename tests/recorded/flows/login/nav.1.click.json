@@ -1,0 +1,8 @@
+{
+  "id": "nav.1.click",
+  "kind": "choice",
+  "index": null,
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "chooser": "agent"
+}

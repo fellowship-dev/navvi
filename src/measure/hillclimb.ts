@@ -147,11 +147,28 @@ export async function runHillclimb(options: HillclimbOptions): Promise<Hillclimb
   return report;
 }
 
+/** The operation the gold answer chose for step `n`, from the `nav.<n>.op` entry of the batch. */
+function chosenOperation(file: BankBatch, id: string): string | undefined {
+  const step = /^nav\.(\d+)\./.exec(id)?.[1];
+  if (step === undefined) return undefined;
+  const op = file.entries.find((e) => e.question.id === `nav.${step}.op`);
+  if (!op || op.gold === null) return undefined;
+  return op.question.options?.[op.gold]?.split(":")[0];
+}
+
+/** R11: only the target head of the chosen operation is consumed; the other heads are speculative and never scored. */
+function usedHead(file: BankBatch, id: string): boolean {
+  const head = /^nav\.\d+\.(click|type|select)$/.exec(id)?.[1];
+  if (!head) return true;
+  const op = chosenOperation(file, id);
+  return op === { click: "CLICK", type: "TYPE_TEXT", select: "SELECT" }[head];
+}
+
 function record(file: BankBatch, answers: readonly Answer[], results: Map<string, QuestionResult>, repeat: number): void {
   const byId = new Map(answers.map((a) => [a.id, a]));
   for (const entry of file.entries) {
     const a = byId.get(entry.question.id);
-    if (!a) continue;
+    if (!a || !usedHead(file, entry.question.id)) continue;
     const key = `${file.scenario}/${file.batch}/${entry.question.id}`;
     let r = results.get(key);
     if (!r) {

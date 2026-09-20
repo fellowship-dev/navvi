@@ -1,0 +1,198 @@
+{
+  "scenario": "F2-login",
+  "batch": 6,
+  "entries": [
+    {
+      "question": {
+        "id": "field.order",
+        "kind": "choice",
+        "premise": "Which candidate holds the order value on every sample? Pick none when no candidate is right on all samples.",
+        "options": [
+          "a = Order #1001 | Order #1002 | Order #1003",
+          "a/@href = /login/orders/1001.html | /login/orders/1002.html | /login/orders/1003.html",
+          "span.status = Shipped | Delivered | Processing",
+          "span.total = $ 45.990 | $ 12.500 | $ 89.900"
+        ],
+        "state": "Records: order\nFields: order, total\nSamples: list mode, 3 sample rows of ul.orders > li.order\nSample 1: Order #1001 Shipped $ 45.990\nSample 2: Order #1002 Delivered $ 12.500\nSample 3: Order #1003 Processing $ 89.900",
+        "context": {
+          "decision": "field_value",
+          "field": {
+            "name": "order"
+          },
+          "shared": {
+            "records": "order",
+            "mode": "list",
+            "fields": [
+              {
+                "name": "order"
+              },
+              {
+                "name": "total"
+              }
+            ],
+            "samples": [
+              "Order #1001 Shipped $ 45.990",
+              "Order #1002 Delivered $ 12.500",
+              "Order #1003 Processing $ 89.900"
+            ]
+          }
+        },
+        "optionContext": [
+          {
+            "path": "a",
+            "shape": "text",
+            "values": [
+              "Order #1001",
+              "Order #1002",
+              "Order #1003"
+            ]
+          },
+          {
+            "path": "a/@href",
+            "shape": "url",
+            "values": [
+              "/login/orders/1001.html",
+              "/login/orders/1002.html",
+              "/login/orders/1003.html"
+            ],
+            "attribute": "href"
+          },
+          {
+            "path": "span.status",
+            "shape": "text",
+            "values": [
+              "Shipped",
+              "Delivered",
+              "Processing"
+            ]
+          },
+          {
+            "path": "span.total",
+            "shape": "money",
+            "values": [
+              "$ 45.990",
+              "$ 12.500",
+              "$ 89.900"
+            ]
+          }
+        ]
+      },
+      "gold": 0
+    },
+    {
+      "question": {
+        "id": "field.total",
+        "kind": "choice",
+        "premise": "Which candidate holds the total value on every sample? Pick none when no candidate is right on all samples.",
+        "options": [
+          "a = Order #1001 | Order #1002 | Order #1003",
+          "a/@href = /login/orders/1001.html | /login/orders/1002.html | /login/orders/1003.html",
+          "span.status = Shipped | Delivered | Processing",
+          "span.total = $ 45.990 | $ 12.500 | $ 89.900"
+        ],
+        "state": "Records: order\nFields: order, total\nSamples: list mode, 3 sample rows of ul.orders > li.order\nSample 1: Order #1001 Shipped $ 45.990\nSample 2: Order #1002 Delivered $ 12.500\nSample 3: Order #1003 Processing $ 89.900",
+        "context": {
+          "decision": "field_value",
+          "field": {
+            "name": "total"
+          },
+          "shared": {
+            "records": "order",
+            "mode": "list",
+            "fields": [
+              {
+                "name": "order"
+              },
+              {
+                "name": "total"
+              }
+            ],
+            "samples": [
+              "Order #1001 Shipped $ 45.990",
+              "Order #1002 Delivered $ 12.500",
+              "Order #1003 Processing $ 89.900"
+            ]
+          }
+        },
+        "optionContext": [
+          {
+            "path": "a",
+            "shape": "text",
+            "values": [
+              "Order #1001",
+              "Order #1002",
+              "Order #1003"
+            ]
+          },
+          {
+            "path": "a/@href",
+            "shape": "url",
+            "values": [
+              "/login/orders/1001.html",
+              "/login/orders/1002.html",
+              "/login/orders/1003.html"
+            ],
+            "attribute": "href"
+          },
+          {
+            "path": "span.status",
+            "shape": "text",
+            "values": [
+              "Shipped",
+              "Delivered",
+              "Processing"
+            ]
+          },
+          {
+            "path": "span.total",
+            "shape": "money",
+            "values": [
+              "$ 45.990",
+              "$ 12.500",
+              "$ 89.900"
+            ]
+          }
+        ]
+      },
+      "gold": 3
+    },
+    {
+      "question": {
+        "id": "link.next",
+        "kind": "choice",
+        "premise": "Which control leads to the next page of the same listing? Pick none when this is the last page or no control does.",
+        "options": [
+          "\"Log out\" -> http://127.0.0.1:56321/login/logout"
+        ],
+        "state": "Records: order\nFields: order, total\nSamples: list mode, 3 sample rows of ul.orders > li.order\nSample 1: Order #1001 Shipped $ 45.990\nSample 2: Order #1002 Delivered $ 12.500\nSample 3: Order #1003 Processing $ 89.900",
+        "context": {
+          "decision": "next_page_link",
+          "shared": {
+            "records": "order",
+            "mode": "list",
+            "fields": [
+              {
+                "name": "order"
+              },
+              {
+                "name": "total"
+              }
+            ],
+            "samples": [
+              "Order #1001 Shipped $ 45.990",
+              "Order #1002 Delivered $ 12.500",
+              "Order #1003 Processing $ 89.900"
+            ]
+          }
+        },
+        "optionContext": [
+          {
+            "text": "Log out",
+            "href": "http://127.0.0.1:56321/login/logout"
+          }
+        ]
+      },
+      "gold": null
+    }
+  ]
+}

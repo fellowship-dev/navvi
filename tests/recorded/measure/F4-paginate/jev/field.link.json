@@ -1,0 +1,16 @@
+{
+  "id": "field.link",
+  "index": 1,
+  "probabilities": [
+    0,
+    0.96,
+    0,
+    0,
+    0,
+    0
+  ],
+  "kind": "choice",
+  "inputTokens": 602,
+  "outputTokens": 75,
+  "chooser": "jev"
+}

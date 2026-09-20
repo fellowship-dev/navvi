@@ -1,0 +1,43 @@
+{
+  "scenario": "F4-paginate",
+  "batch": 0,
+  "entries": [
+    {
+      "question": {
+        "id": "group",
+        "kind": "choice",
+        "premise": "Which candidate group holds one python job listing per item, with the title, company, location, link values? Pick none when no candidate does.",
+        "options": [
+          "ul.jobs > li.job (5 items): Senior Python Engineer II Anaconda Remote 2026-08-28 || Backend Developer (Django) Canonical Berlin, Germany 2026-08-27 || Data Engineer Mozilla London, UK 2026-08-26"
+        ],
+        "state": "Records: python job listing\nFields: title, company, location, link\nPage: http://127.0.0.1:56321/fixtures/python-jobs-1.html",
+        "context": {
+          "decision": "list_group",
+          "shared": {
+            "records": "python job listing",
+            "fields": [
+              "title",
+              "company",
+              "location",
+              "link"
+            ],
+            "page": "http://127.0.0.1:56321/fixtures/python-jobs-1.html"
+          }
+        },
+        "optionContext": [
+          {
+            "container": "ul.jobs",
+            "item": "li.job",
+            "item_count": 5,
+            "sample_items": [
+              "Senior Python Engineer II Anaconda Remote 2026-08-28",
+              "Backend Developer (Django) Canonical Berlin, Germany 2026-08-27",
+              "Data Engineer Mozilla London, UK 2026-08-26"
+            ]
+          }
+        ]
+      },
+      "gold": 0
+    }
+  ]
+}

@@ -120,3 +120,16 @@ describe("Jev framing: structured state, instructions and criteria", () => {
     ]);
   });
 });
+
+describe("text helper answers (R24): the value, whatever the envelope", () => {
+  it("reads the JSON envelope, a bare value, and rejects commentary", async () => {
+    const { parseTextAnswer } = await import("../src/navigate/textHelper.js");
+    expect(parseTextAnswer('{"text":"python"}')).toEqual({ text: "python" });
+    expect(parseTextAnswer('{"text":null}')).toEqual({ text: null });
+    expect(parseTextAnswer("python jobs")).toEqual({ text: "python jobs" });
+    expect(parseTextAnswer("New York")).toEqual({ text: "New York" });
+    expect(parseTextAnswer("Sure! Here is the text you should type: python")).toEqual({ error: "not valid JSON" });
+    expect(parseTextAnswer("python\nand more")).toEqual({ error: "not valid JSON" });
+    expect(parseTextAnswer('{"value":"python"}')).toMatchObject({ error: expect.stringContaining("keys") });
+  });
+});

@@ -2,21 +2,21 @@
   "id": "heal.price",
   "index": null,
   "probabilities": [
-    0.06999999999999999,
+    0.35,
+    0.28,
+    0.29,
     0.01,
-    0.04,
-    0.15000000000000002,
+    0.01,
+    0.01,
+    0.01,
+    0.01,
     0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0
+    0.01,
+    0.01,
+    0.01
   ],
   "kind": "choice",
-  "inputTokens": 551,
-  "outputTokens": 134,
+  "inputTokens": 1938,
+  "outputTokens": 149,
   "chooser": "jev"
 }

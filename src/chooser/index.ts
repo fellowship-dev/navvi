@@ -1,7 +1,7 @@
 import { defaultChooser, hasChooserKey, type AvailableClis, type Chooser as ChooserId } from "../input/schema.js";
 import { Budget } from "../billing/budget.js";
 import { AgentChooser, type AgentChooserOptions } from "./agent.js";
-import { CliChooser, HARNESS_LABEL, SIGN_IN_COMMAND, probeCli, type CliChooserOptions, type CliHarness, type CliProbe } from "./cli.js";
+import { CliChooser, HARNESS_LABEL, SIGN_IN_COMMAND, findOnPath, probeCli, type CliChooserOptions, type CliHarness, type CliProbe } from "./cli.js";
 import { JevChooser, type JevChooserOptions } from "./jev.js";
 import { ModelChooser, type ModelChooserOptions } from "./model.js";
 import type { Chooser } from "./chooser.js";
@@ -38,7 +38,8 @@ export function createChooser(options: CreateChooserOptions = {}): Chooser {
     case "agent":
       return new AgentChooser({ ...options.agent, budget, env });
     case "jev": {
-      const text = options.jev?.textFallback ?? (env.ANTHROPIC_API_KEY || env.AI_GATEWAY_API_KEY ? new ModelChooser({ ...options.model, budget, env }) : undefined);
+      // Jev cannot write: text questions (a typed search query) go to a model key when there is one, else to an installed CLI.
+      const text = options.jev?.textFallback ?? textFallbackFor(options, env, budget);
       return new JevChooser({ ...options.jev, apiKey: options.apiKey, budget, env, textFallback: text });
     }
     case "model":
@@ -47,6 +48,14 @@ export function createChooser(options: CreateChooserOptions = {}): Chooser {
     case "codex":
       return new CliChooser(name, { ...options.cli, budget, env });
   }
+}
+
+function textFallbackFor(options: CreateChooserOptions, env: NodeJS.ProcessEnv, budget: Budget): Chooser | undefined {
+  if (env.ANTHROPIC_API_KEY || env.AI_GATEWAY_API_KEY) return new ModelChooser({ ...options.model, budget, env });
+  for (const harness of HARNESS_ORDER) {
+    if (findOnPath(harness, env)) return new CliChooser(harness, { ...options.cli, budget, env });
+  }
+  return undefined;
 }
 
 export interface ResolvedChooser {

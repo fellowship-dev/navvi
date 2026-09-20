@@ -31,7 +31,8 @@ const NETWORK_PROBE_TIMEOUT_MS = 10_000;
 
 export interface MeasureOptions {
   choosers: ChooserId[];
-  live?: LiveSite;
+  /** Live sites to add, in order (`--live a,b` or repeated). */
+  live?: LiveSite[];
   offline: boolean;
   /** Measure a real host agent over stdio instead of the recorded replay (attended). */
   agentLive: boolean;
@@ -41,11 +42,18 @@ export interface MeasureOptions {
   log?: (line: string) => void;
   /** Root of the recorded answers; live runs record under `<root>/measure/`. */
   recordDir?: string;
-  /** Write every question the agent replay answers, with its gold answer, into the question bank. */
+  /**
+   * Write every question batch the `agent` replay answers, with its answer as
+   * gold, into the question bank (docs/jev-hillclimb.md). `--bank-chooser`
+   * names another chooser whose answers seed the bank for review instead.
+   */
   bank?: boolean;
+  bankChooser?: ChooserId;
+  /** Only these scenario ids (default: all). */
+  scenarios?: string[];
 }
 
-const USAGE = `usage: npm run measure -- [--choosers agent,jev,model] [--live <site>] [--offline] [--agent-live] [--bank] [--out docs/measurements.md]`;
+const USAGE = `usage: npm run measure -- [--choosers agent,jev,model] [--scenarios AE1,F1-search] [--live <site>] [--offline] [--agent-live] [--bank] [--out docs/measurements.md]`;
 
 /** Parses the CLI flags; unknown choosers and sites fail with the accepted names. */
 export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): MeasureOptions {
@@ -71,9 +79,10 @@ export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = proc
         break;
       }
       case "--live": {
-        const site = value(flag);
-        if (!isLiveSite(site)) throw new Error(`unknown live site "${site}"; choose from ${Object.keys(LIVE_SITES).join(", ")}`);
-        options.live = site;
+        for (const site of value(flag).split(",").map((s) => s.trim()).filter(Boolean)) {
+          if (!isLiveSite(site)) throw new Error(`unknown live site "${site}"; choose from ${Object.keys(LIVE_SITES).join(", ")}`);
+          options.live = [...new Set([...(options.live ?? []), site])];
+        }
         break;
       }
       case "--offline":
@@ -84,6 +93,16 @@ export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = proc
         break;
       case "--bank":
         options.bank = true;
+        break;
+      case "--bank-chooser": {
+        const name = value(flag);
+        if (!isChooserId(name)) throw new Error(`unknown chooser "${name}"; choose from ${CHOOSERS.join(", ")}`);
+        options.bank = true;
+        options.bankChooser = name;
+        break;
+      }
+      case "--scenarios":
+        options.scenarios = value(flag).split(",").map((s) => s.trim()).filter(Boolean);
         break;
       case "--out":
         options.out = value(flag);
@@ -123,12 +142,13 @@ function fixtureFor(scenario: Scenario, chooser: ChooserId): string {
 function buildChooser(name: ChooserId, scenario: Scenario, options: MeasureOptions): ChooserBuild {
   const { env } = options;
   const dir = options.recordDir ?? MEASURE_RECORD_DIR;
-  const record = (inner: Chooser): MeteredChooser => new MeteredChooser(new RecordingChooser(inner, { fixture: fixtureFor(scenario, name), dir, env }));
+  const bank = (inner: Chooser): Chooser => (options.bank && name === (options.bankChooser ?? "agent") ? new BankingChooser(inner, scenario.id) : inner);
+  const record = (inner: Chooser): MeteredChooser => new MeteredChooser(bank(new RecordingChooser(inner, { fixture: fixtureFor(scenario, name), dir, env })));
   switch (name) {
     case "agent":
       if (options.agentLive) return { chooser: record(createChooser({ chooser: "agent", env })) };
       if (!scenario.recordedFixture) return { skipped: "agent column is a recorded replay; pass --agent-live to measure a host agent on a live site" };
-      return { chooser: new MeteredChooser(options.bank ? new BankingChooser(new RoutedRecordedChooser(scenario.recordedFixture), scenario.id) : new RoutedRecordedChooser(scenario.recordedFixture)) };
+      return { chooser: new MeteredChooser(bank(new RoutedRecordedChooser(scenario.recordedFixture))) };
     case "jev":
       if (!env.AI_GATEWAY_API_KEY && !env.TYPESAFE_API_KEY) return { skipped: "no key (set AI_GATEWAY_API_KEY or TYPESAFE_API_KEY)" };
       return { chooser: record(createChooser({ chooser: "jev", env })) };
@@ -168,9 +188,10 @@ function skippedRow(chooser: ChooserId, scenario: Scenario, reason: string): Mea
 }
 
 async function probeNetwork(site: LiveSite): Promise<string | null> {
+  const url = LIVE_SITES[site]!.url;
   try {
-    const res = await fetch(LIVE_SITES[site].url, { method: "HEAD", signal: AbortSignal.timeout(NETWORK_PROBE_TIMEOUT_MS), redirect: "follow" });
-    return res.ok || res.status < 500 ? null : `no network: ${LIVE_SITES[site].url} answered ${res.status}`;
+    const res = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(NETWORK_PROBE_TIMEOUT_MS), redirect: "follow" });
+    return res.ok || res.status < 500 ? null : `no network: ${url} answered ${res.status}`;
   } catch (error) {
     return `no network: ${error instanceof Error ? error.message : String(error)}`;
   }
@@ -180,14 +201,12 @@ async function probeNetwork(site: LiveSite): Promise<string | null> {
 export async function runMeasurements(options: MeasureOptions): Promise<MeasurementRow[]> {
   const log = options.log ?? ((line: string) => void process.stderr.write(`${line}\n`));
   const rows: MeasurementRow[] = [];
-  const scenarios: Scenario[] = [...SCENARIOS];
-  let liveSkip: string | null = null;
-  if (options.live && !options.offline) {
-    scenarios.push(liveScenario(options.live));
-    liveSkip = await probeNetwork(options.live);
-  } else if (options.live) {
-    scenarios.push(liveScenario(options.live));
-    liveSkip = "offline run (--offline)";
+  const scenarios: Scenario[] = SCENARIOS.filter((s) => !options.scenarios || options.scenarios.includes(s.id));
+  const liveSkips = new Map<string, string | null>();
+  for (const site of options.live ?? []) {
+    const scenario = liveScenario(site);
+    scenarios.push(scenario);
+    liveSkips.set(scenario.id, options.offline ? "offline run (--offline)" : await probeNetwork(site));
   }
 
   const tmp = mkdtempSync(join(tmpdir(), "navvi-measure-"));
@@ -195,6 +214,7 @@ export async function runMeasurements(options: MeasureOptions): Promise<Measurem
   try {
     for (const chooserName of options.choosers) {
       for (const scenario of scenarios) {
+        const liveSkip = liveSkips.get(scenario.id);
         if (scenario.live && liveSkip) {
           rows.push(skippedRow(chooserName, scenario, liveSkip));
           log(`${chooserName}/${scenario.id}: skipped: ${liveSkip}`);
