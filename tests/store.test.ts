@@ -3,10 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Actor } from "apify";
 import { MemoryStorage } from "crawlee";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { ScraperStore } from "../src/scraper/store.js";
 import type { CompiledScraper } from "../src/scraper/schema.js";
 import { loginFixture } from "./scraper-schema.test.js";
+import { storageAdditions } from "./storage-guard.js";
 
 let dir: string;
 let store: ScraperStore;
@@ -66,8 +67,10 @@ describe("ScraperStore (R5)", () => {
     await expect(store.get("bad-version")).rejects.toThrow(/version 2/);
   });
 
-  it("never wrote to the project storage directory", async () => {
-    const { existsSync } = await import("node:fs");
-    expect(existsSync(join(process.cwd(), "storage", "key_value_stores", "scraper-cache"))).toBe(false);
+  // Not "./storage is empty": a developer who has run the product locally has a
+  // real cache there. The invariant is that the *tests* add nothing to it.
+  it("adds nothing to the project storage directory", () => {
+    const added = storageAdditions(inject("projectStorageBefore"));
+    expect(added, `the tests wrote into ./storage: ${added.join(", ")}`).toEqual([]);
   });
 });

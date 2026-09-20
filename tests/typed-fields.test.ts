@@ -181,7 +181,7 @@ describe("typed fields in the input and the compiled scraper", () => {
       expect(item.price).toMatch(/^\$ [\d.]+$/);
       expect(typeof item.stock).toBe("string");
     }
-  }, 40_000);
+  });
 });
 
 describe("URL start lists through the actor input (R4, R34)", () => {
@@ -223,5 +223,5 @@ describe("URL start lists through the actor input (R4, R34)", () => {
     } finally {
       await helper.close();
     }
-  }, 40_000);
+  });
 });

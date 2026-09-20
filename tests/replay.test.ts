@@ -135,7 +135,7 @@ describe("pagination (R15)", () => {
     const capped = await runCrawl(input({ startUrls: urls, mode: "list", fields: F("title", "likes"), maxPages: 2 }), makeDeps(makeActor(), chooser, { store }));
     expect(capped.pages).toBe(2);
     expect(capped.items).toBe(20);
-  }, 40_000);
+  });
 
   it("a compiled next link crawls three pages and stops at maxPages; a lower maxPages stops earlier", async () => {
     const actor = makeActor();
@@ -159,7 +159,7 @@ describe("pagination (R15)", () => {
     const two = await runCrawl(input({ startUrls: urls, mode: "list", fields: F(...JOB_FIELDS), maxPages: 2 }), makeDeps(makeActor(), undefined, { store: await ScraperStore.open({ actor }) }));
     expect(two.pages).toBe(2);
     expect(two.items).toBe(9);
-  }, 40_000);
+  });
 
   it("two consecutive empty pages end a list crawl with succeeded even though the next links keep going (R16)", async () => {
     const actor = makeActor();
@@ -170,7 +170,7 @@ describe("pagination (R15)", () => {
     expect(summary.items).toBe(14);
     expect(summary.pages).toBe(5);
     expect(summary.unhealed).toBe(0);
-  }, 40_000);
+  });
 
   it("a next link that reproduces the same listing ends pagination (the original python-jobs fixture)", async () => {
     const actor = makeActor();
@@ -180,7 +180,7 @@ describe("pagination (R15)", () => {
     expect(summary.status).toBe("succeeded");
     expect(summary.pages).toBe(1);
     expect(summary.items).toBe(25);
-  }, 40_000);
+  });
 });
 
 describe("dedupe (R16)", () => {
@@ -200,7 +200,7 @@ describe("dedupe (R16)", () => {
     expect(summary.requests.record).toBe(1);
     expect(summary.items).toBe(1);
     expect(await datasetItems(actor)).toHaveLength(1);
-  }, 30_000);
+  });
 });
 
 describe("detail pages (R18)", () => {
@@ -243,7 +243,7 @@ describe("detail pages (R18)", () => {
     expect(again.items).toBe(25);
     expect(again.pages).toBe(4);
     expect(empty.usage().questions).toBe(0);
-  }, 50_000);
+  });
 });
 
 describe("replayTrace (R24, R25, R42)", () => {
@@ -302,7 +302,7 @@ describe("replayTrace (R24, R25, R42)", () => {
       expect(other.ok).toBe(false);
       if (!other.ok) expect(other.reason).toMatch(/expectation failed/);
     });
-  }, 40_000);
+  });
 
   it("a username secret types into an email input and the password secret into the password input; the password secret is refused elsewhere", async () => {
     const secrets = new Map([
@@ -336,7 +336,7 @@ describe("replayTrace (R24, R25, R42)", () => {
       }
       expect(await page.locator("#email").inputValue()).toBe("");
     });
-  }, 40_000);
+  });
 
   it("a click whose recorded and live href is javascript: replays without a domain refusal", async () => {
     await withPage("/fixtures/search-form.html", async (page) => {
@@ -349,5 +349,5 @@ describe("replayTrace (R24, R25, R42)", () => {
       expect(result).toEqual({ ok: true, steps: 1 });
       expect(await page.title()).toBe("clicked");
     });
-  }, 40_000);
+  });
 });

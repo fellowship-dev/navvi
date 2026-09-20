@@ -7,7 +7,7 @@ import { RecordedChooser } from "../src/chooser/recorded.js";
 import { parseInput, type RunInput } from "../src/input/schema.js";
 import type { CrawlDeps } from "../src/replay/crawler.js";
 
-/** Shared crawler-test helpers; crawler.test.ts keeps its own copies until it is next touched. */
+/** Shared crawler-test helpers, used by billing.test.ts, crawler.test.ts and typed-fields.test.ts. */
 
 /** One isolated Actor per test: in-memory storage, nothing under ./storage. */
 export function makeActor(dir: string): Actor {

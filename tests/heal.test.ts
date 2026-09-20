@@ -213,7 +213,7 @@ describe("field healing (AE8, R17, R31, R32, R33)", () => {
     const stored = await store.get(key.cacheKey);
     expect(stored?.healedAt).toBeUndefined();
     expect(stored?.fields.isbn?.alternatives).toHaveLength(1);
-  }, 30_000);
+  });
 
   it("the healing budget: the sixth healing event ends the run with drift and the items so far in the dataset", async () => {
     const actor = makeActor();
@@ -243,7 +243,7 @@ describe("field healing (AE8, R17, R31, R32, R33)", () => {
     expect(calls).toBe(LIMITS.healingEvents + 1);
     expect(summary.items).toBe(LIMITS.healingEvents);
     expect(await datasetItems(actor)).toHaveLength(LIMITS.healingEvents);
-  }, 40_000);
+  });
 
   it("R19: a chooser error during healing logs a warning, counts the page unhealed and the crawl goes on", async () => {
     const actor = makeActor();
@@ -286,7 +286,7 @@ describe("field healing (AE8, R17, R31, R32, R33)", () => {
     } finally {
       stderr.mockRestore();
     }
-  }, 30_000);
+  });
 });
 
 describe("step healing (AE15, R42)", () => {
@@ -352,7 +352,7 @@ describe("step healing (AE15, R42)", () => {
     expect(normalRun.healingEvents).toEqual([]);
     expect(empty.usage().questions).toBe(0);
     expect(await datasetItems(actor)).toHaveLength(10);
-  }, 45_000);
+  });
 
   it("re-navigation after an unhealed step keeps the steps that already succeeded, so the stored trace still logs in", async () => {
     const actor = makeActor();
@@ -400,5 +400,5 @@ describe("step healing (AE15, R42)", () => {
     const stored = await store.get(key.cacheKey);
     expect(stored?.trace).toEqual([loginTrace[0], loginTrace[1], signIn]);
     expect(JSON.stringify(stored)).not.toContain("hunter2");
-  }, 45_000);
+  });
 });

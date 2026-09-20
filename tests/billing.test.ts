@@ -135,7 +135,7 @@ describe("charging through a crawl (R20, AE13)", () => {
     expect(summary.charges).toEqual({ "actor-start": 1, "scraper-compiled": 1, "page-scraped": 1, "result-item": 10 });
     expect(await datasetItems(base)).toHaveLength(10);
     expect(summary.message).toMatch(/charge limit/);
-  }, 40_000);
+  });
 
   it("a blocked run charges actor-start only and the summary still reports chooser usage", async () => {
     const base = makeActor(dir);
@@ -148,7 +148,7 @@ describe("charging through a crawl (R20, AE13)", () => {
     expect(fake.calls.map((c) => c.eventName)).toEqual(["actor-start"]);
     expect(summary.chooser).toMatchObject({ name: "recorded", questions: 0 });
     expect(summary.zeroDataRetention).toBe("not_applicable");
-  }, 40_000);
+  });
 
   it("two templates charge scraper-compiled twice; the cache-hit rerun charges it zero times", async () => {
     const base = makeActor(dir);
@@ -189,7 +189,7 @@ describe("charging through a crawl (R20, AE13)", () => {
     // one template: the summary names the scraper to pin next time
     const templateKey = [...groupByTemplate(raw.startUrls).keys()][0]!;
     expect(summary.scriptId).toBe(cacheKey(templateKey, { description: raw.description, fields: raw.fields.map((f) => f.name), profile: "store" }));
-  }, 40_000);
+  });
 
   it("a budget that cannot afford actor-start ends charge_limit before the browser opens", async () => {
     const base = makeActor(dir);
@@ -215,5 +215,5 @@ describe("charging through a crawl (R20, AE13)", () => {
     expect(summary.items).toBe(1);
     expect(summary.charges["page-scraped"]).toBe(1);
     expect(await datasetItems(base)).toHaveLength(1);
-  }, 40_000);
+  });
 });

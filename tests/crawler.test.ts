@@ -2,18 +2,15 @@ import http from "node:http";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Actor } from "apify";
-import { MemoryStorage } from "crawlee";
 import { chromium, type BrowserContext, type Page } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildCrawleeLaunchContext, profileDir } from "../src/browser/launch.js";
-import type { Answer, Chooser, ChooserUsage, Question } from "../src/chooser/chooser.js";
 import { RecordedChooser } from "../src/chooser/recorded.js";
-import { parseInput, type RunInput } from "../src/input/schema.js";
-import { loadListSources, makeRequestGuard, runCrawl, type CrawlDeps } from "../src/replay/crawler.js";
+import { loadListSources, makeRequestGuard, runCrawl } from "../src/replay/crawler.js";
 import { ScraperStore } from "../src/scraper/store.js";
 import { SCRAPER_VERSION, cacheKey, type CompiledScraper, type TraceStep } from "../src/scraper/schema.js";
 import { groupByTemplate } from "../src/template/index.js";
+import { F, RoutingChooser, datasetItems, fixtureInput, makeActor, makeDeps } from "./helpers.js";
 import { startFixtureServer, type FixtureServer } from "./server.js";
 
 let server: FixtureServer;
@@ -34,45 +31,6 @@ const PRODUCTS = [
   "losartan-50-mg", "metformina-850-mg", "omeprazol-20-mg", "paracetamol-500-mg", "salbutamol-inhalador", "vitamina-c-1-g",
 ];
 const productUrls = () => PRODUCTS.map((s) => `${server.baseUrl}/demo/pharmacy-v1/producto/${s}.html`);
-const F = (...names: string[]) => names.map((name) => ({ name }));
-
-/** One isolated Actor per test: in-memory storage, nothing under ./storage. */
-function makeActor(): Actor {
-  return new Actor({ storageClient: new MemoryStorage({ localDataDirectory: mkdtempSync(join(dir, "storage-")), persistStorage: false }) });
-}
-
-function makeDeps(actor: Actor, chooser: Chooser, over: Partial<CrawlDeps> = {}): CrawlDeps {
-  return { actor, chooser, env: {}, storageDir: join(dir, "st"), attended: false, maxConcurrency: 2, ...over };
-}
-
-function input(over: Record<string, unknown>): RunInput {
-  return parseInput({ browser: "chromium", allowPrivateHosts: ["127.0.0.1"], ...over });
-}
-
-/** Picks the recorded fixture by the sample URL in the question state, so one run can compile two templates. */
-class RoutingChooser implements Chooser {
-  readonly name = "recorded" as const;
-  private readonly inner = new Map<string, RecordedChooser>();
-  constructor(private readonly routes: Array<[string, string]>) {}
-  async ask(batch: Question[]): Promise<Answer[]> {
-    const state = batch[0]?.state ?? "";
-    const route = this.routes.find(([needle]) => state.includes(needle));
-    if (!route) throw new Error(`no recorded fixture routes to a batch whose state starts with ${state.slice(0, 80)}`);
-    let chooser = this.inner.get(route[1]);
-    if (!chooser) this.inner.set(route[1], (chooser = new RecordedChooser({ fixture: route[1] })));
-    return chooser.ask(batch);
-  }
-  usage(): ChooserUsage {
-    const all = [...this.inner.values()].map((c) => c.usage());
-    const sum = (k: "questions" | "textQuestions" | "batches" | "inputTokens" | "outputTokens" | "waitMs" | "costUsd") => all.reduce((n, u) => n + u[k], 0);
-    return { chooser: "recorded", questions: sum("questions"), textQuestions: sum("textQuestions"), batches: sum("batches"), inputTokens: sum("inputTokens"), outputTokens: sum("outputTokens"), waitMs: sum("waitMs"), costUsd: sum("costUsd"), zeroDataRetention: "not_applicable" };
-  }
-}
-
-async function datasetItems(actor: Actor): Promise<Array<Record<string, unknown>>> {
-  const dataset = await actor.openDataset();
-  return (await dataset.getData()).items as Array<Record<string, unknown>>;
-}
 
 /** A tiny server in the test: a JSON list source and a page with a subresource on a private port. */
 function startHelperServer(routes: Record<string, { type: string; body: string }>): Promise<{ baseUrl: string; close(): Promise<void> }> {
@@ -176,15 +134,19 @@ describe("crawler runs", () => {
   });
 
   it("compiles python-jobs once, runs one direct list request and stores the scraper", async () => {
-    const actor = makeActor();
+    const actor = makeActor(dir);
     const chooser = new RecordedChooser({ fixture: "compile/python-jobs" });
     const raw = { startUrls: [`${server.baseUrl}/fixtures/python-jobs.html`], mode: "list", fields: F("title", "company", "location", "date", "link"), description: "python job listing" };
+<<<<<<< Updated upstream
     const observed: string[] = [];
     const onPage = async (page: import("playwright").Page) => { observed.push(page.url()); };
     const summary = await runCrawl(input(raw), { ...makeDeps(actor, chooser), onPage });
     expect(observed.length).toBeGreaterThan(0);
     expect(observed.every((url) => url === "about:blank")).toBe(true);
     const observedBeforeReplay = observed.length;
+=======
+    const summary = await runCrawl(fixtureInput(raw), makeDeps(dir, actor, chooser));
+>>>>>>> Stashed changes
     expect(summary.status).toBe("succeeded");
     expect(summary.templates).toBe(1);
     expect(summary.cacheHit).toBe(false);
@@ -209,22 +171,26 @@ describe("crawler runs", () => {
 
     // second run, same store: no chooser call, cache hit
     const empty = new RecordedChooser({ fixture: "crawler/empty" });
+<<<<<<< Updated upstream
     const again = await runCrawl(input(raw), { ...makeDeps(actor, empty), onPage });
     expect(observed.length).toBeGreaterThan(observedBeforeReplay);
+=======
+    const again = await runCrawl(fixtureInput(raw), makeDeps(dir, actor, empty));
+>>>>>>> Stashed changes
     expect(again.cacheHit).toBe(true);
     expect(again.status).toBe("succeeded");
     expect(again.items).toBe(25);
     expect(again.requests).toEqual({ compile: 0, list: 1, record: 0 });
     expect(empty.usage().questions).toBe(0);
-  }, 40_000);
+  });
 
   it("AE12: a JSON list source of twelve product URLs compiles once and records twelve items", async () => {
     const helper = await startHelperServer({ "/products.json": { type: "application/json", body: JSON.stringify(productUrls()) } });
     try {
-      const actor = makeActor();
+      const actor = makeActor(dir);
       const chooser = new RecordedChooser({ fixture: "compile/pharmacy-v1" });
       const raw = { startUrls: [`${helper.baseUrl}/products.json`], mode: "record", fields: F("name", "laboratory", "price", "stock"), description: "pharmacy product" };
-      const summary = await runCrawl(input(raw), makeDeps(actor, chooser));
+      const summary = await runCrawl(fixtureInput(raw), makeDeps(dir, actor, chooser));
       expect(summary.status).toBe("succeeded");
       expect(summary.requests).toEqual({ compile: 1, list: 0, record: 12 });
       expect(summary.templates).toBe(1);
@@ -239,17 +205,17 @@ describe("crawler runs", () => {
     } finally {
       await helper.close();
     }
-  }, 40_000);
+  });
 
   it("two templates produce two compile requests and two stored scrapers", async () => {
-    const actor = makeActor();
+    const actor = makeActor(dir);
     const chooser = new RoutingChooser([
       ["/demo/pharmacy-v1/", "compile/pharmacy-v1"],
       ["/fixtures/python-jobs", "crawler/python-jobs-record"],
     ]);
     const urls = [...productUrls(), `${server.baseUrl}/fixtures/python-jobs.html`];
     const raw = { startUrls: urls, mode: "record", fields: F("name", "laboratory", "price", "stock"), description: "pharmacy product" };
-    const summary = await runCrawl(input(raw), makeDeps(actor, chooser));
+    const summary = await runCrawl(fixtureInput(raw), makeDeps(dir, actor, chooser));
     expect(summary.templates).toBe(2);
     expect(summary.requests.compile).toBe(2);
     expect(summary.requests.record).toBe(13);
@@ -288,7 +254,7 @@ describe("crawler runs", () => {
   }, 20_000);
 
   it("trace mode replays the trace once per session and start URL, and paginates in-page", async () => {
-    const actor = makeActor();
+    const actor = makeActor(dir);
     // two start URLs of one template, both the search form: each gets its own replay (R14)
     const startUrls = [`${server.baseUrl}/fixtures/search-form.html`, `${server.baseUrl}/fixtures/search-form.html?src=2`];
     const key = keyFor(startUrls, { fields: ["title", "company"], profile: "store" });
@@ -315,7 +281,7 @@ describe("crawler runs", () => {
       }),
     );
     const chooser = new RecordedChooser({ fixture: "crawler/empty" });
-    const summary = await runCrawl(input({ startUrls, mode: "list", fields: F("title", "company") }), makeDeps(actor, chooser));
+    const summary = await runCrawl(fixtureInput({ startUrls, mode: "list", fields: F("title", "company") }), makeDeps(dir, actor, chooser));
     expect(summary.status).toBe("succeeded");
     expect(summary.cacheHit).toBe(true);
     expect(summary.traceReplays).toBe(2);
@@ -326,10 +292,10 @@ describe("crawler runs", () => {
     expect(items.filter((i) => i._source === `${server.baseUrl}/fixtures/results.html?q=python`)).toHaveLength(12);
     expect(items[0]).toMatchObject({ title: "python role 1", company: "Company 1" });
     expect(items[6]).toMatchObject({ title: "python role 1", company: "Company 1" });
-  }, 40_000);
+  });
 
   it("direct entry after a goal: the list request opens the compiled entry URL (the navigated listing), not the start URL", async () => {
-    const actor = makeActor();
+    const actor = makeActor(dir);
     const startUrls = [`${server.baseUrl}/fixtures/search-form.html`];
     const listing = `${server.baseUrl}/fixtures/results.html?q=python`;
     const goal = "search for python jobs";
@@ -351,7 +317,7 @@ describe("crawler runs", () => {
       }),
     );
     const chooser = new RecordedChooser({ fixture: "crawler/empty" });
-    const summary = await runCrawl(input({ startUrls, goal, mode: "list", fields: F("title", "company") }), makeDeps(actor, chooser));
+    const summary = await runCrawl(fixtureInput({ startUrls, goal, mode: "list", fields: F("title", "company") }), makeDeps(dir, actor, chooser));
     expect(summary.status).toBe("succeeded");
     expect(summary.cacheHit).toBe(true);
     expect(summary.traceReplays).toBe(0);
@@ -361,10 +327,10 @@ describe("crawler runs", () => {
     expect(items.map((i) => i._source)).toEqual(Array<string>(6).fill(listing));
     expect(items[0]).toMatchObject({ title: "python role 1", company: "Company 1" });
     expect(chooser.usage().questions).toBe(0);
-  }, 40_000);
+  });
 
   it("AE11: a cached click whose recorded href is off-domain is refused and the run ends blocked_no_progress", async () => {
-    const actor = makeActor();
+    const actor = makeActor(dir);
     const startUrls = [`${server.baseUrl}/fixtures/search-form.html`];
     const key = keyFor(startUrls, { fields: ["title"], profile: "store" });
     const store = await ScraperStore.open({ actor });
@@ -377,19 +343,19 @@ describe("crawler runs", () => {
         fields: { title: { alternatives: [{ selector: "h2", fingerprint: { samples: ["x"], shape: "text" } }] } },
       }),
     );
-    const summary = await runCrawl(input({ startUrls, mode: "list", fields: F("title") }), makeDeps(actor, new RecordedChooser({ fixture: "crawler/empty" })));
+    const summary = await runCrawl(fixtureInput({ startUrls, mode: "list", fields: F("title") }), makeDeps(dir, actor, new RecordedChooser({ fixture: "crawler/empty" })));
     expect(summary.status).toBe("blocked_no_progress");
     expect(summary.message).toMatch(/evil\.example/);
     expect(summary.items).toBe(0);
     expect(summary.traceReplays).toBe(1);
-  }, 40_000);
+  });
 
   it("the route guard aborts a subresource on a private port while the fixture host passes", async () => {
     const helper = await startHelperServer({
       "/tools.html": { type: "text/html; charset=utf-8", body: `<!doctype html><title>Tools</title><h1 id="h">Internal tools</h1><img src="http://127.0.0.1:9/x.png" alt=""><p><a href="${server.baseUrl}/fixtures/redirect-private.html">Fixture</a></p>` },
     });
     try {
-      const actor = makeActor();
+      const actor = makeActor(dir);
       const startUrls = [`${helper.baseUrl}/tools.html`];
       const key = keyFor(startUrls, { fields: ["heading"], profile: "store" });
       const store = await ScraperStore.open({ actor });
@@ -401,14 +367,14 @@ describe("crawler runs", () => {
           fields: { heading: { alternatives: [{ selector: "h1", fingerprint: { samples: ["Internal tools"], shape: "text" } }] } },
         }),
       );
-      const summary = await runCrawl(input({ startUrls, mode: "record", fields: F("heading") }), makeDeps(actor, new RecordedChooser({ fixture: "crawler/empty" })));
+      const summary = await runCrawl(fixtureInput({ startUrls, mode: "record", fields: F("heading") }), makeDeps(dir, actor, new RecordedChooser({ fixture: "crawler/empty" })));
       expect(summary.status).toBe("succeeded");
       expect(summary.blockedRequests).toBe(1);
       expect((await datasetItems(actor))[0]).toMatchObject({ heading: "Internal tools" });
     } finally {
       await helper.close();
     }
-  }, 40_000);
+  });
 
   it("two requests that open concurrently on one context both navigate behind the route guard (R26)", async () => {
     const blockedImg = `<img src="http://127.0.0.1:9/x.png" alt="">`;
@@ -437,7 +403,7 @@ describe("crawler runs", () => {
       return originalGoto.apply(this, args);
     });
     try {
-      const actor = makeActor();
+      const actor = makeActor(dir);
       const startUrls = [`${helper.baseUrl}/tools-1.html`, `${helper.baseUrl}/tools-2.html`];
       const key = keyFor(startUrls, { fields: ["heading"], profile: "store" });
       const store = await ScraperStore.open({ actor });
@@ -450,8 +416,8 @@ describe("crawler runs", () => {
         }),
       );
       const summary = await runCrawl(
-        input({ startUrls, mode: "record", fields: F("heading") }),
-        makeDeps(actor, new RecordedChooser({ fixture: "crawler/empty" }), { maxConcurrency: 2, minConcurrency: 2 }),
+        fixtureInput({ startUrls, mode: "record", fields: F("heading") }),
+        makeDeps(dir, actor, new RecordedChooser({ fixture: "crawler/empty" }), { maxConcurrency: 2, minConcurrency: 2 }),
       );
       expect(summary.status).toBe("succeeded");
       expect(summary.items).toBe(2);
@@ -467,7 +433,7 @@ describe("crawler runs", () => {
   }, 60_000);
 
   it("the summary's echoed input masks the credentials of a proxy URL as well as the secrets (R39)", async () => {
-    const actor = makeActor();
+    const actor = makeActor(dir);
     const store = await ScraperStore.open({ actor });
     const loginUrls = [`${server.baseUrl}/login/`];
     const key = keyFor(loginUrls, { fields: ["order"], profile: "local" });
@@ -483,8 +449,8 @@ describe("crawler runs", () => {
     );
     const proxyUrls = ["http://proxy-user:hunter2-proxy@127.0.0.1:1", "http://127.0.0.1:2"];
     const summary = await runCrawl(
-      input({ startUrls: loginUrls, mode: "list", fields: F("order"), profile: "local", proxy: { proxyUrls } }),
-      makeDeps(actor, new RecordedChooser({ fixture: "crawler/empty" }), { storageDir: mkdtempSync(join(dir, "proxy-")), env: {} }),
+      fixtureInput({ startUrls: loginUrls, mode: "list", fields: F("order"), profile: "local", proxy: { proxyUrls } }),
+      makeDeps(dir, actor, new RecordedChooser({ fixture: "crawler/empty" }), { storageDir: mkdtempSync(join(dir, "proxy-")), env: {} }),
     );
     expect(summary.status).toBe("blocked_login_required");
     expect(summary.input?.proxy?.proxyUrls).toHaveLength(2);
@@ -496,7 +462,7 @@ describe("crawler runs", () => {
   });
 
   it("a login trace under local keeps its cookie in the profile for the next run, and freshProfile discards it", async () => {
-    const actor = makeActor();
+    const actor = makeActor(dir);
     const store = await ScraperStore.open({ actor });
     const loginUrls = [`${server.baseUrl}/login/`];
     const loginKey = keyFor(loginUrls, { fields: ["order", "total"], profile: "local" });
@@ -540,19 +506,19 @@ describe("crawler runs", () => {
     consoleSpies.push(stderr);
 
     const chooser = new RecordedChooser({ fixture: "crawler/empty" });
-    const one = await runCrawl(input({ startUrls: loginUrls, mode: "list", fields: F("order", "total"), profile: "local" }), makeDeps(actor, chooser, { env: { NAVVI_SECRET_PASSWORD: "hunter2-secret" } }));
+    const one = await runCrawl(fixtureInput({ startUrls: loginUrls, mode: "list", fields: F("order", "total"), profile: "local" }), makeDeps(dir, actor, chooser, { env: { NAVVI_SECRET_PASSWORD: "hunter2-secret" } }));
     expect(one.status).toBe("succeeded");
     expect(one.items).toBe(5);
     expect(one.traceReplays).toBe(1);
     expect(existsSync(join(dir, "st", "profiles", "127.0.0.1", "local"))).toBe(true);
 
-    const two = await runCrawl(input({ startUrls: accountUrls, mode: "record", fields: F("who"), profile: "local", secrets: { password: "hunter2-input" } }), makeDeps(actor, chooser));
+    const two = await runCrawl(fixtureInput({ startUrls: accountUrls, mode: "record", fields: F("who"), profile: "local", secrets: { password: "hunter2-input" } }), makeDeps(dir, actor, chooser));
     expect(two.status).toBe("succeeded");
     expect(two.input?.secrets).toEqual({ password: "[secret]" });
     const afterTwo = await datasetItems(actor);
     expect(afterTwo.at(-1)).toMatchObject({ who: "customer", _source: accountUrls[0] });
 
-    const three = await runCrawl(input({ startUrls: accountUrls, mode: "record", fields: F("who"), profile: "local", freshProfile: true }), makeDeps(actor, chooser));
+    const three = await runCrawl(fixtureInput({ startUrls: accountUrls, mode: "record", fields: F("who"), profile: "local", freshProfile: true }), makeDeps(dir, actor, chooser));
     expect(three.status).toBe("drift");
     expect((await datasetItems(actor)).at(-1)).toMatchObject({ who: null });
 
@@ -563,7 +529,7 @@ describe("crawler runs", () => {
   }, 60_000);
 
   it("a missing secret ends the run before the browser opens, naming the placeholder", async () => {
-    const actor = makeActor();
+    const actor = makeActor(dir);
     const store = await ScraperStore.open({ actor });
     const loginUrls = [`${server.baseUrl}/login/`];
     const key = keyFor(loginUrls, { fields: ["order"], profile: "local" });
@@ -580,7 +546,7 @@ describe("crawler runs", () => {
     const profiles = mkdtempSync(join(dir, "missing-"));
     const launchSpy = vi.spyOn(chromium, "launchPersistentContext");
     try {
-      const summary = await runCrawl(input({ startUrls: loginUrls, mode: "list", fields: F("order"), profile: "local" }), makeDeps(actor, new RecordedChooser({ fixture: "crawler/empty" }), { storageDir: profiles, env: {} }));
+      const summary = await runCrawl(fixtureInput({ startUrls: loginUrls, mode: "list", fields: F("order"), profile: "local" }), makeDeps(dir, actor, new RecordedChooser({ fixture: "crawler/empty" }), { storageDir: profiles, env: {} }));
       expect(summary.status).toBe("blocked_login_required");
       expect(summary.message).toMatch(/\{\{secret:password\}\}/);
       expect(summary.requests).toEqual({ compile: 0, list: 0, record: 0 });

@@ -457,7 +457,7 @@ describe("prompt-derived input validation (exit 2)", () => {
     expect(io.stderr.text).toContain("configuration_error");
     expect(io.stderr.text).toMatch(/goal/);
     expect(io.stderr.text).not.toMatch(/ZodError|\n\s+at /);
-  }, 30_000);
+  });
 });
 
 describe("notifications (R41)", () => {
