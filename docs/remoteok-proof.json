@@ -1,0 +1,161 @@
+{
+  "sourceRevision": "8b00ffd",
+  "date": "2026-09-20",
+  "task": "Search Remote OK for Python jobs and extract up to 10 results with job title, company, location and job link. Exclude ads.",
+  "expectedSource": "https://remoteok.com/remote-python-jobs",
+  "qualification": "One live trial; source equivalence checked, relevance not independently ranked. Timings include diagnostic capture and differ from the video.",
+  "runs": {
+    "compile": {
+      "wallMs": 32543.028375,
+      "status": "succeeded",
+      "items": 10,
+      "cacheHit": false,
+      "chooser": {
+        "name": "jev",
+        "questions": 30,
+        "inputTokens": 165511,
+        "waitMs": 20904.817832000008,
+        "costUsd": 0.006951084000000001
+      },
+      "rowsSha256": "ae5ff0948733f58a7ded19905924f003bd46bbe3586b006be94416392944a02b"
+    },
+    "replay": {
+      "wallMs": 4415.472417,
+      "status": "succeeded",
+      "items": 10,
+      "cacheHit": true,
+      "chooser": {
+        "name": "jev",
+        "questions": 0,
+        "inputTokens": 0,
+        "waitMs": 0,
+        "costUsd": 0
+      },
+      "rowsSha256": "ae5ff0948733f58a7ded19905924f003bd46bbe3586b006be94416392944a02b"
+    }
+  },
+  "rows": [
+    {
+      "job_title": "Sr Solutions Architect",
+      "company": "ExtraHop",
+      "location": "🌏 Worldwide",
+      "job_link": "https://remoteok.com/remote-jobs/remote-sr-solutions-architect-extrahop-1137394",
+      "_source": "https://remoteok.com/remote-python-jobs"
+    },
+    {
+      "job_title": "DESARROLLADOR FULL STACK",
+      "company": "Kruger NearShore LLC - Rekluti",
+      "location": "🌏 Probably worldwide",
+      "job_link": "https://remoteok.com/remote-jobs/remote-desarrollador-full-stack-kruger-nearshore-llc-rekluti-1137062",
+      "_source": "https://remoteok.com/remote-python-jobs"
+    },
+    {
+      "job_title": "Senior Software Engineer Case Execution",
+      "company": "Pivotal Health",
+      "location": "🇺🇸 United States",
+      "job_link": "https://remoteok.com/remote-jobs/remote-senior-software-engineer-case-execution-pivotal-health-1136795",
+      "_source": "https://remoteok.com/remote-python-jobs"
+    },
+    {
+      "job_title": "Data Analyst",
+      "company": "SEAhub Asia",
+      "location": "🇲🇾 Malaysia",
+      "job_link": "https://remoteok.com/remote-jobs/remote-data-analyst-seahub-asia-1136222",
+      "_source": "https://remoteok.com/remote-python-jobs"
+    },
+    {
+      "job_title": "Human Resources Specialist",
+      "company": "Harvey Nash",
+      "location": "🇺🇸 United States",
+      "job_link": "https://remoteok.com/remote-jobs/remote-human-resources-specialist-harvey-nash-1135675",
+      "_source": "https://remoteok.com/remote-python-jobs"
+    },
+    {
+      "job_title": "Care Navigator Level 1",
+      "company": "Ready",
+      "location": "🇺🇸 United States",
+      "job_link": "https://remoteok.com/remote-jobs/remote-care-navigator-level-1-ready-1135674",
+      "_source": "https://remoteok.com/remote-python-jobs"
+    },
+    {
+      "job_title": "Healthcare Virtual Assistant Athena EMR Experience",
+      "company": "Snapscale Philippines",
+      "location": "🇵🇭 Philippines",
+      "job_link": "https://remoteok.com/remote-jobs/remote-healthcare-virtual-assistant-athena-emr-experience-snapscale-philippines-1135688",
+      "_source": "https://remoteok.com/remote-python-jobs"
+    },
+    {
+      "job_title": "Junior Data Analyst",
+      "company": "HiredBuddy",
+      "location": "🇺🇸 United States",
+      "job_link": "https://remoteok.com/remote-jobs/remote-junior-data-analyst-hiredbuddy-1135673",
+      "_source": "https://remoteok.com/remote-python-jobs"
+    },
+    {
+      "job_title": "Program Administration Manager",
+      "company": "Greenlight Action",
+      "location": "🌏 Worldwide",
+      "job_link": "https://remoteok.com/remote-jobs/remote-program-administration-manager-greenlight-action-1135738",
+      "_source": "https://remoteok.com/remote-python-jobs"
+    },
+    {
+      "job_title": "AI Intern",
+      "company": "CertifyOS",
+      "location": "🇮🇳 India",
+      "job_link": "https://remoteok.com/remote-jobs/remote-ai-intern-certifyos-1135555",
+      "_source": "https://remoteok.com/remote-python-jobs"
+    }
+  ],
+  "sourceVerification": [
+    {
+      "index": 0,
+      "fields": true,
+      "visible": true
+    },
+    {
+      "index": 1,
+      "fields": true,
+      "visible": true
+    },
+    {
+      "index": 2,
+      "fields": true,
+      "visible": true
+    },
+    {
+      "index": 3,
+      "fields": true,
+      "visible": true
+    },
+    {
+      "index": 4,
+      "fields": true,
+      "visible": true
+    },
+    {
+      "index": 5,
+      "fields": true,
+      "visible": true
+    },
+    {
+      "index": 6,
+      "fields": true,
+      "visible": true
+    },
+    {
+      "index": 7,
+      "fields": true,
+      "visible": true
+    },
+    {
+      "index": 8,
+      "fields": true,
+      "visible": true
+    },
+    {
+      "index": 9,
+      "fields": true,
+      "visible": true
+    }
+  ]
+}

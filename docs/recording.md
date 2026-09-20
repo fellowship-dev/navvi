@@ -63,3 +63,19 @@ Opening: “Jev made browser agents fast. I wanted the second run to stop needin
 ## Review before publishing
 
 Inspect the first frame, form interaction, first real results, both timer stops, replay and last frame. Watch the complete MP4 at normal speed. Ensure labels match the actual chooser and cache state, text is legible at mobile width, and no credential or private data appears. Save the exact command, commit, run summaries, correctness check and timing receipt beside the recording work. Use MP4 for the social post and GIF for the README. Publishing follows review of the actual clip.
+
+## First run versus saved replay from an existing recording
+
+When the useful claim is reuse, compose the validated Jev lane's two sequential runs. To capture a new source without requiring the optional Haiku comparison, run the real-site command above with `DEMO_CHOOSERS=jev`. The recorder then requires only Jev's compile and replay to pass; it still enforces fields and expected source. It keeps the Jev pane in the same location for this compositor. The default `DEMO_CHOOSERS=jev,claude` retains the two-model race. This does not repeat model calls or show an invalid competitor lane. Preserve the original run directory. Verify the start/end frame indices and displayed elapsed clock values visually before supplying anchors:
+
+```sh
+DEMO_OUT=/tmp/navvi-publishable npx tsx scripts/compose-replay-comparison.ts \
+  --source /tmp/navvi-recordings/navvi-race-j7CMFv \
+  --expect-source https://remoteok.com/remote-python-jobs \
+  --compile-start 6 --compile-end 169 --compile-anchor 0 \
+  --replay-start 284 --replay-end 296 --replay-anchor 0.1
+```
+
+Those indices are specific to the cited recording, not defaults for future runs. Each `*-start` is the first active frame, each `*-end` the first frame showing the final timer, and each `*-anchor` its start frame's displayed elapsed seconds. The tool uses the existing `frames/frames.txt` durations to align the runs; it preserves original browser and timer pixels, freezes completed frames, and labels the comparison as two sequential real runs. Tenths-of-a-second source clocks imply ±0.05-second anchor rounding uncertainty, plus video sampling precision. No runtime value is invented.
+
+The source must contain successful Jev compile/replay reports, complete requested fields, matching source URLs and zero replay questions. The resulting unique directory contains MP4, GIF, frames, selected rows and `provenance.json` with source hashes, source commit/dirty state, verified lane reports, alignment anchors and every output-to-input frame mapping. A dirty source capture is identified as such; a subsequent clean-commit validation must be reported separately. Review the original and derived keyframes before publishing. Do not claim a universal speedup from one example.

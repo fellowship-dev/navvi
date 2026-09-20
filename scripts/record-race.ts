@@ -170,7 +170,10 @@ async function main(): Promise<void> {
   const env: NodeJS.ProcessEnv = { ...process.env, NAVVI_BROWSER: "chromium", NAVVI_CLAUDE_MODEL: "haiku" };
   delete env.DEMO_EXPECT_SOURCE;
   const freshChooser = (key: "jev" | "claude") => createChooser({ chooser: key, env, cli: { timeoutMs: 180_000, model: "haiku" } });
-  const lanes: Lane[] = (["jev", "claude"] as const).map((key) => ({
+  const selected = process.env.DEMO_CHOOSERS ?? "jev,claude";
+  if (selected !== "jev" && selected !== "jev,claude") throw new Error("DEMO_CHOOSERS must be jev or jev,claude");
+  const keys: Array<"jev" | "claude"> = selected === "jev" ? ["jev"] : ["jev", "claude"];
+  const lanes: Lane[] = keys.map((key) => ({
     key, label: key === "jev" ? "Navvi + Jev" : "Navvi + Haiku",
     color: key === "jev" ? "#1f6feb" : "#a371f7", chooser: freshChooser(key),
     page: null, shot: "", blank: true, log: [], status: "waiting", rows: [], startedAt: 0,

@@ -1,0 +1,1414 @@
+{
+  "sourceDirectory": "/tmp/navvi-recordings/navvi-race-j7CMFv",
+  "sourceReceiptSha256": "023fca1564afdc85cfa83c7dc87c222abd508e394d7a3d7d8b27a036224304d7",
+  "sourceManifestSha256": "e893490329ebdc910ae1ada1ebe9c8358377f3552f9dbcd8c49665264ef03922",
+  "sourceCommit": "1ff11faad7fe98a52ba0add362e97615afd09ea2",
+  "sourceWorkingTree": "M README.md\n M docs/recording.md\n M package.json\n M scripts/record-race.ts\n M src/browser/snapshot.inject.js\n M src/browser/snapshot.ts\n M src/chooser/chooser.ts\n M src/chooser/questions.ts\n M src/navigate/agent.ts\n M src/navigate/trace.ts\n M src/replay/crawler.ts\n M src/replay/entry.ts\n M tests/chooser.test.ts\n M tests/crawler.test.ts\n M tests/replay.test.ts\n M tests/snapshot.test.ts\n?? src/browser/typing.ts\n?? tests/typing.test.ts",
+  "sourceRecordedAt": "2026-09-20T15:21:14.831Z",
+  "prompt": "Search Remote OK for Python jobs and extract up to 10 results with job title, company, location and job link. Exclude ads.",
+  "expectedSource": "https://remoteok.com/remote-python-jobs",
+  "validatedLane": {
+    "key": "jev",
+    "label": "Navvi + Jev",
+    "reports": [
+      {
+        "phase": "compile",
+        "wallMs": 42550.459792,
+        "questions": 30,
+        "usage": {
+          "chooser": "jev",
+          "questions": 30,
+          "textQuestions": 3,
+          "batches": 13,
+          "inputTokens": 166279,
+          "outputTokens": 8649,
+          "waitMs": 26469.584999000002,
+          "costUsd": 0.00698334,
+          "zeroDataRetention": "unknown"
+        },
+        "summary": {
+          "status": "succeeded",
+          "items": 10,
+          "pages": 1,
+          "templates": 1,
+          "cacheHit": false,
+          "healingEvents": [],
+          "unmappedCandidates": [],
+          "fieldsNotFound": [],
+          "chooser": {
+            "name": "jev",
+            "questions": 30,
+            "inputTokens": 166279,
+            "waitMs": 26469.584999000002,
+            "costUsd": 0.00698334
+          },
+          "input": {
+            "prompt": "Search Remote OK for Python jobs and extract up to 10 results with job title, company, location and job link. Exclude ads.",
+            "startUrls": [
+              "https://remoteok.com/"
+            ],
+            "mode": "list",
+            "description": "Python job listings from Remote OK",
+            "fields": [
+              {
+                "name": "job_title",
+                "description": "The position title"
+              },
+              {
+                "name": "company",
+                "description": "The hiring company"
+              },
+              {
+                "name": "location",
+                "description": "Job location"
+              },
+              {
+                "name": "job_link",
+                "description": "URL to the job posting"
+              }
+            ],
+            "goal": "search Remote OK for Python jobs",
+            "maxPages": 1,
+            "maxItems": 10,
+            "followDetailPages": false,
+            "browser": "chromium",
+            "allowedDomains": [],
+            "allowPrivateHosts": [],
+            "forceRecompile": false,
+            "profile": "store",
+            "secrets": {},
+            "allowMutations": [],
+            "freshProfile": false,
+            "headed": false,
+            "chooser": "jev"
+          },
+          "requests": {
+            "compile": 1,
+            "list": 1,
+            "record": 0
+          },
+          "traceReplays": 0,
+          "blockedRequests": 0,
+          "unhealed": 0
+        },
+        "rows": [
+          {
+            "job_title": "Sr Solutions Architect",
+            "company": "ExtraHop",
+            "location": "🌏 Worldwide",
+            "job_link": "https://remoteok.com/remote-jobs/remote-sr-solutions-architect-extrahop-1137394",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          },
+          {
+            "job_title": "DESARROLLADOR FULL STACK",
+            "company": "Kruger NearShore LLC - Rekluti",
+            "location": "🌏 Probably worldwide",
+            "job_link": "https://remoteok.com/remote-jobs/remote-desarrollador-full-stack-kruger-nearshore-llc-rekluti-1137062",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          },
+          {
+            "job_title": "Senior Software Engineer Case Execution",
+            "company": "Pivotal Health",
+            "location": "🇺🇸 United States",
+            "job_link": "https://remoteok.com/remote-jobs/remote-senior-software-engineer-case-execution-pivotal-health-1136795",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          },
+          {
+            "job_title": "Data Analyst",
+            "company": "SEAhub Asia",
+            "location": "🇲🇾 Malaysia",
+            "job_link": "https://remoteok.com/remote-jobs/remote-data-analyst-seahub-asia-1136222",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          },
+          {
+            "job_title": "Human Resources Specialist",
+            "company": "Harvey Nash",
+            "location": "🇺🇸 United States",
+            "job_link": "https://remoteok.com/remote-jobs/remote-human-resources-specialist-harvey-nash-1135675",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          },
+          {
+            "job_title": "Care Navigator Level 1",
+            "company": "Ready",
+            "location": "🇺🇸 United States",
+            "job_link": "https://remoteok.com/remote-jobs/remote-care-navigator-level-1-ready-1135674",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          },
+          {
+            "job_title": "Healthcare Virtual Assistant Athena EMR Experience",
+            "company": "Snapscale Philippines",
+            "location": "🇵🇭 Philippines",
+            "job_link": "https://remoteok.com/remote-jobs/remote-healthcare-virtual-assistant-athena-emr-experience-snapscale-philippines-1135688",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          },
+          {
+            "job_title": "Junior Data Analyst",
+            "company": "HiredBuddy",
+            "location": "🇺🇸 United States",
+            "job_link": "https://remoteok.com/remote-jobs/remote-junior-data-analyst-hiredbuddy-1135673",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          },
+          {
+            "job_title": "Program Administration Manager",
+            "company": "Greenlight Action",
+            "location": "🌏 Worldwide",
+            "job_link": "https://remoteok.com/remote-jobs/remote-program-administration-manager-greenlight-action-1135738",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          },
+          {
+            "job_title": "AI Intern",
+            "company": "CertifyOS",
+            "location": "🇮🇳 India",
+            "job_link": "https://remoteok.com/remote-jobs/remote-ai-intern-certifyos-1135555",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          }
+        ]
+      },
+      {
+        "phase": "replay",
+        "wallMs": 3673.1182499999995,
+        "questions": 0,
+        "usage": {
+          "chooser": "jev",
+          "questions": 0,
+          "textQuestions": 0,
+          "batches": 0,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "waitMs": 0,
+          "costUsd": 0,
+          "zeroDataRetention": "unknown"
+        },
+        "summary": {
+          "status": "succeeded",
+          "items": 10,
+          "pages": 1,
+          "templates": 1,
+          "cacheHit": true,
+          "healingEvents": [],
+          "unmappedCandidates": [],
+          "fieldsNotFound": [],
+          "chooser": {
+            "name": "jev",
+            "questions": 0,
+            "inputTokens": 0,
+            "waitMs": 0,
+            "costUsd": 0
+          },
+          "input": {
+            "prompt": "Search Remote OK for Python jobs and extract up to 10 results with job title, company, location and job link. Exclude ads.",
+            "startUrls": [
+              "https://remoteok.com/"
+            ],
+            "mode": "list",
+            "description": "Python job listings from Remote OK",
+            "fields": [
+              {
+                "name": "job_title",
+                "description": "The position title"
+              },
+              {
+                "name": "company",
+                "description": "The hiring company"
+              },
+              {
+                "name": "location",
+                "description": "Job location"
+              },
+              {
+                "name": "job_link",
+                "description": "URL to the job posting"
+              }
+            ],
+            "goal": "search Remote OK for Python jobs",
+            "maxPages": 1,
+            "maxItems": 10,
+            "followDetailPages": false,
+            "browser": "chromium",
+            "allowedDomains": [],
+            "allowPrivateHosts": [],
+            "forceRecompile": false,
+            "profile": "store",
+            "secrets": {},
+            "allowMutations": [],
+            "freshProfile": false,
+            "headed": false,
+            "chooser": "jev"
+          },
+          "requests": {
+            "compile": 0,
+            "list": 1,
+            "record": 0
+          },
+          "traceReplays": 0,
+          "blockedRequests": 0,
+          "unhealed": 0
+        },
+        "rows": [
+          {
+            "job_title": "Sr Solutions Architect",
+            "company": "ExtraHop",
+            "location": "🌏 Worldwide",
+            "job_link": "https://remoteok.com/remote-jobs/remote-sr-solutions-architect-extrahop-1137394",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          },
+          {
+            "job_title": "DESARROLLADOR FULL STACK",
+            "company": "Kruger NearShore LLC - Rekluti",
+            "location": "🌏 Probably worldwide",
+            "job_link": "https://remoteok.com/remote-jobs/remote-desarrollador-full-stack-kruger-nearshore-llc-rekluti-1137062",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          },
+          {
+            "job_title": "Senior Software Engineer Case Execution",
+            "company": "Pivotal Health",
+            "location": "🇺🇸 United States",
+            "job_link": "https://remoteok.com/remote-jobs/remote-senior-software-engineer-case-execution-pivotal-health-1136795",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          },
+          {
+            "job_title": "Data Analyst",
+            "company": "SEAhub Asia",
+            "location": "🇲🇾 Malaysia",
+            "job_link": "https://remoteok.com/remote-jobs/remote-data-analyst-seahub-asia-1136222",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          },
+          {
+            "job_title": "Human Resources Specialist",
+            "company": "Harvey Nash",
+            "location": "🇺🇸 United States",
+            "job_link": "https://remoteok.com/remote-jobs/remote-human-resources-specialist-harvey-nash-1135675",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          },
+          {
+            "job_title": "Care Navigator Level 1",
+            "company": "Ready",
+            "location": "🇺🇸 United States",
+            "job_link": "https://remoteok.com/remote-jobs/remote-care-navigator-level-1-ready-1135674",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          },
+          {
+            "job_title": "Healthcare Virtual Assistant Athena EMR Experience",
+            "company": "Snapscale Philippines",
+            "location": "🇵🇭 Philippines",
+            "job_link": "https://remoteok.com/remote-jobs/remote-healthcare-virtual-assistant-athena-emr-experience-snapscale-philippines-1135688",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          },
+          {
+            "job_title": "Junior Data Analyst",
+            "company": "HiredBuddy",
+            "location": "🇺🇸 United States",
+            "job_link": "https://remoteok.com/remote-jobs/remote-junior-data-analyst-hiredbuddy-1135673",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          },
+          {
+            "job_title": "Program Administration Manager",
+            "company": "Greenlight Action",
+            "location": "🌏 Worldwide",
+            "job_link": "https://remoteok.com/remote-jobs/remote-program-administration-manager-greenlight-action-1135738",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          },
+          {
+            "job_title": "AI Intern",
+            "company": "CertifyOS",
+            "location": "🇮🇳 India",
+            "job_link": "https://remoteok.com/remote-jobs/remote-ai-intern-certifyos-1135555",
+            "_source": "https://remoteok.com/remote-python-jobs"
+          }
+        ]
+      }
+    ]
+  },
+  "editing": "Sequential actual Jev runs aligned using original rounded clock anchors; original timer and browser pixels preserved; final frames frozen; saved receipt rows shown after measured completion. Haiku excluded.",
+  "alignmentPrecisionSeconds": 0.05,
+  "samplingFramesPerSecond": 4,
+  "anchors": {
+    "compile": {
+      "first": 6,
+      "last": 169,
+      "displayedSeconds": 0
+    },
+    "replay": {
+      "first": 284,
+      "last": 296,
+      "displayedSeconds": 0.1
+    }
+  },
+  "mapping": [
+    {
+      "outputFrame": 0,
+      "elapsedSeconds": 0,
+      "compileFrame": "0006.png",
+      "replayFrame": "0283.png"
+    },
+    {
+      "outputFrame": 1,
+      "elapsedSeconds": 0.25,
+      "compileFrame": "0007.png",
+      "replayFrame": "0284.png"
+    },
+    {
+      "outputFrame": 2,
+      "elapsedSeconds": 0.5,
+      "compileFrame": "0007.png",
+      "replayFrame": "0285.png"
+    },
+    {
+      "outputFrame": 3,
+      "elapsedSeconds": 0.75,
+      "compileFrame": "0008.png",
+      "replayFrame": "0286.png"
+    },
+    {
+      "outputFrame": 4,
+      "elapsedSeconds": 1,
+      "compileFrame": "0009.png",
+      "replayFrame": "0287.png"
+    },
+    {
+      "outputFrame": 5,
+      "elapsedSeconds": 1.25,
+      "compileFrame": "0010.png",
+      "replayFrame": "0287.png"
+    },
+    {
+      "outputFrame": 6,
+      "elapsedSeconds": 1.5,
+      "compileFrame": "0011.png",
+      "replayFrame": "0287.png"
+    },
+    {
+      "outputFrame": 7,
+      "elapsedSeconds": 1.75,
+      "compileFrame": "0012.png",
+      "replayFrame": "0288.png"
+    },
+    {
+      "outputFrame": 8,
+      "elapsedSeconds": 2,
+      "compileFrame": "0013.png",
+      "replayFrame": "0288.png"
+    },
+    {
+      "outputFrame": 9,
+      "elapsedSeconds": 2.25,
+      "compileFrame": "0014.png",
+      "replayFrame": "0289.png"
+    },
+    {
+      "outputFrame": 10,
+      "elapsedSeconds": 2.5,
+      "compileFrame": "0015.png",
+      "replayFrame": "0290.png"
+    },
+    {
+      "outputFrame": 11,
+      "elapsedSeconds": 2.75,
+      "compileFrame": "0016.png",
+      "replayFrame": "0291.png"
+    },
+    {
+      "outputFrame": 12,
+      "elapsedSeconds": 3,
+      "compileFrame": "0017.png",
+      "replayFrame": "0292.png"
+    },
+    {
+      "outputFrame": 13,
+      "elapsedSeconds": 3.25,
+      "compileFrame": "0018.png",
+      "replayFrame": "0293.png"
+    },
+    {
+      "outputFrame": 14,
+      "elapsedSeconds": 3.5,
+      "compileFrame": "0019.png",
+      "replayFrame": "0294.png"
+    },
+    {
+      "outputFrame": 15,
+      "elapsedSeconds": 3.75,
+      "compileFrame": "0020.png",
+      "replayFrame": "0295.png"
+    },
+    {
+      "outputFrame": 16,
+      "elapsedSeconds": 4,
+      "compileFrame": "0021.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 17,
+      "elapsedSeconds": 4.25,
+      "compileFrame": "0022.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 18,
+      "elapsedSeconds": 4.5,
+      "compileFrame": "0023.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 19,
+      "elapsedSeconds": 4.75,
+      "compileFrame": "0024.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 20,
+      "elapsedSeconds": 5,
+      "compileFrame": "0025.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 21,
+      "elapsedSeconds": 5.25,
+      "compileFrame": "0026.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 22,
+      "elapsedSeconds": 5.5,
+      "compileFrame": "0027.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 23,
+      "elapsedSeconds": 5.75,
+      "compileFrame": "0028.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 24,
+      "elapsedSeconds": 6,
+      "compileFrame": "0029.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 25,
+      "elapsedSeconds": 6.25,
+      "compileFrame": "0030.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 26,
+      "elapsedSeconds": 6.5,
+      "compileFrame": "0031.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 27,
+      "elapsedSeconds": 6.75,
+      "compileFrame": "0032.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 28,
+      "elapsedSeconds": 7,
+      "compileFrame": "0033.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 29,
+      "elapsedSeconds": 7.25,
+      "compileFrame": "0034.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 30,
+      "elapsedSeconds": 7.5,
+      "compileFrame": "0035.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 31,
+      "elapsedSeconds": 7.75,
+      "compileFrame": "0035.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 32,
+      "elapsedSeconds": 8,
+      "compileFrame": "0035.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 33,
+      "elapsedSeconds": 8.25,
+      "compileFrame": "0036.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 34,
+      "elapsedSeconds": 8.5,
+      "compileFrame": "0036.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 35,
+      "elapsedSeconds": 8.75,
+      "compileFrame": "0037.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 36,
+      "elapsedSeconds": 9,
+      "compileFrame": "0038.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 37,
+      "elapsedSeconds": 9.25,
+      "compileFrame": "0039.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 38,
+      "elapsedSeconds": 9.5,
+      "compileFrame": "0040.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 39,
+      "elapsedSeconds": 9.75,
+      "compileFrame": "0041.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 40,
+      "elapsedSeconds": 10,
+      "compileFrame": "0042.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 41,
+      "elapsedSeconds": 10.25,
+      "compileFrame": "0042.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 42,
+      "elapsedSeconds": 10.5,
+      "compileFrame": "0043.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 43,
+      "elapsedSeconds": 10.75,
+      "compileFrame": "0044.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 44,
+      "elapsedSeconds": 11,
+      "compileFrame": "0045.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 45,
+      "elapsedSeconds": 11.25,
+      "compileFrame": "0046.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 46,
+      "elapsedSeconds": 11.5,
+      "compileFrame": "0047.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 47,
+      "elapsedSeconds": 11.75,
+      "compileFrame": "0048.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 48,
+      "elapsedSeconds": 12,
+      "compileFrame": "0049.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 49,
+      "elapsedSeconds": 12.25,
+      "compileFrame": "0050.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 50,
+      "elapsedSeconds": 12.5,
+      "compileFrame": "0051.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 51,
+      "elapsedSeconds": 12.75,
+      "compileFrame": "0052.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 52,
+      "elapsedSeconds": 13,
+      "compileFrame": "0053.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 53,
+      "elapsedSeconds": 13.25,
+      "compileFrame": "0054.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 54,
+      "elapsedSeconds": 13.5,
+      "compileFrame": "0055.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 55,
+      "elapsedSeconds": 13.75,
+      "compileFrame": "0056.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 56,
+      "elapsedSeconds": 14,
+      "compileFrame": "0057.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 57,
+      "elapsedSeconds": 14.25,
+      "compileFrame": "0058.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 58,
+      "elapsedSeconds": 14.5,
+      "compileFrame": "0059.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 59,
+      "elapsedSeconds": 14.75,
+      "compileFrame": "0060.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 60,
+      "elapsedSeconds": 15,
+      "compileFrame": "0061.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 61,
+      "elapsedSeconds": 15.25,
+      "compileFrame": "0062.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 62,
+      "elapsedSeconds": 15.5,
+      "compileFrame": "0063.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 63,
+      "elapsedSeconds": 15.75,
+      "compileFrame": "0064.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 64,
+      "elapsedSeconds": 16,
+      "compileFrame": "0065.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 65,
+      "elapsedSeconds": 16.25,
+      "compileFrame": "0066.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 66,
+      "elapsedSeconds": 16.5,
+      "compileFrame": "0067.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 67,
+      "elapsedSeconds": 16.75,
+      "compileFrame": "0068.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 68,
+      "elapsedSeconds": 17,
+      "compileFrame": "0069.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 69,
+      "elapsedSeconds": 17.25,
+      "compileFrame": "0070.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 70,
+      "elapsedSeconds": 17.5,
+      "compileFrame": "0071.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 71,
+      "elapsedSeconds": 17.75,
+      "compileFrame": "0072.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 72,
+      "elapsedSeconds": 18,
+      "compileFrame": "0073.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 73,
+      "elapsedSeconds": 18.25,
+      "compileFrame": "0074.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 74,
+      "elapsedSeconds": 18.5,
+      "compileFrame": "0075.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 75,
+      "elapsedSeconds": 18.75,
+      "compileFrame": "0076.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 76,
+      "elapsedSeconds": 19,
+      "compileFrame": "0077.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 77,
+      "elapsedSeconds": 19.25,
+      "compileFrame": "0078.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 78,
+      "elapsedSeconds": 19.5,
+      "compileFrame": "0079.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 79,
+      "elapsedSeconds": 19.75,
+      "compileFrame": "0080.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 80,
+      "elapsedSeconds": 20,
+      "compileFrame": "0081.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 81,
+      "elapsedSeconds": 20.25,
+      "compileFrame": "0082.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 82,
+      "elapsedSeconds": 20.5,
+      "compileFrame": "0083.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 83,
+      "elapsedSeconds": 20.75,
+      "compileFrame": "0084.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 84,
+      "elapsedSeconds": 21,
+      "compileFrame": "0085.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 85,
+      "elapsedSeconds": 21.25,
+      "compileFrame": "0086.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 86,
+      "elapsedSeconds": 21.5,
+      "compileFrame": "0087.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 87,
+      "elapsedSeconds": 21.75,
+      "compileFrame": "0088.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 88,
+      "elapsedSeconds": 22,
+      "compileFrame": "0089.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 89,
+      "elapsedSeconds": 22.25,
+      "compileFrame": "0090.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 90,
+      "elapsedSeconds": 22.5,
+      "compileFrame": "0091.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 91,
+      "elapsedSeconds": 22.75,
+      "compileFrame": "0092.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 92,
+      "elapsedSeconds": 23,
+      "compileFrame": "0093.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 93,
+      "elapsedSeconds": 23.25,
+      "compileFrame": "0094.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 94,
+      "elapsedSeconds": 23.5,
+      "compileFrame": "0095.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 95,
+      "elapsedSeconds": 23.75,
+      "compileFrame": "0096.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 96,
+      "elapsedSeconds": 24,
+      "compileFrame": "0097.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 97,
+      "elapsedSeconds": 24.25,
+      "compileFrame": "0098.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 98,
+      "elapsedSeconds": 24.5,
+      "compileFrame": "0099.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 99,
+      "elapsedSeconds": 24.75,
+      "compileFrame": "0100.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 100,
+      "elapsedSeconds": 25,
+      "compileFrame": "0101.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 101,
+      "elapsedSeconds": 25.25,
+      "compileFrame": "0102.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 102,
+      "elapsedSeconds": 25.5,
+      "compileFrame": "0103.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 103,
+      "elapsedSeconds": 25.75,
+      "compileFrame": "0104.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 104,
+      "elapsedSeconds": 26,
+      "compileFrame": "0105.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 105,
+      "elapsedSeconds": 26.25,
+      "compileFrame": "0106.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 106,
+      "elapsedSeconds": 26.5,
+      "compileFrame": "0107.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 107,
+      "elapsedSeconds": 26.75,
+      "compileFrame": "0107.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 108,
+      "elapsedSeconds": 27,
+      "compileFrame": "0108.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 109,
+      "elapsedSeconds": 27.25,
+      "compileFrame": "0109.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 110,
+      "elapsedSeconds": 27.5,
+      "compileFrame": "0110.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 111,
+      "elapsedSeconds": 27.75,
+      "compileFrame": "0111.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 112,
+      "elapsedSeconds": 28,
+      "compileFrame": "0112.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 113,
+      "elapsedSeconds": 28.25,
+      "compileFrame": "0113.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 114,
+      "elapsedSeconds": 28.5,
+      "compileFrame": "0114.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 115,
+      "elapsedSeconds": 28.75,
+      "compileFrame": "0115.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 116,
+      "elapsedSeconds": 29,
+      "compileFrame": "0116.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 117,
+      "elapsedSeconds": 29.25,
+      "compileFrame": "0117.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 118,
+      "elapsedSeconds": 29.5,
+      "compileFrame": "0118.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 119,
+      "elapsedSeconds": 29.75,
+      "compileFrame": "0119.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 120,
+      "elapsedSeconds": 30,
+      "compileFrame": "0120.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 121,
+      "elapsedSeconds": 30.25,
+      "compileFrame": "0121.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 122,
+      "elapsedSeconds": 30.5,
+      "compileFrame": "0122.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 123,
+      "elapsedSeconds": 30.75,
+      "compileFrame": "0123.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 124,
+      "elapsedSeconds": 31,
+      "compileFrame": "0124.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 125,
+      "elapsedSeconds": 31.25,
+      "compileFrame": "0125.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 126,
+      "elapsedSeconds": 31.5,
+      "compileFrame": "0126.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 127,
+      "elapsedSeconds": 31.75,
+      "compileFrame": "0127.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 128,
+      "elapsedSeconds": 32,
+      "compileFrame": "0128.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 129,
+      "elapsedSeconds": 32.25,
+      "compileFrame": "0129.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 130,
+      "elapsedSeconds": 32.5,
+      "compileFrame": "0130.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 131,
+      "elapsedSeconds": 32.75,
+      "compileFrame": "0131.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 132,
+      "elapsedSeconds": 33,
+      "compileFrame": "0132.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 133,
+      "elapsedSeconds": 33.25,
+      "compileFrame": "0133.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 134,
+      "elapsedSeconds": 33.5,
+      "compileFrame": "0134.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 135,
+      "elapsedSeconds": 33.75,
+      "compileFrame": "0135.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 136,
+      "elapsedSeconds": 34,
+      "compileFrame": "0136.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 137,
+      "elapsedSeconds": 34.25,
+      "compileFrame": "0137.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 138,
+      "elapsedSeconds": 34.5,
+      "compileFrame": "0138.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 139,
+      "elapsedSeconds": 34.75,
+      "compileFrame": "0139.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 140,
+      "elapsedSeconds": 35,
+      "compileFrame": "0140.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 141,
+      "elapsedSeconds": 35.25,
+      "compileFrame": "0141.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 142,
+      "elapsedSeconds": 35.5,
+      "compileFrame": "0142.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 143,
+      "elapsedSeconds": 35.75,
+      "compileFrame": "0143.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 144,
+      "elapsedSeconds": 36,
+      "compileFrame": "0144.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 145,
+      "elapsedSeconds": 36.25,
+      "compileFrame": "0145.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 146,
+      "elapsedSeconds": 36.5,
+      "compileFrame": "0146.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 147,
+      "elapsedSeconds": 36.75,
+      "compileFrame": "0147.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 148,
+      "elapsedSeconds": 37,
+      "compileFrame": "0147.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 149,
+      "elapsedSeconds": 37.25,
+      "compileFrame": "0148.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 150,
+      "elapsedSeconds": 37.5,
+      "compileFrame": "0149.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 151,
+      "elapsedSeconds": 37.75,
+      "compileFrame": "0150.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 152,
+      "elapsedSeconds": 38,
+      "compileFrame": "0151.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 153,
+      "elapsedSeconds": 38.25,
+      "compileFrame": "0152.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 154,
+      "elapsedSeconds": 38.5,
+      "compileFrame": "0153.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 155,
+      "elapsedSeconds": 38.75,
+      "compileFrame": "0154.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 156,
+      "elapsedSeconds": 39,
+      "compileFrame": "0155.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 157,
+      "elapsedSeconds": 39.25,
+      "compileFrame": "0156.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 158,
+      "elapsedSeconds": 39.5,
+      "compileFrame": "0157.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 159,
+      "elapsedSeconds": 39.75,
+      "compileFrame": "0158.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 160,
+      "elapsedSeconds": 40,
+      "compileFrame": "0159.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 161,
+      "elapsedSeconds": 40.25,
+      "compileFrame": "0160.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 162,
+      "elapsedSeconds": 40.5,
+      "compileFrame": "0161.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 163,
+      "elapsedSeconds": 40.75,
+      "compileFrame": "0162.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 164,
+      "elapsedSeconds": 41,
+      "compileFrame": "0163.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 165,
+      "elapsedSeconds": 41.25,
+      "compileFrame": "0164.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 166,
+      "elapsedSeconds": 41.5,
+      "compileFrame": "0164.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 167,
+      "elapsedSeconds": 41.75,
+      "compileFrame": "0165.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 168,
+      "elapsedSeconds": 42,
+      "compileFrame": "0166.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 169,
+      "elapsedSeconds": 42.25,
+      "compileFrame": "0167.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 170,
+      "elapsedSeconds": 42.5,
+      "compileFrame": "0168.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 171,
+      "elapsedSeconds": 42.75,
+      "compileFrame": "0169.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 172,
+      "elapsedSeconds": 43,
+      "compileFrame": "0169.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 173,
+      "elapsedSeconds": 43.25,
+      "compileFrame": "0169.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 174,
+      "elapsedSeconds": 43.5,
+      "compileFrame": "0169.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 175,
+      "elapsedSeconds": 43.75,
+      "compileFrame": "0169.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 176,
+      "elapsedSeconds": 44,
+      "compileFrame": "0169.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 177,
+      "elapsedSeconds": 44.25,
+      "compileFrame": "0169.png",
+      "replayFrame": "0296.png"
+    },
+    {
+      "outputFrame": 178,
+      "elapsedSeconds": 44.5,
+      "compileFrame": "0169.png",
+      "replayFrame": "0296.png"
+    }
+  ],
+  "limitations": "A measured example, not a universal speedup or an independent held-out benchmark. Alignment has original timer rounding and frame sampling precision."
+}

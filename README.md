@@ -37,6 +37,17 @@ Agents: read [`SKILL.md`](SKILL.md); [`llms.txt`](llms.txt) indexes the docs.
 
 ## Demos and evidence
 
+![Real Remote OK first run and saved replay](docs/remoteok-replay.gif)
+
+[Watch the 45-second clip](docs/remoteok-replay.mp4): two real sequential runs,
+aligned for comparison with their original timers (42.6 s / 3.7 s). Both produce
+ten records from the selected results page; replay makes zero model questions.
+The clip demonstrates healthy reuse. It does not demonstrate healing or establish
+a general speed ratio. [Capture provenance](docs/remoteok-replay-provenance.json)
+and [separate final-revision source proof](docs/remoteok-proof.json) preserve the
+evidence. The attempted Jev-versus-Haiku race was withheld because equivalent
+search completion was inconsistent.
+
 The controlled fixture below demonstrates compile, deliberately changed markup,
 and replay. Its answers are recorded fixtures: it shows behavior, not live model
 latency or a production-site guarantee. [Video](docs/demo.mp4), `npm run demo`.
@@ -123,6 +134,8 @@ coming; the compiled scraper format is the same in both.
 
 ## Limits
 
+- Models can mistake a filled form for a completed search. Validate the target
+  results and output meaning, not just status or non-empty fields.
 - Repairs supported field/step changes, but cannot guarantee repair of a redesign.
   An empty listing may report `no_items_found`; it is not always distinguishable
   from a changed item selector. Missing compiled rows get a bounded five-second wait.
