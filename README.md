@@ -117,6 +117,31 @@ Today Navvi runs locally through the CLI: Camoufox by default, Chromium with
 (default `./storage`). An Apify actor with the same input contract is
 coming; the compiled scraper format is the same in both.
 
+### Pay-per-event
+
+On Apify the actor charges four events, priced in the Apify Console, never in
+code. Every run ends with a `SUMMARY` record in the run's key-value store
+carrying the status, counts, chooser usage, healing events, the `scriptId` to
+pin next time, the charged event counts and the zero-data-retention state.
+
+| Event | Charged |
+| --- | --- |
+| `actor-start` | Once, first thing; covers navigation model spend when the operator key is used |
+| `scraper-compiled` | Once per template, the first time a page passes the fingerprint check with a scraper compiled this run; a cache hit charges nothing |
+| `page-scraped` | Per scraped page (listing, paginated page, detail page); the limit is checked before every page |
+| `result-item` | Per dataset item |
+
+When the run's charge limit is reached the items pushed so far stay in the
+dataset and the run ends `charge_limit`. Off the platform nothing is charged
+and every count in the summary is zero; a local run with
+`ACTOR_TEST_PAY_PER_EVENT=1` writes the charging log instead.
+
+Who pays what under pay-per-event, per Apify's pricing docs: the caller pays
+the events; the actor's platform usage (compute, residential proxy, storage)
+is the operator's cost, which is why the event prices carry a compute margin.
+The first platform run under this pricing confirms the split and this
+paragraph is updated with the observed numbers.
+
 ## Exit codes
 
 | Exit | Status | Meaning |
