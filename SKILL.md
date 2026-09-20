@@ -27,7 +27,7 @@ One command turns a prompt and a few URLs into records plus a compiled scraper J
 npx navvi "<what to extract or do>" <url...> [--out data.json|data.csv]
 ```
 
-Optional structure when the prompt is not enough: `--mode list|record --fields a,b,c --goal "<navigation>" --from-url <list.json> --max-pages N --follow-details`. `npx navvi --help` lists every flag.
+Optional structure when the prompt is not enough: `--mode list|record --fields a,b,c --goal "<navigation>" --from-url <url> --max-pages N --follow-details`. A field may declare an output type, `--fields name,price:money,stock:boolean` (types: `text`, `money`, `integer`, `number`, `boolean`, `url`); the run coerces the value and a value that does not coerce is `null`. `npx navvi --help` lists every flag.
 
 ## Who Answers the Questions
 
@@ -67,7 +67,7 @@ If you cannot keep stdin open (a tool that runs a command to completion), add `-
 ## Input Contract
 
 - Prompt: plain words, one flow, one site. Never put a credential in the prompt, goal or URLs; navvi refuses them
-- URLs come from the command line or `--from-url` (a `.txt`, `.json` or `.csv` list), never from the prompt
+- URLs come from the command line or `--from-url` (a URL answering the list as newline text or JSON), never from the prompt
 - Logins: `--profile local --secret password` reads `NAVVI_SECRET_PASSWORD` from the environment (or prompts on a TTY); `--secrets-file secrets.json` takes a `{name: value}` object. Reference them in `--goal` as `{{secret:password}}`
 - Domains: the run stays on the start URLs' domains; `--allow-domain <host>` widens it
 

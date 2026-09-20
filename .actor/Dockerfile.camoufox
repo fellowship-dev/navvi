@@ -1,0 +1,24 @@
+# Navvi on Apify, Camoufox image: the switch when a site challenges Chromium.
+# Same Playwright pin rule as ./Dockerfile; scripts/check-image-pins.mjs
+# checks both. The image fetched Camoufox and exports its path as
+# APIFY_DEFAULT_BROWSER_PATH, which src/browser/launch.ts hands to camoufox-js.
+FROM apify/actor-node-playwright-camoufox:22-1.60.0@sha256:17cdb6d906a0213b8ba9aaebed79a117ee210b4e8d05bfe1b548d99e3a6ded65
+
+ENV NAVVI_BROWSER=camoufox \
+    NAVVI_SKIP_BROWSER_DOWNLOAD=1 \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+COPY --chown=myuser package*.json ./
+
+RUN npm --quiet set progress=false \
+    && npm ci --omit=optional \
+    && echo "Node.js version:" && node --version \
+    && echo "NPM version:" && npm --version
+
+COPY --chown=myuser . ./
+
+RUN npm run build \
+    && npm prune --omit=dev --omit=optional \
+    && echo "Installed NPM packages:" && (npm list --omit=dev --all || true)
+
+CMD ["npm", "start", "--silent"]

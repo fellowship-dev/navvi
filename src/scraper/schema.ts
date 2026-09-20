@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { CHOOSERS, MODES, PROFILES, type Profile } from "../input/schema.js";
+import { CHOOSERS, FIELD_TYPES, MODES, PROFILES, type Profile } from "../input/schema.js";
 
 /**
  * CompiledScraper v1 (KTD6): the versioned JSON contract every phase reads and
@@ -41,9 +41,10 @@ export const FieldAlternativeSchema = z.object({
   fingerprint: FingerprintSchema,
 });
 
-/** R31: at least one alternative; healing only ever appends. */
+/** R31: at least one alternative; healing only ever appends. `type` (R5) is the declared output type replay coerces to. */
 export const FieldSchema = z.object({
   alternatives: z.array(FieldAlternativeSchema).min(1, "a field needs at least one alternative"),
+  type: z.enum(FIELD_TYPES).optional(),
 });
 
 const fieldName = z.string().regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/, "field names are identifiers");
@@ -212,7 +213,7 @@ export function appendFieldAlternative(
     throw new Error(`unknown field "${field}"; the merge API cannot add or rename fields`);
   }
   if (existing.alternatives.some((a) => sameFieldAlternative(a, alt))) return scraper;
-  const updated: Field = { alternatives: [...existing.alternatives, alt] };
+  const updated: Field = { ...existing, alternatives: [...existing.alternatives, alt] };
   if (options.detail && scraper.detail) {
     return { ...scraper, detail: { ...scraper.detail, fields: { ...scraper.detail.fields, [field]: updated } } };
   }

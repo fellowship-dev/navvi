@@ -19,6 +19,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "start": "node dist/src/main.js",
     "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",

@@ -142,7 +142,7 @@ function finish(options: CompileOptions, mapped: Map<string, FieldCandidate | nu
   const fieldsNotFound: string[] = [];
   for (const field of options.fields) {
     const candidate = mapped.get(field.name);
-    if (candidate) fields[field.name] = { alternatives: [toAlternative(candidate, parts.baseUrls)] };
+    if (candidate) fields[field.name] = { alternatives: [toAlternative(candidate, parts.baseUrls)], ...(field.type ? { type: field.type } : {}) };
     else fieldsNotFound.push(field.name);
   }
   const doc: CompiledScraper = {
