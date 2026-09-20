@@ -79,7 +79,12 @@ const image = (index: number) => {
   if (!images.has(index)) images.set(index, `data:image/png;base64,${readFileSync(join(source, "frames", entries[index]!.file)).toString("base64")}`);
   return images.get(index)!;
 };
-const results = (report: typeof compileReport, elapsed: number) => elapsed * 1000 < report.wallMs ? "" : `<div class="results"><table>${report.rows.slice(0, 4).map((row: Record<string, unknown>) => `<tr>${report.summary.input.fields.map((field: { name: string }) => `<td>${esc(String(row[field.name]))}</td>`).join("")}</tr>`).join("")}</table><b>${report.rows.length} saved records</b></div>`;
+const results = (report: typeof compileReport, elapsed: number) => elapsed * 1000 < report.wallMs ? "" : `<div class="results"><b>${report.rows.length} records saved · first 2 shown</b>${report.rows.slice(0, 2).map((row: Record<string, unknown>) => {
+  const fields = report.summary.input.fields as Array<{ name: string }>;
+  const values = fields.map(({ name }) => String(row[name] ?? ""));
+  return `<article><div>${esc(values[0] ?? "")}</div><small>${values.slice(1).map((value) => esc(/^https?:/.test(value) ? new URL(value).hostname : value)).join(" · ")}</small></article>`;
+}).join("")}</div>`;
+
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
 const mapping: Array<{ outputFrame: number; elapsedSeconds: number; compileFrame: string; replayFrame: string }> = [];
@@ -94,7 +99,7 @@ try {
       header{height:80px;padding:10px 16px;border-bottom:1px solid #30363d;font-size:20px;line-height:27px}header b{color:#7ee787}header span{color:#adbac7;font-size:18px}
       .panels{display:flex;gap:8px}.panel{width:632px}.label{height:32px;padding:4px 10px;font-size:20px;font-weight:700;color:#79c0ff}.repeat{color:#7ee787}
       .raw{position:relative;width:632px;height:474px;overflow:hidden}.raw img{position:absolute;left:-${laneOffset}px;top:-80px;width:1280px;height:800px;max-width:none}
-      .results{padding:12px 12px;font:18px/1.45 Menlo,monospace}.results table{width:100%;table-layout:fixed;border-collapse:collapse}.results td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-top:1px solid #30363d;padding:2px 5px 2px 0}.results b{display:block;color:#7ee787;margin-top:8px}
+      .results{padding:8px 12px;font:20px/1.2 -apple-system,Arial,sans-serif}.results article{margin-top:6px;border-top:1px solid #30363d;padding-top:6px}.results article div{font-weight:600;line-height:24px}.results small{display:block;font-size:17px;color:#adbac7;margin-top:3px}.results table{width:100%;table-layout:fixed;border-collapse:collapse}.results td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-top:1px solid #30363d;padding:2px 5px 2px 0}.results b{display:block;color:#7ee787;font-size:20px}
       footer{position:absolute;bottom:0;left:0;width:1280px;height:38px;padding:9px 16px;font-size:16px;color:#adbac7;border-top:1px solid #30363d;background:#0b0e14}
       </style></head><body><header><b>Navvi</b> · ${esc(receipt.prompt)}<br><span>Same prompt · ${esc(new URL(receipt.startUrl).hostname)} · fresh browser for each run</span></header>
       <div class="panels"><section class="panel"><div class="label">First run · Jev + text fallback</div><div class="raw"><img src="${image(compileIndex)}"></div>${results(compileReport, elapsed)}</section>

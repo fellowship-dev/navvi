@@ -29,9 +29,9 @@ for prompt interpretation and values to type; those calls are included in usage.
 ### 1. Compile: Haiku versus Jev
 
 Same task, separate empty caches, Haiku on the left and Jev on the right.
-The real-site comparison is pending: the latest Remote OK trial stalled in the
-Haiku lane, and result relevance still needs review. No speed or accuracy win is
-claimed. This slot will lead with the comparison once both outputs pass.
+The real-site comparison is pending owner review. Remote OK served unrelated
+roles on its Python-filter page, so that attempt is not a valid speed comparison.
+A Hacker News search comparison is being reviewed as an alternative.
 
 ### 2. Reuse: the saved scraper
 
@@ -40,7 +40,9 @@ claimed. This slot will lead with the comparison once both outputs pass.
 [Watch the video](docs/remoteok-replay.mp4): ten records from a real Remote OK
 search, then the same prompt in a fresh browser with **zero model calls**.
 The two sequential runs are aligned, with original clocks (42.6 s / 3.7 s).
-This demonstrates reuse; browser execution still has a cost.
+This historical capture demonstrates reuse, but its result relevance did not
+pass the launch review. It is not an accepted Python-job search demo. Browser
+execution still has a cost.
 
 <details>
 <summary>Recording evidence, healing demo and limitations</summary>
@@ -69,7 +71,11 @@ costs. A new live demo must retain its own rows, timings and revision.
 
 ## Install and run
 
-Node 22+. Install the 3.0 compiler with Chromium for the demo:
+Node 22+. The published compiler is 3.0.0. The separate `--decider`/`--writer`
+controls and highlighted-text extraction fix on main are newer than that release;
+use the source installation below to reproduce the proposed Hacker News demo.
+
+Install the published compiler with Chromium:
 
 ```bash
 NAVVI_BROWSER=chromium npm install -g navvi@3.0.0

@@ -88,3 +88,42 @@ The source must contain successful Jev compile/replay reports, complete requeste
 ## Latest real-site attempt
 
 The September 20 compile-only trial is **not accepted for publication**: Haiku returned `blocked_no_progress` with zero rows after 110.4 seconds; Jev returned ten rows after 61.8 seconds. Both reached the Python-filter URL, but the visible page includes unrelated-looking jobs. That is not evidence of a clean semantic match or a fair speed win. Review site filtering and extracted membership before accepting either dataset. The recorder correctly withheld the success GIF. Next work: inspect Haiku’s repeated rejected completion judgments and validate result membership beyond URL equality.
+
+
+## September 20 proposed Hacker News replacement
+
+Remote OK's Python-filter page served unrelated roles directly; only one of the
+first ten retained job descriptions mentioned Python. Treat the failed comparison
+and older replay as historical diagnostics, not an accepted semantic demo.
+The owner is reviewing Hacker News as an alternative; it is not approved yet.
+
+Clean source capture `80cfd8f` at `/tmp/navvi-hn-proposal/navvi-race-VJjU4P`:
+Haiku 49.3 s, Jev 25.6 s, ten correct stories per lane; Jev replay 2.2 s with
+zero model questions. Both deciders use the explicit Claude Code Haiku writer.
+Jev structured decisions use TypeSafe direct. These are end-to-end recorded
+workflows, including browser/capture overhead, not isolated inference latency.
+
+```sh
+DEMO_URL=https://hn.algolia.com/ \
+DEMO_EXPECT_SOURCE='https://hn.algolia.com/?dateRange=all&page=0&prefix=true&query=Python&sort=byPopularity&type=story' \
+DEMO_PROMPT='Search Hacker News for Python stories and extract up to 10 results with title, author, points and story link.' \
+DEMO_PHASES=compile,replay DEMO_OUT=/tmp/navvi-hn-proposal \
+npx tsx scripts/record-race.ts
+```
+
+`frame-times.jsonl` records per-frame phase, lane state and actual elapsed time.
+The recorder freezes completed lane screenshots. For this capture, Jev compile
+anchors are frames 6–102 (0.0 s) and replay 217–222 (0.1 s). The replay compositor
+selects the Jev pane from receipt lane order and presents readable result cards;
+it no longer assumes Jev is left or hardcodes the site name.
+
+Reviewed-source receipts and candidate media live in Buddy at
+`artifacts/navvi/2026-09-20-launch-evidence/`. The primary postprocessor preserves
+all original compile frames/timings and overlays two persisted rows after each
+lane completes. It omits the later replay phase. No clocks are rewritten and no
+footage is sped up. Full ten-row datasets and the independent page comparison
+remain alongside both clips.
+
+Use a source checkout for this recording. npm 3.0.0 predates separate
+writer/decider flags and the highlighted-word extraction correction. No npm
+patch release is implied by a main-branch capture.
