@@ -8,10 +8,10 @@ import { buildCrawleeLaunchContext, restoreProfileCookies, saveProfileCookies } 
 import { hostOf, isAllowedRequestUrl, registrableDomain } from "../browser/policy.js";
 import { createChooser, NavviError, NeedsHumanError, type Chooser } from "../chooser/index.js";
 import { compile, type CompileResult } from "../compile/index.js";
-import { LIMITS, isAllowedUrl, type Profile, type RunInput } from "../input/schema.js";
+import { LIMITS, isAllowedUrl, type FieldType, type Profile, type RunInput } from "../input/schema.js";
 import type { RunSummary } from "../main.js";
 import { dismissConsent, runPreSteps, type Notifier } from "../prestep/index.js";
-import { extractPage, fingerprintMatches, type ItemExtraction } from "../scraper/extract.js";
+import { coerceValues, extractPage, fieldTypesOf, fingerprintMatches, type ItemExtraction } from "../scraper/extract.js";
 import { cacheKey, validateScraper, type CompiledScraper, type Status, type TraceStep } from "../scraper/schema.js";
 import { ScraperStore, ScraperStoreError } from "../scraper/store.js";
 import { findPlaceholders, MissingSecretError, redactRunInput, resolveSecrets, type CommandRunner, type Secret } from "../secrets/resolve.js";
@@ -142,28 +142,56 @@ async function defaultFetchText(url: string): Promise<{ contentType: string; bod
   return { contentType: response.headers.get("content-type") ?? "", body: await response.text() };
 }
 
-function parseListSource(contentType: string, body: string): string[] | null {
-  const type = contentType.toLowerCase();
-  if (type.includes("json")) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(body);
-    } catch {
-      return null;
+/** A list entry's URL: a string, `{ url }`, or Strapi's `{ attributes: { url } }`. */
+function entryUrl(entry: unknown): string | undefined {
+  if (typeof entry === "string") return entry;
+  if (typeof entry !== "object" || entry === null) return undefined;
+  const o = entry as { url?: unknown; attributes?: { url?: unknown } };
+  if (typeof o.url === "string") return o.url;
+  return typeof o.attributes?.url === "string" ? o.attributes.url : undefined;
+}
+
+/** A JSON list: an array, or an object whose `urls`, `data` or `items` is one. */
+function parseJsonList(body: string): string[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  let list: unknown[] | null = null;
+  if (Array.isArray(parsed)) list = parsed;
+  else if (typeof parsed === "object" && parsed !== null) {
+    const o = parsed as Record<string, unknown>;
+    for (const key of ["urls", "data", "items"]) {
+      if (Array.isArray(o[key])) {
+        list = o[key] as unknown[];
+        break;
+      }
     }
-    const list = Array.isArray(parsed) ? parsed : typeof parsed === "object" && parsed !== null && Array.isArray((parsed as { urls?: unknown }).urls) ? (parsed as { urls: unknown[] }).urls : null;
-    if (!list) return null;
-    return list
-      .map((entry) => (typeof entry === "string" ? entry : typeof entry === "object" && entry !== null ? (entry as { url?: unknown }).url : undefined))
-      .filter((u): u is string => typeof u === "string");
   }
-  if (type.includes("text/plain") || type.includes("text/csv")) {
-    return body
-      .split(/\r?\n/)
-      .map((line) => line.split(",")[0]!.trim())
-      .filter((line) => line.length > 0 && !line.startsWith("#"));
-  }
-  return null;
+  if (!list) return null;
+  return list.map(entryUrl).filter((u): u is string => typeof u === "string");
+}
+
+function parseTextList(body: string): string[] {
+  return body
+    .split(/\r?\n/)
+    .map((line) => line.split(",")[0]!.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#"));
+}
+
+/**
+ * `strict` (a declared list URL, R34): JSON by content type or by shape, else
+ * lines; an HTML answer yields nothing. Otherwise (a start URL by extension)
+ * only a JSON or plain-text answer is a list.
+ */
+function parseListSource(contentType: string, body: string, strict = false): string[] | null {
+  const type = contentType.toLowerCase();
+  if (type.includes("json")) return parseJsonList(body);
+  if (type.includes("text/plain") || type.includes("text/csv")) return parseTextList(body);
+  if (!strict || type.includes("html")) return null;
+  return parseJsonList(body) ?? parseTextList(body);
 }
 
 function looksLikeListSource(url: string): boolean {
@@ -178,11 +206,15 @@ function looksLikeListSource(url: string): boolean {
 /**
  * R34: a start URL whose path ends in .txt/.json/.csv is fetched outside the
  * browser; when it answers JSON or plain text it is replaced by the URLs it
- * lists (a page answering HTML stays a start URL). Every URL is
+ * lists (a page answering HTML stays a start URL). A `urlLists` entry
+ * (`{ requestsFromUrl }` in the actor input, `--from-url` on the CLI) is
+ * always a list: fetched, parsed as JSON or lines, never opened as a page; one
+ * that fails or lists nothing is skipped with a log line. Every URL is
  * policy-checked; refused ones are dropped.
  */
 export async function loadListSources(
   startUrls: readonly string[],
+  urlLists: readonly string[],
   allowPrivateHosts: readonly string[],
   fetchText: (url: string) => Promise<{ contentType: string; body: string }> = defaultFetchText,
 ): Promise<string[]> {
@@ -204,6 +236,22 @@ export async function loadListSources(
     }
     if (listed === null) push(url);
     else for (const entry of listed) push(entry);
+  }
+  for (const url of urlLists) {
+    if (!isAllowedUrl(url, allowPrivateHosts)) continue;
+    let listed: string[] | null = null;
+    try {
+      const { contentType, body } = await fetchText(url);
+      listed = parseListSource(contentType, body, true);
+    } catch (error) {
+      ctxLog(`list ${url} skipped: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+    if (listed === null || listed.length === 0) {
+      ctxLog(`list ${url} skipped: no URLs in the answer`);
+      continue;
+    }
+    for (const entry of listed) push(entry);
   }
   return out;
 }
@@ -333,6 +381,9 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   const paginateHook: PaginateHook = deps.paginate ?? defaultPaginate;
   const fields = (input.fields ?? []).map((f) => f.name);
   const detailFields = input.followDetailPages ? (input.detailFields ?? []) : [];
+  // R5: the run's declared types win over the ones recorded at compile time, so a pinned scraper compiled without types still coerces.
+  const inputTypes: Record<string, FieldType | undefined> = {};
+  for (const f of [...(input.fields ?? []), ...detailFields]) if (f.type) inputTypes[f.name] = f.type;
   const detailFieldNames = detailFields.map((f) => f.name);
   const mode = input.mode ?? "list";
   const state: RunState = {
@@ -364,7 +415,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   if (started.limitReached && started.charged === 0) return fail("charge_limit", "charge limit reached before actor-start");
 
   // R34: list sources, then the policy on every URL.
-  const urls = await loadListSources(input.startUrls ?? [], input.allowPrivateHosts, deps.fetchText);
+  const urls = await loadListSources(input.startUrls ?? [], input.urlLists, input.allowPrivateHosts, deps.fetchText);
   if (urls.length === 0) return fail("no_items_found", "no allowed start URL");
   const guard = makeRequestGuard(input.allowPrivateHosts, urls);
 
@@ -806,10 +857,12 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       if (Object.keys(live.fields).some((n) => item.values[n] === null)) state.failedItems += 1;
     }
     if (rows.length > 0) {
+      // R5: declared types are applied after the fingerprint check, on the row that goes out
+      const types = { ...fieldTypesOf(live), ...inputTypes };
       await dataset.pushData(
         rows.map((item) => {
           const { [DETAIL_LINK_FIELD]: _hidden, ...values } = item.values;
-          return { ...values, _source: sourceUrl };
+          return { ...coerceValues(values, types, sourceUrl), _source: sourceUrl };
         }),
       );
     }

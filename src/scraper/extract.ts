@@ -1,5 +1,6 @@
 import { ensureEvaluateShim } from "../browser/snapshot.js";
 import type { Page } from "playwright";
+import type { FieldType } from "../input/schema.js";
 import type { CompiledScraper, FieldAlternative, Fingerprint, Shape } from "./schema.js";
 
 /**
@@ -135,6 +136,93 @@ export function fingerprintMatches(value: string | null | undefined, fingerprint
     case "money":
       return isMoney(t) || INT.test(t) || DECIMAL.test(t);
   }
+}
+
+// ---------------------------------------------------------------- typed values (R5)
+
+export type TypedValue = string | number | boolean | null;
+
+/** The first number in the text: sign, digits, one or two separators. */
+const NUMBER_TOKEN = /[-+]?\d[\d.,]*/;
+
+/**
+ * Reads a number the way a price is written: `6.990` and `12,990` are
+ * thousands (Chilean dot grouping and the English comma), `12.990,50` and
+ * `12,990.00` carry a decimal part after the last separator, `6.99` and
+ * `12,5` are decimals. Null when there is no number.
+ */
+export function parseNumber(text: string | null | undefined): number | null {
+  const match = NUMBER_TOKEN.exec(squash(text));
+  if (!match) return null;
+  let token = match[0];
+  const sign = token.startsWith("-") ? -1 : 1;
+  token = token.replace(/^[-+]/, "").replace(/[.,]$/, "");
+  const dots = token.split(".").length - 1;
+  const commas = token.split(",").length - 1;
+  let normalized: string;
+  if (dots > 0 && commas > 0) {
+    // the last separator is the decimal one, the other groups thousands
+    const decimal = token.lastIndexOf(".") > token.lastIndexOf(",") ? "." : ",";
+    const grouping = decimal === "." ? "," : ".";
+    normalized = token.split(grouping).join("").replace(decimal, ".");
+  } else if (dots + commas === 0) {
+    normalized = token;
+  } else {
+    const sep = dots > 0 ? "." : ",";
+    const parts = token.split(sep);
+    // several separators, or one followed by exactly three digits: thousands grouping
+    const grouping = parts.length > 2 || (parts.length === 2 && parts[1]!.length === 3);
+    normalized = grouping ? parts.join("") : parts.join(".");
+  }
+  const value = Number(normalized);
+  return Number.isFinite(value) ? sign * value : null;
+}
+
+const NO_ACCENTS = (s: string): string => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+/** Phrases match anywhere in the text; the negatives go first because "no disponible" contains "disponible". Words match the whole text only. */
+const FALSE_PHRASES = ["agotado", "sin stock", "no disponible", "no hay stock", "out of stock", "sold out", "unavailable", "not available"];
+const TRUE_PHRASES = ["en stock", "hay stock", "disponible", "in stock", "available"];
+const FALSE_WORDS = new Set(["no", "false", "0"]);
+const TRUE_WORDS = new Set(["si", "yes", "true", "1"]);
+
+export function parseBoolean(text: string | null | undefined): boolean | null {
+  const t = NO_ACCENTS(squash(text).toLowerCase());
+  if (!t) return null;
+  if (FALSE_WORDS.has(t) || FALSE_PHRASES.some((p) => t.includes(p))) return false;
+  if (TRUE_WORDS.has(t) || TRUE_PHRASES.some((p) => t.includes(p))) return true;
+  return null;
+}
+
+/** R5: the extracted text as the field's declared type; untyped and `text` fields are returned as they are. */
+export function coerceValue(value: string | null, type: FieldType | undefined, base?: string): TypedValue {
+  if (value === null || type === undefined || type === "text") return value;
+  switch (type) {
+    case "money":
+    case "number":
+      return parseNumber(value);
+    case "integer": {
+      const n = parseNumber(value);
+      return n !== null && Number.isInteger(n) ? n : null;
+    }
+    case "boolean":
+      return parseBoolean(value);
+    case "url":
+      return resolveUrl(value, base ?? value);
+  }
+}
+
+export function coerceValues(values: Record<string, string | null>, types: Record<string, FieldType | undefined>, base?: string): Record<string, TypedValue> {
+  const out: Record<string, TypedValue> = {};
+  for (const [name, value] of Object.entries(values)) out[name] = coerceValue(value, types[name], base);
+  return out;
+}
+
+/** The declared type of every field, top-level and detail. */
+export function fieldTypesOf(scraper: CompiledScraper): Record<string, FieldType | undefined> {
+  const types: Record<string, FieldType | undefined> = {};
+  for (const [name, field] of Object.entries(scraper.fields)) types[name] = field.type;
+  for (const [name, field] of Object.entries(scraper.detail?.fields ?? {})) types[name] = field.type;
+  return types;
 }
 
 // ---------------------------------------------------------------- extraction
