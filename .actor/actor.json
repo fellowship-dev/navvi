@@ -2,13 +2,15 @@
   "actorSpecification": 1,
   "name": "navvi",
   "title": "Navvi: self-healing scraper compiler",
-  "description": "Prompt in, data out, and the second run costs nothing. Compiles a scraper from a plain-English prompt, replays it with no model call, heals drift.",
+  "description": "Web scraper that compiles itself from a plain-English prompt and extracts titles, prices, stock, dates and links as typed values. Every run after the first replays the compiled selectors with no model call, and repairs itself when the page changes. Export, schedule or call the API.",
   "version": "3.0",
   "buildTag": "beta",
   "dockerfile": "./Dockerfile",
   "readme": "../README.md",
   "input": "./input_schema.json",
-  "storages": { "dataset": "./dataset_schema.json" },
+  "storages": {
+    "dataset": "./dataset_schema.json"
+  },
   "minMemoryMbytes": 2048,
   "maxMemoryMbytes": 8192,
   "environmentVariables": {
