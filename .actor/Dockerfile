@@ -23,7 +23,7 @@ COPY --chown=myuser scripts/postinstall.mjs ./scripts/postinstall.mjs
 
 # Dev dependencies are needed for the TypeScript build, then pruned.
 RUN npm --quiet set progress=false \
-    && npm ci \
+    && npm ci --include=dev \
     && echo "Node.js version:" && node --version \
     && echo "NPM version:" && npm --version
 
