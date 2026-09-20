@@ -162,3 +162,53 @@ Every row below is from one run of the harness after the hillclimb.
 | claude | live:quotes-login | 16 | 70 | 51693 | 57025 | 0.000000 | 20/20 | 0 | ok |
 | claude | live:books-category | 9 | 50 | 41881 | 49605 | 0.000000 | 22/22 | 0 | ok |
 <!-- measurements:end -->
+
+## On the Apify platform (2026-09-20)
+
+The first platform runs of the actor, U4 of the client-on-Navvi plan. Actor
+`kdeETLG1aDgq61ofI`, the prefill input (python.org/jobs, list mode, five
+fields with `link` typed as `url`, `maxPages` 1), Jev over the Vercel AI
+Gateway supplied as the caller's `gatewayApiKey`. Both runs executed under
+`LIMITED_PERMISSIONS`.
+
+| build | tag | browser | status | items | pages | questions | chooser wait (ms) | cost (USD) | charges |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 3.0.5 | `beta` | Chromium | succeeded | 25 | 1 | 7 | 749 | 0.000433 | all zero |
+| 3.0.7 | `beta-camoufox` | Camoufox | succeeded | 25 | 1 | 0 | 0 | 0.000000 | all zero |
+
+Read these two rows together. The Chromium run compiled the scraper from
+scratch and asked Jev seven questions for four hundredths of a cent. The
+Camoufox run, on the same account minutes later, found that scraper in the
+`scraper-cache` key-value store and replayed it with **zero** model
+questions and zero cost: the compile-once promise holds across images on the
+platform, not only locally.
+
+Charges are all zero in both runs and that is correct, not a defect. The actor
+has no pay-per-event pricing configured in the Console yet, and `Charger` is a
+deliberate no-op without it, so a test run bills nobody. The charging counters
+are exercised instead by `tests/billing.test.ts` against a fake with the SDK's
+semantics, and locally by `ACTOR_TEST_PAY_PER_EVENT=1`.
+
+Not yet measured on the platform: the live measurement set (this table's
+scenarios run against the fixture server, which the platform has no access
+to), and a Cloudflare-fronted site to record `blocked_bot_detection` under
+Chromium against the Camoufox result. Both remain open items of U4.
+
+### What the image build actually required
+
+Five failed builds preceded 3.0.5, each a real defect that no local test could
+catch, because this Mac has no container runtime and the platform build is the
+first place the recipe runs:
+
+1. `camoufox-js` depends on `better-sqlite3`, which found no prebuild for the
+   image platform and fell back to `node-gyp`; the base images ship no Python.
+   `camoufox-js` is optional now, and both images install a toolchain.
+2. `npm ci` runs this package's `postinstall`, but the Dockerfiles copied only
+   the manifests at that point, so the script was missing.
+3. `tsc` compiled `src/measure` and `scripts/`, which import the test fixture
+   server, and `tests/` is excluded from the build context.
+   `tsconfig.actor.json` now compiles `src` and `bin` only.
+4. The base images set `NODE_ENV=production`, so a bare `npm ci` omitted
+   devDependencies and `tsc` was absent. `--include=dev` says it outright.
+5. The Camoufox image pruned `--omit=optional` after the build and so deleted
+   the very package it launches; it prunes only dev dependencies now.
