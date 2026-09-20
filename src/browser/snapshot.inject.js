@@ -329,15 +329,42 @@
       },
     });
     var el = row;
+    var skipRoot = null;
     while (el) {
+      if (skipRoot && skipRoot !== el && skipRoot.contains(el)) { el = walker.nextNode(); continue; }
       var path = prefix + pathFor(el, pathRoot);
       var own = ownText(el);
       if (own) sink.push({ el: el, leaf: leaf(el, null, own, path, selectorRoot) });
+      else {
+        // A short inline container made only of text fragments (a price split into currency, integer and
+        // decimals, a date split into parts) is one composite candidate with its joined text; the fragments
+        // themselves are meaningless alone and are not offered.
+        var joined = fragmentText(el);
+        if (joined) { sink.push({ el: el, leaf: leaf(el, null, joined, path, selectorRoot) }); skipRoot = el; }
+      }
       if (el.localName === "a" && el.getAttribute("href")) sink.push({ el: el, leaf: leaf(el, "href", squash(el.getAttribute("href")).slice(0, LEAF_TEXT_CHARS), path + "/@href", selectorRoot) });
       if (el.localName === "img" && el.getAttribute("src")) sink.push({ el: el, leaf: leaf(el, "src", squash(el.getAttribute("src")).slice(0, LEAF_TEXT_CHARS), path + "/@src", selectorRoot) });
       if (el.localName === "time" && el.getAttribute("datetime")) sink.push({ el: el, leaf: leaf(el, "datetime", squash(el.getAttribute("datetime")), path + "/@datetime", selectorRoot) });
       el = walker.nextNode();
     }
+  }
+  var FRAGMENT_TAGS = new Set(["span", "b", "i", "em", "strong", "sup", "sub", "small", "bdi", "abbr"]);
+  var FRAGMENT_TEXT_CHARS = 40;
+  var FRAGMENT_PART_CHARS = 6;
+  /** Joined text of an element whose children are two or more visible inline text fragments and nothing else. */
+  function fragmentText(el) {
+    if (!FRAGMENT_TAGS.has(el.localName) && el.localName !== "div" && el.localName !== "p" && el.localName !== "td") return "";
+    var kids = Array.from(el.children);
+    if (kids.length < 2 || kids.length > 8) return "";
+    for (var k of kids) {
+      if (!FRAGMENT_TAGS.has(k.localName) || k.children.length > 0 || !visible(k)) return "";
+      // Each fragment must be meaningless on its own: a currency sign, digits, a separator, a short unit code.
+      var part = squash(k.textContent || "");
+      if (part.length > FRAGMENT_PART_CHARS || !/^(?:[^A-Za-z\u00C0-\u024F]+|[A-Za-z]{1,3})$/.test(part)) return "";
+    }
+    var text = squash(el.textContent || "");
+    if (!text || text.length > FRAGMENT_TEXT_CHARS) return "";
+    return text;
   }
   function leaf(el, attr, text, path, selectorRoot) {
     var out = {

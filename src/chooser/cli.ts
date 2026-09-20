@@ -124,10 +124,30 @@ export function findOnPath(command: string, env: NodeJS.ProcessEnv = process.env
 
 // ---------------------------------------------------------------- rendering and parsing
 
+/**
+ * Small models sometimes answer a choice with words ("not shown") instead of
+ * an index. That is `none`; the strict validator would otherwise fail the batch.
+ */
+export function coerceAnswers(batch: Question[], raw: unknown[]): unknown[] {
+  const kinds = new Map(batch.map((q) => [q.id, q.kind]));
+  return raw.map((a) => {
+    if (!isRecord(a) || typeof a.id !== "string") return a;
+    const kind = kinds.get(a.id);
+    if (kind !== "choice" && kind !== "boolean" && kind !== "score") return a;
+    const { text, ...rest } = a;
+    const index = rest.index;
+    if (typeof index === "number" && Number.isInteger(index)) return rest;
+    if (typeof index === "string" && /^-?\d+$/.test(index)) return { ...rest, index: Number(index) };
+    if (index === null || index === undefined || typeof text === "string") return { ...rest, index: null };
+    return rest;
+  });
+}
+
 /** One prompt per batch: the answer shape first, then the model chooser's state and questions. */
 export function renderPrompt(batch: Question[]): string {
   return [
     `Reply with JSON only, no prose, no code fence: ${ANSWER_WITH}`,
+    "For choice questions answer with an option index (an integer) or null for none; never write words in place of an index. Use \"text\" only for text questions.",
     SYSTEM_PROMPT,
     `STATE:\n${batch[0]?.state ?? ""}`,
     `QUESTIONS:\n${renderQuestions(batch)}`,
@@ -293,7 +313,7 @@ export class CliChooser extends BaseChooser {
     const outcome: { text: string | undefined; inputTokens?: number; outputTokens?: number } = this.harness === "claude" ? this.claudeOutcome(run) : this.codexOutcome(run);
     const parsed = outcome.text === undefined ? undefined : extractJsonObject(outcome.text);
     // No JSON, or JSON without answers: the base class re-asks once and then fails typed.
-    const answers = parsed && Array.isArray(parsed.answers) ? parsed.answers : [];
+    const answers = coerceAnswers(batch, parsed && Array.isArray(parsed.answers) ? parsed.answers : []);
     return { answers, inputTokens: outcome.inputTokens ?? estimate, outputTokens: outcome.outputTokens ?? estimateTokens(outcome.text ?? ""), zeroDataRetention: "not_applicable" };
   }
 
