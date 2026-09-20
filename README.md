@@ -139,7 +139,9 @@ challenges Chromium. Both image tags carry the Playwright version and must
 equal the `playwright` pin in `package.json`; `node scripts/check-image-pins.mjs`
 fails CI when they disagree. CI pushes every green `main` to the `beta` build
 tag through `apify/push-actor-action` when the `APIFY_TOKEN` repository
-secret is present; `latest` is a manual promote.
+secret is present; `latest` is a manual promote. `node scripts/push-beta.mjs`
+pushes the Chromium beta from a signed-in CLI and `--camoufox` pushes the
+Camoufox build under the `beta-camoufox` tag of the same version.
 
 The actor input differs from the CLI in three places: `startUrls` takes
 `{ url }` and `{ requestsFromUrl }` entries (Apify's request-list editor);
