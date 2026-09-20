@@ -2,12 +2,12 @@
   "id": "field.link",
   "index": 1,
   "probabilities": [
-    0.02,
-    0.72,
+    0.03,
+    0.64,
     0
   ],
   "kind": "choice",
-  "inputTokens": 396,
+  "inputTokens": 408,
   "outputTokens": 47,
   "chooser": "jev"
 }

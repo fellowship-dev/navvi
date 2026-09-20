@@ -1,0 +1,11 @@
+{
+  "id": "nav.1.type",
+  "index": null,
+  "probabilities": [
+    0.01
+  ],
+  "kind": "choice",
+  "inputTokens": 2000,
+  "outputTokens": 154,
+  "chooser": "jev"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "nav.2.done",
+  "index": 1,
+  "probability": 0.94,
+  "kind": "boolean",
+  "inputTokens": 1931,
+  "outputTokens": 23,
+  "chooser": "jev"
+}

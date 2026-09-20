@@ -1,0 +1,11 @@
+{
+  "id": "group",
+  "index": 0,
+  "probabilities": [
+    0.96
+  ],
+  "kind": "choice",
+  "inputTokens": 619,
+  "outputTokens": 35,
+  "chooser": "jev"
+}

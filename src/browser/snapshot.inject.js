@@ -645,6 +645,7 @@
         form: formInfo(e.form || e.closest("form"), forms),
         autocomplete: e.getAttribute("autocomplete") || undefined,
         nameAttr: e.getAttribute("name") || undefined,
+        idAttr: e.id || undefined,
         secretCapable: inputType === "password",
         href: tag === "a" ? e.href : undefined,
       };

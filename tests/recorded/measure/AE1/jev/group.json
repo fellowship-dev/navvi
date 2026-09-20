@@ -2,10 +2,10 @@
   "id": "group",
   "index": 0,
   "probabilities": [
-    0.93
+    0.9
   ],
   "kind": "choice",
-  "inputTokens": 535,
+  "inputTokens": 585,
   "outputTokens": 35,
   "chooser": "jev"
 }

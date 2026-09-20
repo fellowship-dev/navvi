@@ -1,0 +1,8 @@
+{
+  "id": "field.team",
+  "index": 0,
+  "kind": "choice",
+  "inputTokens": 3,
+  "outputTokens": 243,
+  "chooser": "claude"
+}

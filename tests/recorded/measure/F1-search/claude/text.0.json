@@ -4,6 +4,6 @@
   "text": "python jobs",
   "kind": "text",
   "inputTokens": 10,
-  "outputTokens": 382,
+  "outputTokens": 276,
   "chooser": "claude"
 }

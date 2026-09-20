@@ -2,13 +2,13 @@
   "id": "nav.0.op",
   "index": 1,
   "probabilities": [
-    0.01,
-    0.98,
+    0,
+    1,
     0,
     0,
     0,
     0,
-    0.01
+    0
   ],
   "kind": "choice",
   "inputTokens": 528,

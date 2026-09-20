@@ -1,0 +1,17 @@
+{
+  "id": "nav.2.op",
+  "index": 0,
+  "probabilities": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "kind": "choice",
+  "inputTokens": 641,
+  "outputTokens": 62,
+  "chooser": "jev"
+}

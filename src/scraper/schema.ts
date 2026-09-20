@@ -54,6 +54,8 @@ export const LocatorAlternativeSchema = z.object({
   role: z.string().min(1),
   name: z.string(),
   exact: z.boolean(),
+  /** For a control with no accessible name (a password field behind a broken label): its `name` attribute or id, as a CSS selector. */
+  css: z.string().min(1).optional(),
 });
 
 export const StepTargetSchema = z.object({

@@ -2,12 +2,12 @@
   "id": "field.company",
   "index": 2,
   "probabilities": [
-    0.01,
     0,
-    0.94
+    0,
+    0.95
   ],
   "kind": "choice",
-  "inputTokens": 396,
+  "inputTokens": 408,
   "outputTokens": 47,
   "chooser": "jev"
 }

@@ -1,0 +1,16 @@
+{
+  "id": "field.team",
+  "index": 0,
+  "probabilities": [
+    0.99,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "kind": "choice",
+  "inputTokens": 563,
+  "outputTokens": 79,
+  "chooser": "jev"
+}

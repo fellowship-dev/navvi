@@ -86,6 +86,7 @@ export interface SnapshotControl {
   form: SnapshotFormInfo | null;
   autocomplete?: string | undefined;
   nameAttr?: string | undefined;
+  idAttr?: string | undefined;
   /** R24: true only for password inputs, which are only reachable through a secret step. */
   secretCapable: boolean;
   href?: string | undefined;

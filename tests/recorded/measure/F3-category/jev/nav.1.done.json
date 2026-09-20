@@ -1,7 +1,7 @@
 {
   "id": "nav.1.done",
   "index": 1,
-  "probability": 0.87,
+  "probability": 0.88,
   "kind": "boolean",
   "inputTokens": 3475,
   "outputTokens": 23,

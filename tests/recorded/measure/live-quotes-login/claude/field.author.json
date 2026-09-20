@@ -1,0 +1,8 @@
+{
+  "id": "field.author",
+  "index": 2,
+  "kind": "choice",
+  "inputTokens": 3,
+  "outputTokens": 189,
+  "chooser": "claude"
+}

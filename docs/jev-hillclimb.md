@@ -75,6 +75,8 @@ operation is consumed), so a head the run never used is asked but not scored.
 | 5 | one rule each for `list_group`, `detail_page_link` and `next_page_link` (a lone candidate that fits is the answer; what a next link is not) | 329/330 (99.7%) | 24/25 | 35/35 | 45/45 | 30/30 | 15/15 |
 | 6 | the gate is joint: a gated choice stands when P(present) x P(choice) >= 0.2 instead of P(present) >= 0.5. Two rewordings of the gate rule were tried first and reverted: dropping the out-of-stock example moved the absent case from 0.22 to 0.45; a "yes when" clause moved it to 0.48 | **330/330 (100.0%)** | 25/25 | 35/35 | 45/45 | 30/30 | 15/15 |
 
+| 7 | live login (quotes.toscrape.com): after the submitted form Jev answered BLOCKED, then DONE was rejected by the verification. One rule each for `next_operation` (a submitted form whose page changed has done its work; a session on the page means DONE) and `goal_achieved` (what evidences a login, a search, an open-a-page goal). The same run also exposed a Navvi locator defect: the password field behind a broken label has no accessible name, so the role locator failed; alternatives now carry a CSS hint by `name` attribute or id | 330/330 on the bank; the live login went from 0/20 to 20/20 under both Jev and Claude | | | | | |
+
 Step 4's two misses before the head rule were a single-candidate detail link
 (`P(gold)` 0.49 to 0.54 against `none`), the shape of the original group
 complaint, fixed by step 5's rule, and two transport failures on one run.
