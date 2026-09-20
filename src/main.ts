@@ -119,11 +119,36 @@ export async function run(raw: unknown, deps: CrawlDeps = {}): Promise<RunSummar
   return runCrawl(input, { ...deps, chooser });
 }
 
+/** Actor-only input keys: caller keys (R23) become the run's env, `scraperStore` qualifies a bare `scriptId`. None of them reaches the parsed input. */
+export const ACTOR_ONLY_KEYS = ["typesafeApiKey", "gatewayApiKey", "anthropicApiKey", "scraperStore"] as const;
+
+const CALLER_KEY_ENV: Record<string, string> = { typesafeApiKey: "TYPESAFE_API_KEY", gatewayApiKey: "AI_GATEWAY_API_KEY", anthropicApiKey: "ANTHROPIC_API_KEY" };
+
+/**
+ * Splits the actor input into the run input and the run's environment. A
+ * caller key overrides the operator's for this run only; `scraperStore` with
+ * a bare `scriptId` becomes `store/key`. Returns a copy; the raw object and
+ * `base` are not modified.
+ */
+export function actorInput(raw: unknown, base: NodeJS.ProcessEnv = process.env): { input: Record<string, unknown>; env: NodeJS.ProcessEnv } {
+  const env: NodeJS.ProcessEnv = { ...base };
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return { input: {}, env };
+  const { typesafeApiKey, gatewayApiKey, anthropicApiKey, scraperStore, ...input } = raw as Record<string, unknown>;
+  for (const [key, value] of Object.entries({ typesafeApiKey, gatewayApiKey, anthropicApiKey })) {
+    if (typeof value === "string" && value.trim().length > 0) env[CALLER_KEY_ENV[key]!] = value.trim();
+  }
+  if (typeof scraperStore === "string" && scraperStore.length > 0 && typeof input.scriptId === "string" && input.scriptId.length > 0 && !input.scriptId.includes("/")) {
+    input.scriptId = `${scraperStore}/${input.scriptId}`;
+  }
+  return { input, env };
+}
+
 async function main() {
   await Actor.init();
   const raw = (await Actor.getInput()) ?? {};
   try {
-    const summary = await run(raw);
+    const { input, env } = actorInput(raw);
+    const summary = await run(input, { env });
     await Actor.setValue("SUMMARY", summary);
     const message = summary.message ? `${summary.status}: ${summary.message}` : summary.status;
     // needs_human is a hold, not a failure: the CLI (U17) maps it to exit code 3.

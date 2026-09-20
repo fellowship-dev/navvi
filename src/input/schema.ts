@@ -95,7 +95,8 @@ function splitStartUrls(raw: unknown): unknown {
   return { ...input, startUrls, urlLists };
 }
 
-const BaseInputSchema = z
+/** The input object before the start-URL split; the actor schema test reads its keys. */
+export const BaseInputSchema = z
   .object({
     prompt: z.string().min(1).optional(),
     startUrls: z.array(urlField).optional(),

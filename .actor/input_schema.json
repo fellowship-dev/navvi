@@ -1,0 +1,317 @@
+{
+  "title": "Navvi input",
+  "description": "Describe what to extract and where. A plain-English prompt is enough; the structured fields below pin the details when a program is calling. The second run of the same prompt on the same site replays the compiled scraper with no model call.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "prompt": {
+      "title": "Prompt",
+      "type": "string",
+      "description": "What to extract, in plain words, for example: 'every job on the listing: title, company, location, date posted, link'. Optional when mode and fields are given. Never put credentials in the prompt.",
+      "editor": "textarea",
+      "sectionCaption": "Prompt",
+      "sectionDescription": "Say what you want. Navvi turns the prompt into mode, fields and description through one chooser question; the structured fields below override it."
+    },
+    "startUrls": {
+      "title": "Start URLs",
+      "type": "array",
+      "description": "Pages to scrape (http or https, public hosts only). A 'Text file' or 'requestsFromUrl' entry is a URL that answers the page list itself, as newline-delimited text or JSON (an array of URLs or of { url } objects, or an object whose urls, data or items is one), so a backend endpoint can feed the daily target list. A URL whose path ends in .txt, .json or .csv is fetched as a list too.",
+      "editor": "requestListSources",
+      "prefill": [
+        {
+          "url": "https://www.python.org/jobs/"
+        }
+      ],
+      "sectionCaption": "Target",
+      "sectionDescription": "Where the records are. One template (a listing, or many pages of the same shape) compiles once."
+    },
+    "mode": {
+      "title": "Mode",
+      "type": "string",
+      "description": "list: many rows per page (a listing, search results). record: the values of each start URL (a product page, a profile). Derived from the prompt when omitted.",
+      "editor": "select",
+      "enum": [
+        "list",
+        "record"
+      ],
+      "enumTitles": [
+        "list: rows on each page",
+        "record: one record per page"
+      ],
+      "prefill": "list"
+    },
+    "description": {
+      "title": "What the records are",
+      "type": "string",
+      "description": "One phrase naming the records, for example 'python job listing' or 'pharmacy product'. Used in the compile questions; derived from the prompt when omitted.",
+      "editor": "textfield",
+      "prefill": "python job listing"
+    },
+    "fields": {
+      "title": "Fields",
+      "type": "array",
+      "description": "The fields to extract. Each needs a name (an identifier); an optional description helps the chooser; an optional type coerces the value after extraction: money and number read '$ 6.990' as 6990 and '12.990,50' as 12990.5, integer takes a whole number, boolean maps stock phrases in Spanish and English (En stock, Agotado, Out of stock), url resolves to an absolute http(s) URL. A value that does not coerce is null. The type is recorded in the compiled scraper so replays coerce the same way.",
+      "editor": "schemaBased",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Identifier: letters, digits and underscores, not starting with a digit.",
+            "editor": "textfield",
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "What the value is, when the name alone is ambiguous.",
+            "editor": "textfield"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "Output type the run coerces to; text (the default) keeps the extracted string.",
+            "editor": "select",
+            "enum": [
+              "text",
+              "money",
+              "integer",
+              "number",
+              "boolean",
+              "url"
+            ],
+            "enumTitles": [
+              "text",
+              "money (number)",
+              "integer",
+              "number",
+              "boolean",
+              "url"
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "prefill": [
+        {
+          "name": "title"
+        },
+        {
+          "name": "company"
+        },
+        {
+          "name": "location"
+        },
+        {
+          "name": "date"
+        },
+        {
+          "name": "link",
+          "type": "url"
+        }
+      ],
+      "sectionCaption": "What to extract",
+      "sectionDescription": "Named fields with optional output types. Omit them to let the prompt decide."
+    },
+    "goal": {
+      "title": "Navigation goal",
+      "type": "string",
+      "description": "Steps before extracting, in plain words: 'search for python jobs', 'open the Remote category'. The navigator drives the page with the chooser and records the trace; a replay repeats it with no model call. Leave empty when the start URLs are the target pages. The published actor runs the read-only 'store' profile: no logins, no secrets.",
+      "editor": "textfield",
+      "sectionCaption": "Navigation",
+      "sectionDescription": "Optional navigation before extraction, and detail pages after it."
+    },
+    "followDetailPages": {
+      "title": "Follow detail pages",
+      "type": "boolean",
+      "description": "In list mode, also open each row's detail page and read the detail fields there. Every detail page counts as a scraped page.",
+      "default": false
+    },
+    "detailFields": {
+      "title": "Detail fields",
+      "type": "array",
+      "description": "Fields read on each detail page, same shape as Fields.",
+      "editor": "schemaBased",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Identifier.",
+            "editor": "textfield",
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "What the value is.",
+            "editor": "textfield"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "Output type.",
+            "editor": "select",
+            "enum": [
+              "text",
+              "money",
+              "integer",
+              "number",
+              "boolean",
+              "url"
+            ],
+            "enumTitles": [
+              "text",
+              "money (number)",
+              "integer",
+              "number",
+              "boolean",
+              "url"
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    "maxPages": {
+      "title": "Max pages",
+      "type": "integer",
+      "description": "Pages to scrape per template, pagination and detail pages included.",
+      "minimum": 1,
+      "maximum": 1000,
+      "default": 10,
+      "prefill": 1,
+      "unit": "pages",
+      "sectionCaption": "Crawl limits",
+      "sectionDescription": "Caps on pages and items. Every run also has a fixed chooser budget: 1.5M chooser input tokens, 40 text-helper calls, 5 healing events, 30 navigation steps."
+    },
+    "maxItems": {
+      "title": "Max items",
+      "type": "integer",
+      "description": "Dataset items to produce, over every template.",
+      "minimum": 1,
+      "maximum": 50000,
+      "default": 1000,
+      "unit": "items"
+    },
+    "browser": {
+      "title": "Browser",
+      "type": "string",
+      "description": "Leave empty to use the build's browser (Chromium on the default image, Camoufox on the Camoufox image). Camoufox passes more bot checks on a residential proxy; Chromium is faster.",
+      "editor": "select",
+      "enum": [
+        "chromium",
+        "camoufox"
+      ],
+      "enumTitles": [
+        "Chromium",
+        "Camoufox"
+      ],
+      "nullable": true,
+      "sectionCaption": "Browser and proxy",
+      "sectionDescription": "The browser and the proxy the pages are opened with."
+    },
+    "proxy": {
+      "title": "Proxy",
+      "type": "object",
+      "description": "Apify Proxy or your own proxy URLs. A residential proxy is the answer to blocked_bot_detection.",
+      "editor": "proxy",
+      "prefill": {
+        "useApifyProxy": false
+      }
+    },
+    "allowedDomains": {
+      "title": "Allowed domains",
+      "type": "array",
+      "description": "Domains the crawl may follow beyond the start URLs' registrable domains (next-page and detail links).",
+      "editor": "stringList",
+      "default": []
+    },
+    "chooser": {
+      "title": "Chooser",
+      "type": "string",
+      "description": "Who answers the compile questions. jev: TypeSafe's System One model through Vercel AI Gateway or a TypeSafe key, the measured default. model: a text model (Claude Haiku) answering a JSON schema of indices. Leave empty to follow the key: jev with a TypeSafe or Gateway key, model with an Anthropic key.",
+      "editor": "select",
+      "enum": [
+        "jev",
+        "model"
+      ],
+      "enumTitles": [
+        "jev (TypeSafe)",
+        "model (text model)"
+      ],
+      "sectionCaption": "Your key",
+      "sectionDescription": "Bring your own key and the operator pays no model cost on your run; without one the actor uses the operator key and the actor-start price covers it. Keys are used for this run only, never stored.",
+      "nullable": true
+    },
+    "typesafeApiKey": {
+      "title": "TypeSafe API key",
+      "type": "string",
+      "description": "Your TypeSafe key for the jev chooser (direct provider).",
+      "editor": "textfield",
+      "isSecret": true
+    },
+    "gatewayApiKey": {
+      "title": "Vercel AI Gateway key",
+      "type": "string",
+      "description": "Your AI Gateway key; jev runs through the gateway's typesafe-ai/jev route, model through its Anthropic route.",
+      "editor": "textfield",
+      "isSecret": true
+    },
+    "anthropicApiKey": {
+      "title": "Anthropic API key",
+      "type": "string",
+      "description": "Your Anthropic key for the model chooser.",
+      "editor": "textfield",
+      "isSecret": true
+    },
+    "scriptId": {
+      "title": "Pinned scraper (scriptId)",
+      "type": "string",
+      "description": "Replay exactly this compiled scraper instead of looking the cache up: the key in the scraper store (the SUMMARY of a run names it), or 'storeIdOrName/key'. The run then makes no chooser call unless the page drifted and healing is needed.",
+      "editor": "textfield",
+      "pattern": "^[a-zA-Z0-9!\\-_.'()]+(/[a-zA-Z0-9!\\-_.'()]+)?$",
+      "sectionCaption": "Advanced",
+      "sectionDescription": "Pinning, recompiling and the profile."
+    },
+    "scraperStore": {
+      "title": "Scraper store",
+      "type": "string",
+      "description": "The key-value store holding the pinned scraper; defaults to the named store scraper-cache in your account. Used when scriptId is a bare key.",
+      "resourceType": "keyValueStore",
+      "editor": "resourcePicker"
+    },
+    "forceRecompile": {
+      "title": "Force recompile",
+      "type": "boolean",
+      "description": "Ignore the cached scraper and compile again (one chooser round). Off for scheduled runs.",
+      "default": false
+    },
+    "profile": {
+      "title": "Profile",
+      "type": "string",
+      "description": "The published actor runs the read-only store profile only: no form submits, no logins, no secrets, no destructive-looking controls. Logins are a local CLI feature.",
+      "editor": "select",
+      "enum": [
+        "store"
+      ],
+      "enumTitles": [
+        "store (read-only)"
+      ],
+      "default": "store"
+    },
+    "freshProfile": {
+      "title": "Fresh browser profile",
+      "type": "boolean",
+      "description": "Discard the persisted browser profile for the start URLs' domain before the run.",
+      "default": false
+    }
+  },
+  "required": []
+}
