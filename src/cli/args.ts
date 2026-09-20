@@ -260,9 +260,10 @@ Input
   <prompt>                  What to extract or do, in plain words. Optional when --mode and --fields are given.
   <url...>                  Start URLs (http/https). Never put credentials in the prompt or the URLs.
   --mode list|record        list: many rows per page. record: the values of each given page.
-  --fields a,b,c            Field names to extract (identifiers).
+  --fields a,b,c            Field names to extract (identifiers); name:type declares an output type
+                            (text, money, integer, number, boolean, url) the run coerces to.
   --goal <text>             Navigation before extracting (log in, search, filter). {{secret:name}} for credentials.
-  --from-url <url>          A .txt/.json/.csv list of URLs to use as start URLs (repeatable).
+  --from-url <url>          A URL answering the start URLs as newline text or JSON (repeatable).
   --max-pages <n>           Pagination cap (default 10).   --max-items <n>  Item cap (default 1000).
   --follow-details          Also open each item's detail page.   --detail-fields a,b  Fields read there.
   --allow-domain <host>     Extra registrable domain the run may visit (repeatable).

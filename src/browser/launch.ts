@@ -36,6 +36,23 @@ export function profileDir(spec: LaunchSpec): string | undefined {
 }
 
 /**
+ * camoufox-js launch options. On the Apify Camoufox image the browser the
+ * image fetched is at `APIFY_DEFAULT_BROWSER_PATH` (a stable symlink), so the
+ * run uses it instead of the cache layout camoufox-js's own version expects;
+ * `NAVVI_CAMOUFOX_PATH` does the same anywhere else.
+ */
+async function camoufoxLaunchOptions(spec: { headed?: boolean | undefined; proxyUrl?: string | undefined }): Promise<LaunchOptions> {
+  const { launchOptions } = await import("camoufox-js");
+  const executable = process.env.NAVVI_CAMOUFOX_PATH || process.env.APIFY_DEFAULT_BROWSER_PATH;
+  return (await launchOptions({
+    headless: !spec.headed,
+    proxy: spec.proxyUrl,
+    geoip: false,
+    ...(executable ? { executable_path: executable } : {}),
+  })) as LaunchOptions;
+}
+
+/**
  * KTD4 / R43: one launch function for both browsers. Camoufox runs with
  * fingerprints off (it has its own); Chromium relies on Crawlee's
  * fingerprint injection when driven by the crawler.
@@ -45,9 +62,8 @@ export async function launch(spec: LaunchSpec): Promise<LaunchedBrowser> {
   const proxy = spec.proxyUrl ? { server: spec.proxyUrl } : undefined;
 
   if (spec.browser === "camoufox") {
-    const { launchOptions } = await import("camoufox-js");
     const { firefox } = await import("playwright");
-    const options = (await launchOptions({ headless: !spec.headed, proxy: spec.proxyUrl, geoip: false })) as LaunchOptions;
+    const options = await camoufoxLaunchOptions(spec);
     if (dir) {
       const context = await firefox.launchPersistentContext(dir, options);
       await installSnapshot(context);
@@ -139,9 +155,8 @@ export async function buildCrawleeLaunchContext(spec: LaunchSpec): Promise<Crawl
     ? { maxOpenPagesPerBrowser: 1_000, retireBrowserAfterPageCount: 1_000_000, closeInactiveBrowserAfterSecs: 3_600 }
     : {};
   if (spec.browser === "camoufox") {
-    const { launchOptions } = await import("camoufox-js");
     const { firefox } = await import("playwright");
-    const options = (await launchOptions({ headless: !spec.headed, proxy: spec.proxyUrl, geoip: false })) as LaunchOptions;
+    const options = await camoufoxLaunchOptions(spec);
     const launchContext: CrawleeLaunchContext = { launcher: firefox, launchOptions: options, useIncognitoPages: false };
     if (userDataDir) launchContext.userDataDir = userDataDir;
     return { launchContext, browserPoolOptions: { ...pool, useFingerprints: false }, userAgentFamily: "firefox", userDataDir };

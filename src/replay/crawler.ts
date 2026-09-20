@@ -3,14 +3,15 @@ import { createHash, randomUUID } from "node:crypto";
 import { Actor } from "apify";
 import { PlaywrightCrawler, ProxyConfiguration, type Configuration, type Dataset, type KeyValueStore, type PlaywrightCrawlingContext } from "crawlee";
 import type { BrowserContext, Page } from "playwright";
+import { Charger, type ChargingActor } from "../billing/charge.js";
 import { buildCrawleeLaunchContext, restoreProfileCookies, saveProfileCookies } from "../browser/launch.js";
 import { hostOf, isAllowedRequestUrl, registrableDomain } from "../browser/policy.js";
 import { createChooser, NavviError, NeedsHumanError, type Chooser } from "../chooser/index.js";
 import { compile, type CompileResult } from "../compile/index.js";
-import { LIMITS, isAllowedUrl, type Profile, type RunInput } from "../input/schema.js";
+import { LIMITS, isAllowedUrl, type FieldType, type Profile, type RunInput } from "../input/schema.js";
 import type { RunSummary } from "../main.js";
 import { dismissConsent, runPreSteps, type Notifier } from "../prestep/index.js";
-import { extractPage, fingerprintMatches, type ItemExtraction } from "../scraper/extract.js";
+import { coerceValues, extractPage, fieldTypesOf, fingerprintMatches, type ItemExtraction } from "../scraper/extract.js";
 import { cacheKey, validateScraper, type CompiledScraper, type Status, type TraceStep } from "../scraper/schema.js";
 import { ScraperStore, ScraperStoreError } from "../scraper/store.js";
 import { findPlaceholders, MissingSecretError, redactRunInput, resolveSecrets, type CommandRunner, type Secret } from "../secrets/resolve.js";
@@ -36,8 +37,8 @@ export const LIST_SOURCE_EXTENSIONS = [".txt", ".json", ".csv"] as const;
 
 export type RequestLabel = "compile" | "list" | "record";
 
-/** What the crawler needs from `Actor`; the static class and an instance both satisfy it. */
-export interface CrawlActor {
+/** What the crawler needs from `Actor`; the static class and an instance both satisfy it. Charging is optional (R20). */
+export interface CrawlActor extends ChargingActor {
   openKeyValueStore(storeIdOrName?: string | null): Promise<KeyValueStore>;
   openDataset(datasetIdOrName?: string | null): Promise<Dataset>;
   isAtHome(): boolean;
@@ -143,28 +144,56 @@ async function defaultFetchText(url: string): Promise<{ contentType: string; bod
   return { contentType: response.headers.get("content-type") ?? "", body: await response.text() };
 }
 
-function parseListSource(contentType: string, body: string): string[] | null {
-  const type = contentType.toLowerCase();
-  if (type.includes("json")) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(body);
-    } catch {
-      return null;
+/** A list entry's URL: a string, `{ url }`, or Strapi's `{ attributes: { url } }`. */
+function entryUrl(entry: unknown): string | undefined {
+  if (typeof entry === "string") return entry;
+  if (typeof entry !== "object" || entry === null) return undefined;
+  const o = entry as { url?: unknown; attributes?: { url?: unknown } };
+  if (typeof o.url === "string") return o.url;
+  return typeof o.attributes?.url === "string" ? o.attributes.url : undefined;
+}
+
+/** A JSON list: an array, or an object whose `urls`, `data` or `items` is one. */
+function parseJsonList(body: string): string[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  let list: unknown[] | null = null;
+  if (Array.isArray(parsed)) list = parsed;
+  else if (typeof parsed === "object" && parsed !== null) {
+    const o = parsed as Record<string, unknown>;
+    for (const key of ["urls", "data", "items"]) {
+      if (Array.isArray(o[key])) {
+        list = o[key] as unknown[];
+        break;
+      }
     }
-    const list = Array.isArray(parsed) ? parsed : typeof parsed === "object" && parsed !== null && Array.isArray((parsed as { urls?: unknown }).urls) ? (parsed as { urls: unknown[] }).urls : null;
-    if (!list) return null;
-    return list
-      .map((entry) => (typeof entry === "string" ? entry : typeof entry === "object" && entry !== null ? (entry as { url?: unknown }).url : undefined))
-      .filter((u): u is string => typeof u === "string");
   }
-  if (type.includes("text/plain") || type.includes("text/csv")) {
-    return body
-      .split(/\r?\n/)
-      .map((line) => line.split(",")[0]!.trim())
-      .filter((line) => line.length > 0 && !line.startsWith("#"));
-  }
-  return null;
+  if (!list) return null;
+  return list.map(entryUrl).filter((u): u is string => typeof u === "string");
+}
+
+function parseTextList(body: string): string[] {
+  return body
+    .split(/\r?\n/)
+    .map((line) => line.split(",")[0]!.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#"));
+}
+
+/**
+ * `strict` (a declared list URL, R34): JSON by content type or by shape, else
+ * lines; an HTML answer yields nothing. Otherwise (a start URL by extension)
+ * only a JSON or plain-text answer is a list.
+ */
+function parseListSource(contentType: string, body: string, strict = false): string[] | null {
+  const type = contentType.toLowerCase();
+  if (type.includes("json")) return parseJsonList(body);
+  if (type.includes("text/plain") || type.includes("text/csv")) return parseTextList(body);
+  if (!strict || type.includes("html")) return null;
+  return parseJsonList(body) ?? parseTextList(body);
 }
 
 function looksLikeListSource(url: string): boolean {
@@ -179,11 +208,15 @@ function looksLikeListSource(url: string): boolean {
 /**
  * R34: a start URL whose path ends in .txt/.json/.csv is fetched outside the
  * browser; when it answers JSON or plain text it is replaced by the URLs it
- * lists (a page answering HTML stays a start URL). Every URL is
+ * lists (a page answering HTML stays a start URL). A `urlLists` entry
+ * (`{ requestsFromUrl }` in the actor input, `--from-url` on the CLI) is
+ * always a list: fetched, parsed as JSON or lines, never opened as a page; one
+ * that fails or lists nothing is skipped with a log line. Every URL is
  * policy-checked; refused ones are dropped.
  */
 export async function loadListSources(
   startUrls: readonly string[],
+  urlLists: readonly string[],
   allowPrivateHosts: readonly string[],
   fetchText: (url: string) => Promise<{ contentType: string; body: string }> = defaultFetchText,
 ): Promise<string[]> {
@@ -206,6 +239,22 @@ export async function loadListSources(
     if (listed === null) push(url);
     else for (const entry of listed) push(entry);
   }
+  for (const url of urlLists) {
+    if (!isAllowedUrl(url, allowPrivateHosts)) continue;
+    let listed: string[] | null = null;
+    try {
+      const { contentType, body } = await fetchText(url);
+      listed = parseListSource(contentType, body, true);
+    } catch (error) {
+      ctxLog(`list ${url} skipped: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+    if (listed === null || listed.length === 0) {
+      ctxLog(`list ${url} skipped: no URLs in the answer`);
+      continue;
+    }
+    for (const entry of listed) push(entry);
+  }
   return out;
 }
 
@@ -217,6 +266,8 @@ interface TemplatePlan {
   urls: string[];
   scraper: CompiledScraper | null;
   cacheHit: boolean;
+  /** R20: `scraper-compiled` is charged once per template, after its first page passes the fingerprint check. */
+  compileCharged: boolean;
 }
 
 interface Stop {
@@ -260,7 +311,7 @@ interface ReplayUserData {
 
 type UserData = CompileUserData | ReplayUserData;
 
-function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePlan[], chooser: Chooser | null): RunSummary {
+function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePlan[], chooser: Chooser | null, charger: Charger): RunSummary {
   const usage = chooser?.usage();
   const status: Status = state.stop
     ? state.stop.status
@@ -285,6 +336,10 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
     traceReplays: state.traceReplays,
     blockedRequests: state.blockedRequests,
     unhealed: state.unhealed,
+    // the scraper a caller pins next time: the given id, else the one scraper this run used
+    scriptId: input.scriptId ?? (plans.length === 1 && plans[0]!.scraper ? plans[0]!.scraper.cacheKey : null),
+    charges: { ...charger.counts },
+    zeroDataRetention: usage?.zeroDataRetention ?? null,
   };
   if (state.stop) {
     summary.message = state.stop.message;
@@ -328,6 +383,9 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   const paginateHook: PaginateHook = deps.paginate ?? defaultPaginate;
   const fields = (input.fields ?? []).map((f) => f.name);
   const detailFields = input.followDetailPages ? (input.detailFields ?? []) : [];
+  // R5: the run's declared types win over the ones recorded at compile time, so a pinned scraper compiled without types still coerces.
+  const inputTypes: Record<string, FieldType | undefined> = {};
+  for (const f of [...(input.fields ?? []), ...detailFields]) if (f.type) inputTypes[f.name] = f.type;
   const detailFieldNames = detailFields.map((f) => f.name);
   const mode = input.mode ?? "list";
   const state: RunState = {
@@ -348,13 +406,18 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     guardedContexts: new Map(),
   };
   const plans: TemplatePlan[] = [];
+  const charger = Charger.for(actor);
   const fail = (status: Status, message: string): RunSummary => {
     state.stop = { status, message };
-    return summaryOf(input, state, plans, chooser);
+    return summaryOf(input, state, plans, chooser, charger);
   };
 
+  // R20: actor-start is the first charge of the run; a budget that cannot cover it ends the run before anything else.
+  const started = await charger.charge("actor-start");
+  if (started.limitReached && started.charged === 0) return fail("charge_limit", "charge limit reached before actor-start");
+
   // R34: list sources, then the policy on every URL.
-  const urls = await loadListSources(input.startUrls ?? [], input.allowPrivateHosts, deps.fetchText);
+  const urls = await loadListSources(input.startUrls ?? [], input.urlLists, input.allowPrivateHosts, deps.fetchText);
   if (urls.length === 0) return fail("no_items_found", "no allowed start URL");
   const guard = makeRequestGuard(input.allowPrivateHosts, urls);
 
@@ -370,7 +433,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
         scriptId: grouped.size === 1 ? input.scriptId : undefined,
         forceRecompile: input.forceRecompile,
       });
-      plans.push({ templateKey, cacheKey: key, urls: templateUrls, scraper: loaded.scraper, cacheHit: loaded.cacheHit });
+      plans.push({ templateKey, cacheKey: key, urls: templateUrls, scraper: loaded.scraper, cacheHit: loaded.cacheHit, compileCharged: loaded.cacheHit });
     }
   } catch (error) {
     if (error instanceof ScraperStoreError) return fail(error.status, error.message);
@@ -486,6 +549,11 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       }],
       requestHandler: async (ctx) => {
         if (state.stop) return;
+        // R20 / R28: the charge limit is checked before every page proceeds.
+        if (!charger.canAfford("page-scraped")) {
+          stopWith(state, crawler, { status: "charge_limit", message: `charge limit reached before ${ctx.request.url}` });
+          return;
+        }
         const data = ctx.request.userData as UserData;
         try {
           if (data.label === "compile") await handleCompile(ctx, data);
@@ -624,6 +692,30 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
 
   const driftSeen = (): boolean => state.healingEvents.length > 0 || state.unhealed > 0;
 
+  /** Every scraped page (a listing, a paginated page, a detail page) is counted and charged `page-scraped`; resolves false when the limit stops the run. */
+  async function countPages(n: number, where: string): Promise<boolean> {
+    if (n <= 0) return true;
+    const outcome = await charger.charge("page-scraped", n);
+    state.pages += charger.enabled ? outcome.charged : n;
+    if (outcome.limitReached && outcome.charged < n) {
+      stopWith(state, crawler, { status: "charge_limit", message: `charge limit reached while scraping ${where}` });
+      return false;
+    }
+    return true;
+  }
+
+  /** R20: `scraper-compiled` once per template, the first time a page extracted with a scraper compiled this run passes the fingerprint check. */
+  async function chargeCompiled(plan: TemplatePlan, extracted: Extracted, where: string): Promise<boolean> {
+    if (plan.compileCharged || extracted.items.length === 0 || needsHealing(extracted)) return true;
+    plan.compileCharged = true;
+    const outcome = await charger.charge("scraper-compiled");
+    if (outcome.limitReached && outcome.charged === 0) {
+      stopWith(state, crawler, { status: "charge_limit", message: `charge limit reached before scraper-compiled on ${where}` });
+      return false;
+    }
+    return true;
+  }
+
   async function heal(ctx: PlaywrightCrawlingContext, plan: TemplatePlan, failure: HealFailure): Promise<CompiledScraper | null> {
     if (!plan.scraper || state.stop) return null;
     let outcome: HealOutcome;
@@ -703,9 +795,9 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
         allowedDomains: input.allowedDomains,
         prepare: (page) => dismissConsent(page).then(() => undefined),
       });
-      state.pages += result.pagesOpened;
+      const counted = await countPages(result.pagesOpened, `detail samples of ${ctx.page.url()}`);
       for (const name of result.fieldsNotFound) state.fieldsNotFound.add(name);
-      if (!result.ok) return items.map((item) => mergeDetail(item, null, detailFieldNames));
+      if (!counted || !result.ok) return items.map((item) => mergeDetail(item, null, detailFieldNames));
       live = result.scraper;
       await store.put(live);
       plan.scraper = live;
@@ -717,9 +809,9 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       for (const [i, item] of items.entries()) {
         const link = links[i] ?? null;
         let detail = link ? (samples.get(link) ?? null) : null;
-        if (link && !detail && state.pages < input.maxPages) {
+        if (link && !detail && state.pages < input.maxPages && !state.stop) {
           detailPage ??= await ctx.page.context().newPage();
-          state.pages += 1;
+          if (!(await countPages(1, link))) break;
           detail = await extractDetail(detailPage, live, link, detailFieldNames);
         }
         out.push(mergeDetail(item, detail, detailFieldNames));
@@ -748,7 +840,8 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     }
     if (state.stop) return 0;
     if (!healAttempted && driftSeen()) noteUnmapped(await findUnmappedCandidates(page, current.scraper).catch(() => []));
-    state.pages += 1;
+    if (!(await chargeCompiled(plan, current, sourceUrl))) return 0;
+    if (!(await countPages(1, sourceUrl))) return 0;
     const live = current.scraper;
     const fresh: ItemExtraction[] = [];
     for (const item of current.items) {
@@ -759,21 +852,31 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       }
       fresh.push(item);
     }
-    const room = Math.max(0, input.maxItems - state.items);
+    // R20 / AE13: rows beyond the charge room are never pushed; the run ends charge_limit with the rows before them.
+    const itemRoom = input.maxItems - state.items;
+    const chargeRoom = charger.room("result-item");
+    const room = Math.max(0, Math.min(itemRoom, chargeRoom));
     let rows = fresh.slice(0, room);
     if (live.mode === "list" && live.detail && detailFieldNames.length > 0 && rows.length > 0) rows = await mergeDetails(ctx, plan, live, rows);
     for (const item of rows) {
       if (Object.keys(live.fields).some((n) => item.values[n] === null)) state.failedItems += 1;
     }
     if (rows.length > 0) {
+      // R5: declared types are applied after the fingerprint check, on the row that goes out
+      const types = { ...fieldTypesOf(live), ...inputTypes };
       await dataset.pushData(
         rows.map((item) => {
           const { [DETAIL_LINK_FIELD]: _hidden, ...values } = item.values;
-          return { ...values, _source: sourceUrl };
+          return { ...coerceValues(values, types, sourceUrl), _source: sourceUrl };
         }),
       );
     }
     state.items += rows.length;
+    const charged = await charger.charge("result-item", rows.length);
+    const droppedByCharge = fresh.length > rows.length && chargeRoom < itemRoom;
+    if (droppedByCharge || charged.limitReached) {
+      stopWith(state, crawler, { status: "charge_limit", message: `charge limit reached after ${state.items} items on ${sourceUrl}` });
+    }
     return rows.length;
   }
 
@@ -859,7 +962,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
 
   await crawler.run(initial);
   if (state.fatal) throw state.fatal;
-  return summaryOf(input, state, plans, chooser);
+  return summaryOf(input, state, plans, chooser, charger);
 }
 
 /** On the platform a secret may also be a `SECRET_<NAME>` record in the run's default store. */

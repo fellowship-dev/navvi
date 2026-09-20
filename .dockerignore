@@ -1,0 +1,11 @@
+.git
+node_modules
+dist
+storage
+tests
+demo
+docs
+tmp
+.env
+*.log
+.github

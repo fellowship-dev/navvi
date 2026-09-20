@@ -21,8 +21,6 @@ containing this README until the compiler release is published.
 ```bash
 git clone https://github.com/fellowship-dev/navvi.git
 cd navvi
-# While the demo changes are in review:
-git checkout fix/prompt-cache-demo-trial
 NAVVI_SKIP_BROWSER_DOWNLOAD=1 npm ci
 npx playwright install chromium
 npm run build
@@ -74,6 +72,19 @@ costs. A new live demo must retain its own rows, timings and revision.
   `--force-recompile` deliberately bypasses reuse.
 - A targeted repair path plus explicit failure statuses when automation cannot finish.
 - A stderr summary with pages, items, chooser usage and healing events.
+- **Typed values when you ask for them**: `--fields name,price:money,stock:boolean`
+  (or `type` on a field in the JSON input) coerces the extracted text after
+  the fingerprint check: `money` and `number` read `$ 6.990` as `6990` and
+  `12.990,50` as `12990.5`, `integer` takes a whole number, `boolean` maps
+  stock phrases in Spanish and English (`En stock`, `Agotado`, `Out of stock`),
+  `url` resolves to an absolute http(s) URL; a value that does not coerce is
+  `null`. The type is recorded in the compiled scraper, so a replay coerces the
+  same way with no model call. Untyped fields stay strings.
+- **A URL list as the start**: `--from-url <url>` (or a
+  `{ "requestsFromUrl": "<url>" }` entry in `startUrls`) fetches a URL that
+  answers the pages to scrape as newline text or JSON (an array of URLs or of
+  `{ url }` objects, or an object whose `urls`, `data` or `items` is one), so
+  a backend endpoint can feed the daily target list directly.
 
 ## Choosers
 
@@ -117,10 +128,64 @@ separately before making that claim.
 
 ## Local and Apify
 
-Today Navvi runs locally through the CLI: Camoufox by default, Chromium with
+Locally Navvi runs through the CLI: Camoufox by default, Chromium with
 `--browser chromium`, profiles and compiled scrapers under `--storage`
-(default `./storage`). An Apify actor with the same input contract is
-coming; the compiled scraper format is the same in both.
+(default `./storage`).
+
+On Apify the same code is the actor under `.actor/`: the manifest, the input
+schema (the CLI flags as fields, with section captions and descriptions
+written for a model reading them through Apify's MCP server), the dataset
+schema and two Dockerfiles. `Dockerfile` is the default build on
+`apify/actor-node-playwright-chrome`; `Dockerfile.camoufox` builds on
+`apify/actor-node-playwright-camoufox` and is the switch for a site that
+challenges Chromium. Both image tags carry the Playwright version and must
+equal the `playwright` pin in `package.json`; `node scripts/check-image-pins.mjs`
+fails CI when they disagree. CI pushes every green `main` to the `beta` build
+tag through `apify/push-actor-action` when the `APIFY_TOKEN` repository
+secret is present; `latest` is a manual promote. `node scripts/push-beta.mjs`
+pushes the Chromium beta from a signed-in CLI and `--camoufox` pushes the
+Camoufox build under the `beta-camoufox` tag of the same version.
+
+The actor input differs from the CLI in three places: `startUrls` takes
+`{ url }` and `{ requestsFromUrl }` entries (Apify's request-list editor);
+`profile` is `store` only and `chooser` is `jev` or `model`; a caller key
+comes as a secret input (`typesafeApiKey`, `gatewayApiKey`,
+`anthropicApiKey`) and is used for that run only. `scriptId` pins a compiled
+scraper by key, with `scraperStore` naming the key-value store when the key
+is bare (default `scraper-cache` in your account). Locally,
+
+```sh
+npx apify run --input-file input.json   # runs dist/src/main.js with local storage
+```
+
+runs the actor entry with the same input.
+
+### Pay-per-event
+
+On Apify the actor charges four events, priced in the Apify Console, never in
+code. Every run ends with a `SUMMARY` record in the run's key-value store
+carrying the status, counts, chooser usage, healing events, the `scriptId` to
+pin next time, the charged event counts and the zero-data-retention state.
+
+| Event | Charged |
+| --- | --- |
+| `actor-start` | Once, first thing; covers navigation model spend when the operator key is used |
+| `scraper-compiled` | Once per template, the first time a page passes the fingerprint check with a scraper compiled this run; a cache hit charges nothing |
+| `page-scraped` | Per scraped page (listing, paginated page, detail page); the limit is checked before every page |
+| `result-item` | Per dataset item |
+
+When the run's charge limit is reached the items pushed so far stay in the
+dataset and the run ends `charge_limit`. Off the platform nothing is charged
+and every count in the summary is zero; a local run with
+`ACTOR_TEST_PAY_PER_EVENT=1 ACTOR_USE_CHARGING_LOG_DATASET=1` charges at $1
+per event against `ACTOR_MAX_TOTAL_CHARGE_USD` and writes the charging log to
+the `charging_log` dataset instead.
+
+Who pays what under pay-per-event, per Apify's pricing docs: the caller pays
+the events; the actor's platform usage (compute, residential proxy, storage)
+is the operator's cost, which is why the event prices carry a compute margin.
+The first platform run under this pricing confirms the split and this
+paragraph is updated with the observed numbers.
 
 ## Exit codes
 

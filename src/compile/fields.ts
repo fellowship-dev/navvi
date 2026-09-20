@@ -1,4 +1,5 @@
 import type { LeafCandidate } from "../browser/snapshot.js";
+import type { FieldType } from "../input/schema.js";
 import type { Answer, JsonValue, Question, QuestionContext } from "../chooser/chooser.js";
 import { premises } from "../chooser/questions.js";
 import { URL_ATTRS, commonShape, resolveUrl } from "../scraper/extract.js";
@@ -24,6 +25,8 @@ export const FIELD_QUESTION_PREFIX = "field.";
 export interface CompileField {
   name: string;
   description?: string | undefined;
+  /** R5: recorded in the compiled scraper so replay coerces the same way. */
+  type?: FieldType | undefined;
 }
 
 export type LeafAttr = LeafCandidate["attr"];
