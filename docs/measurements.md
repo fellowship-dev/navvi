@@ -119,46 +119,46 @@ Every row below is from one run of the harness after the hillclimb.
 <!-- measurements:start -->
 | chooser | scenario | questions | input tokens | chooser wait (ms) | total wall (ms) | cost (USD) | fields correct | healing events | status |
 |---|---|---|---|---|---|---|---|---|---|
-| agent | AE1 | 7 | 1392 | 0 | 2600 | 0.000000 | 125/125 | 0 | ok |
-| agent | AE7 | 4 | 5789 | 0 | 4117 | 0.000000 | 48/48 | 0 | ok |
-| agent | AE8 | 9 | 7225 | 1 | 6422 | 0.000000 | 48/48 | 1 | ok |
-| agent | AE15 | 1 | 105 | 0 | 11211 | 0.000000 | 10/10 | 1 | ok |
-| agent | F1-search | 15 | 4083 | 1 | 4491 | 0.000000 | 18/18 | 0 | ok |
-| agent | F2-login | 15 | 4437 | 1 | 4565 | 0.000000 | 10/10 | 0 | ok |
-| agent | F3-category | 11 | 8105 | 1 | 2544 | 0.000000 | 100/100 | 0 | ok |
-| agent | F4-paginate | 6 | 1099 | 0 | 3540 | 0.000000 | 56/56 | 0 | ok |
-| agent | F5-detail | 6 | 1157 | 0 | 4668 | 0.000000 | 75/75 | 0 | ok |
+| agent | AE1 | 7 | 1392 | 1 | 2634 | 0.000000 | 125/125 | 0 | ok |
+| agent | AE7 | 4 | 5789 | 0 | 4164 | 0.000000 | 48/48 | 0 | ok |
+| agent | AE8 | 9 | 7225 | 1 | 6503 | 0.000000 | 48/48 | 1 | ok |
+| agent | AE15 | 1 | 105 | 0 | 11194 | 0.000000 | 10/10 | 1 | ok |
+| agent | F1-search | 15 | 4083 | 1 | 4515 | 0.000000 | 18/18 | 0 | ok |
+| agent | F2-login | 15 | 4437 | 1 | 4446 | 0.000000 | 10/10 | 0 | ok |
+| agent | F3-category | 11 | 8105 | 1 | 2561 | 0.000000 | 100/100 | 0 | ok |
+| agent | F4-paginate | 6 | 1099 | 0 | 3518 | 0.000000 | 56/56 | 0 | ok |
+| agent | F5-detail | 6 | 1157 | 0 | 4695 | 0.000000 | 75/75 | 0 | ok |
 | agent | live:python.org | 0 | 0 | 0 | 0 | 0.000000 | 0/0 | 0 | skipped: agent column is a recorded replay; pass --agent-live to measure a host agent on a live site |
 | agent | live:hackernews | 0 | 0 | 0 | 0 | 0.000000 | 0/0 | 0 | skipped: agent column is a recorded replay; pass --agent-live to measure a host agent on a live site |
 | agent | live:scrapethissite-search | 0 | 0 | 0 | 0 | 0.000000 | 0/0 | 0 | skipped: agent column is a recorded replay; pass --agent-live to measure a host agent on a live site |
 | agent | live:quotes-login | 0 | 0 | 0 | 0 | 0.000000 | 0/0 | 0 | skipped: agent column is a recorded replay; pass --agent-live to measure a host agent on a live site |
 | agent | live:books-category | 0 | 0 | 0 | 0 | 0.000000 | 0/0 | 0 | skipped: agent column is a recorded replay; pass --agent-live to measure a host agent on a live site |
-| jev | AE1 | 7 | 4415 | 1402 | 3848 | 0.000185 | 125/125 | 0 | ok |
-| jev | AE7 | 4 | 18017 | 621 | 4791 | 0.000757 | 48/48 | 0 | ok |
-| jev | AE8 | 9 | 26702 | 1901 | 8372 | 0.001121 | 48/48 | 1 | ok |
-| jev | AE15 | 1 | 583 | 1135 | 12291 | 0.000024 | 10/10 | 1 | ok |
-| jev | F1-search | 14 | 8065 | 2330 | 11325 | 0.000339 | 18/18 | 0 | ok |
-| jev | F2-login | 15 | 8349 | 2698 | 6894 | 0.000351 | 10/10 | 0 | ok |
-| jev | F3-category | 11 | 15737 | 1755 | 4077 | 0.000661 | 100/100 | 0 | ok |
-| jev | F4-paginate | 6 | 3642 | 696 | 4281 | 0.000153 | 56/56 | 0 | ok |
-| jev | F5-detail | 6 | 3901 | 963 | 5647 | 0.000164 | 75/75 | 0 | ok |
-| jev | live:python.org | 6 | 8863 | 1100 | 6613 | 0.000372 | 100/100 | 0 | ok |
-| jev | live:hackernews | 5 | 6963 | 1172 | 7908 | 0.000292 | 89/90 | 0 | ok |
-| jev | live:scrapethissite-search | 15 | 19761 | 4235 | 14582 | 0.000830 | 63/63 | 0 | ok |
-| jev | live:quotes-login | 12 | 7293 | 4041 | 6296 | 0.000306 | 0/20 | 0 | failed |
-| jev | live:books-category | 9 | 42259 | 2546 | 8718 | 0.001775 | 22/22 | 0 | ok |
-| claude | AE1 | 7 | 20 | 12674 | 15122 | 0.000000 | 125/125 | 0 | ok |
-| claude | AE7 | 4 | 10 | 10507 | 14638 | 0.000000 | 48/48 | 0 | ok |
-| claude | AE8 | 9 | 30 | 75065 | 81582 | 0.000000 | 46/48 | 2 | ok |
-| claude | AE15 | 1 | 10 | 4836 | 16001 | 0.000000 | 10/10 | 1 | ok |
-| claude | F1-search | 15 | 70 | 49497 | 53610 | 0.000000 | 18/18 | 0 | ok |
-| claude | F2-login | 15 | 70 | 68748 | 72923 | 0.000000 | 10/10 | 0 | ok |
-| claude | F3-category | 11 | 50 | 34901 | 37169 | 0.000000 | 100/100 | 0 | ok |
-| claude | F4-paginate | 6 | 20 | 14726 | 18223 | 0.000000 | 56/56 | 0 | ok |
-| claude | F5-detail | 6 | 30 | 19678 | 24293 | 0.000000 | 75/75 | 0 | ok |
-| claude | live:python.org | 6 | 20 | 16047 | 25963 | 0.000000 | 100/100 | 0 | ok |
-| claude | live:hackernews | 5 | 20 | 18957 | 30343 | 0.000000 | 89/90 | 0 | ok |
-| claude | live:scrapethissite-search | 16 | 70 | 61180 | 67292 | 0.000000 | 63/63 | 0 | ok |
-| claude | live:quotes-login | 12 | 40 | 82647 | 85352 | 0.000000 | 0/20 | 0 | failed |
-| claude | live:books-category | 9 | 50 | 40805 | 48168 | 0.000000 | 22/22 | 0 | ok |
+| jev | AE1 | 7 | 4415 | 1193 | 3643 | 0.000185 | 125/125 | 0 | ok |
+| jev | AE7 | 4 | 18017 | 576 | 4729 | 0.000757 | 48/48 | 0 | ok |
+| jev | AE8 | 9 | 26702 | 1997 | 8487 | 0.001121 | 48/48 | 1 | ok |
+| jev | AE15 | 1 | 583 | 730 | 11908 | 0.000024 | 10/10 | 1 | ok |
+| jev | F1-search | 14 | 8348 | 2380 | 12228 | 0.000351 | 18/18 | 0 | ok |
+| jev | F2-login | 15 | 8701 | 2363 | 6693 | 0.000365 | 10/10 | 0 | ok |
+| jev | F3-category | 11 | 15951 | 1906 | 4204 | 0.000670 | 100/100 | 0 | ok |
+| jev | F4-paginate | 6 | 3642 | 633 | 4162 | 0.000153 | 56/56 | 0 | ok |
+| jev | F5-detail | 6 | 3901 | 1221 | 5926 | 0.000164 | 75/75 | 0 | ok |
+| jev | live:python.org | 6 | 8863 | 1487 | 8662 | 0.000372 | 100/100 | 0 | ok |
+| jev | live:hackernews | 5 | 6863 | 1159 | 7706 | 0.000288 | 89/90 | 0 | ok |
+| jev | live:scrapethissite-search | 15 | 20044 | 2470 | 11896 | 0.000842 | 63/63 | 0 | ok |
+| jev | live:quotes-login | 16 | 22943 | 2932 | 7658 | 0.000964 | 20/20 | 0 | ok |
+| jev | live:books-category | 9 | 42473 | 2962 | 10582 | 0.001784 | 22/22 | 0 | ok |
+| claude | AE1 | 7 | 20 | 18697 | 21206 | 0.000000 | 125/125 | 0 | ok |
+| claude | AE7 | 4 | 10 | 7915 | 12030 | 0.000000 | 48/48 | 0 | ok |
+| claude | AE8 | 9 | 30 | 48998 | 55526 | 0.000000 | 46/48 | 2 | ok |
+| claude | AE15 | 1 | 10 | 4928 | 16103 | 0.000000 | 10/10 | 1 | ok |
+| claude | F1-search | 15 | 70 | 53899 | 58112 | 0.000000 | 18/18 | 0 | ok |
+| claude | F2-login | 15 | 70 | 59182 | 63496 | 0.000000 | 10/10 | 0 | ok |
+| claude | F3-category | 11 | 50 | 46166 | 48435 | 0.000000 | 100/100 | 0 | ok |
+| claude | F4-paginate | 6 | 20 | 14714 | 18216 | 0.000000 | 56/56 | 0 | ok |
+| claude | F5-detail | 6 | 30 | 20818 | 25431 | 0.000000 | 75/75 | 0 | ok |
+| claude | live:python.org | 6 | 20 | 14978 | 21088 | 0.000000 | 100/100 | 0 | ok |
+| claude | live:hackernews | 5 | 20 | 16686 | 23001 | 0.000000 | 89/90 | 0 | ok |
+| claude | live:scrapethissite-search | 16 | 70 | 52243 | 58172 | 0.000000 | 63/63 | 0 | ok |
+| claude | live:quotes-login | 16 | 70 | 51693 | 57025 | 0.000000 | 20/20 | 0 | ok |
+| claude | live:books-category | 9 | 50 | 41881 | 49605 | 0.000000 | 22/22 | 0 | ok |
 <!-- measurements:end -->

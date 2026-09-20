@@ -2,16 +2,16 @@
   "id": "nav.1.op",
   "index": 0,
   "probabilities": [
-    1,
+    0.96,
     0,
     0,
     0,
-    0,
-    0,
+    0.01,
+    0.03,
     0
   ],
   "kind": "choice",
-  "inputTokens": 2000,
+  "inputTokens": 2023,
   "outputTokens": 154,
   "chooser": "jev"
 }

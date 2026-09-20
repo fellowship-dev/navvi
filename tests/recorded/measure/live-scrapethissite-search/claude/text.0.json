@@ -4,6 +4,6 @@
   "text": "Rangers",
   "kind": "text",
   "inputTokens": 10,
-  "outputTokens": 246,
+  "outputTokens": 234,
   "chooser": "claude"
 }

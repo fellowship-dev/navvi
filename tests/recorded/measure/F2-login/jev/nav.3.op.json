@@ -4,12 +4,12 @@
   "probabilities": [
     0,
     0,
-    0.01,
-    0.94,
-    0.03
+    0,
+    0.97,
+    0.02
   ],
   "kind": "choice",
-  "inputTokens": 886,
+  "inputTokens": 955,
   "outputTokens": 74,
   "chooser": "jev"
 }

@@ -5,7 +5,7 @@
     0.01
   ],
   "kind": "choice",
-  "inputTokens": 2000,
+  "inputTokens": 2023,
   "outputTokens": 154,
   "chooser": "jev"
 }
