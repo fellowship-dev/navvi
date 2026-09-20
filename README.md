@@ -12,11 +12,22 @@ Jev supplies fast typed decisions. Navvi adds persistence, structured extraction
 replay and repair around those decisions. Jev also uses a text-capable fallback
 for prompt interpretation and values to type; those calls are included in usage.
 
-## Try the compiler from source
+## Install and run
 
-The compiler is version 3.0.0 in this checkout. As of 2026-09-20, npm's `navvi`
-package is still 2.0.1 and represents the earlier product. Use the source revision
-containing this README until the compiler release is published.
+Node 22+. Install the 3.0 compiler with Chromium for the demo:
+
+```bash
+NAVVI_BROWSER=chromium npm install -g navvi@3.0.0
+npx playwright@1.60.0 install chromium
+navvi "Search Remote OK for Python jobs and extract up to 10 results with job title, company, location and job link. Exclude ads." https://remoteok.com/ --browser chromium --max-pages 1 --max-items 10 --out jobs.json
+# Repeat the identical command to reuse the saved prompt interpretation and scraper.
+```
+
+For the default Camoufox browser, use `npm install -g navvi@3.0.0` without
+`NAVVI_BROWSER`; postinstall downloads Camoufox. Version 3 replaces the earlier
+2.x product with the scraper compiler.
+
+To work from source:
 
 ```bash
 git clone https://github.com/fellowship-dev/navvi.git
@@ -24,13 +35,14 @@ cd navvi
 NAVVI_SKIP_BROWSER_DOWNLOAD=1 npm ci
 npx playwright install chromium
 npm run build
-node dist/bin/cli.js "Search Remote OK for Python jobs and extract up to 10 results with job title, company, location and job link. Exclude ads." https://remoteok.com/ --browser chromium --max-pages 1 --max-items 10 --out jobs.json
-# Repeat the identical command to reuse the saved prompt interpretation and scraper.
+node dist/bin/cli.js --help
 ```
 
 Node 22+. Select a chooser below; an installed, signed-in Claude Code or Codex CLI
 can answer on your subscription. Jev needs a TypeSafe or AI Gateway key plus a
-text-capable fallback. Browser time and subscription/API charges still apply.
+text-capable fallback. A Gateway account must have access to the configured text
+model as well as Jev; access to Jev alone does not cover prompt interpretation
+or typed text. Browser time and subscription/API charges still apply.
 Agents: read [`SKILL.md`](SKILL.md); [`llms.txt`](llms.txt) indexes the docs.
 
 ## Demos and evidence

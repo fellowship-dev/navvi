@@ -3,6 +3,9 @@
   "version": "3.0.0",
   "description": "Scraper compiler with cached prompts, model-free healthy replay and targeted repair.",
   "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/fellowship-dev/navvi.git" },
+  "homepage": "https://github.com/fellowship-dev/navvi#readme",
+  "bugs": { "url": "https://github.com/fellowship-dev/navvi/issues" },
   "type": "module",
   "engines": {
     "node": ">=22"
