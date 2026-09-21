@@ -2,7 +2,7 @@
   "actorSpecification": 1,
   "name": "navvi",
   "title": "Navvi: self-healing scraper compiler",
-  "description": "Prompt in, data out, and the second run costs nothing. Compiles a scraper from a plain-English prompt, replays it with no model call, heals drift.",
+  "description": "Prompt in, data out, and the second run costs nothing. Compiles a scraper from a plain-English prompt, replays it with no model call, heals drift. Titles, prices, stock, dates and links come back as typed values.",
   "version": "3.0",
   "buildTag": "beta",
   "dockerfile": "./Dockerfile",

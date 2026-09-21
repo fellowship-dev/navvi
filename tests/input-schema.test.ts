@@ -55,14 +55,22 @@ describe(".actor/input_schema.json", () => {
     expect(schema.properties.fields?.type).toBe("array");
   });
 
-  it("the prefill is a valid run: python.org jobs, list mode, one page, a typed link field (R22, KTD13)", () => {
+  // The prefill is what Apify's daily Store test runs: it must produce dataset
+  // rows in under five minutes, unattended, every day, or the actor is labelled
+  // under maintenance after 3 failures and deprecated after 30. Hacker News's
+  // front page is never empty and needs no navigation goal.
+  it("the prefill is a valid run: the Hacker News front page, list mode, one page, typed fields (R22, KTD13)", () => {
     const { input } = actorInput(pick("prefill"), {});
     const parsed = parseInput(input);
-    expect(parsed.startUrls).toEqual(["https://www.python.org/jobs/"]);
+    expect(parsed.startUrls).toEqual(["https://news.ycombinator.com/"]);
     expect(parsed.mode).toBe("list");
     expect(parsed.maxPages).toBe(1);
-    expect(parsed.fields?.map((f) => f.name)).toEqual(["title", "company", "location", "date", "link"]);
+    expect(parsed.fields?.map((f) => f.name)).toEqual(["title", "link", "points", "comments"]);
     expect(parsed.fields?.find((f) => f.name === "link")?.type).toBe("url");
+    expect(parsed.fields?.find((f) => f.name === "points")?.type).toBe("integer");
+    expect(parsed.fields?.find((f) => f.name === "comments")?.type).toBe("integer");
+    // no goal: the daily test must not spend navigation steps or model calls it does not need
+    expect(parsed.goal).toBeUndefined();
     expect(parsed.profile).toBe("store");
     expect(parsed.proxy).toEqual({ useApifyProxy: false });
   });

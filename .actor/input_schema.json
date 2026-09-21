@@ -19,7 +19,7 @@
       "editor": "requestListSources",
       "prefill": [
         {
-          "url": "https://www.python.org/jobs/"
+          "url": "https://news.ycombinator.com/"
         }
       ],
       "sectionCaption": "Target",
@@ -45,7 +45,7 @@
       "type": "string",
       "description": "One phrase naming the records, for example 'python job listing' or 'pharmacy product'. Used in the compile questions; derived from the prompt when omitted.",
       "editor": "textfield",
-      "prefill": "python job listing"
+      "prefill": "front page story"
     },
     "fields": {
       "title": "Fields",
@@ -100,17 +100,16 @@
           "name": "title"
         },
         {
-          "name": "company"
-        },
-        {
-          "name": "location"
-        },
-        {
-          "name": "date"
-        },
-        {
           "name": "link",
           "type": "url"
+        },
+        {
+          "name": "points",
+          "type": "integer"
+        },
+        {
+          "name": "comments",
+          "type": "integer"
         }
       ],
       "sectionCaption": "What to extract",
