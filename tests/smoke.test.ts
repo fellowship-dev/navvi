@@ -30,6 +30,30 @@ describe("input schema", () => {
     expect(InputSchema.safeParse({ ...base, secrets: { password: "x" } }).success).toBe(false);
     expect(InputSchema.safeParse({ ...base, profile: "local", secrets: { password: "x" } }).success).toBe(true);
   });
+
+  // The proxy object Apify's `editor: "proxy"` emits survives validation
+  // whole; before this the groups and the country were stripped and a run that
+  // asked for RESIDENTIAL silently got datacenter proxies.
+  it("keeps the Apify Proxy groups and country the Console emits", () => {
+    const base = { mode: "record", fields: [{ name: "price" }], startUrls: ["https://example.com/a"] };
+    const proxy = { useApifyProxy: true, apifyProxyGroups: ["RESIDENTIAL"], apifyProxyCountry: "CL" };
+    const parsed = InputSchema.parse({ ...base, proxy });
+    expect(parsed.proxy).toEqual(proxy);
+    expect(InputSchema.parse({ ...base, proxy: { useApifyProxy: false } }).proxy).toEqual({ useApifyProxy: false });
+    expect(InputSchema.parse({ ...base, proxy: { useApifyProxy: true, apifyProxyGroups: ["BUYPROXIES94952"] } }).proxy).toEqual({ useApifyProxy: true, apifyProxyGroups: ["BUYPROXIES94952"] });
+  });
+
+  it("refuses Apify Proxy combined with a caller's own proxy URLs, a bad country and groups without Apify Proxy", () => {
+    const base = { mode: "record", fields: [{ name: "price" }], startUrls: ["https://example.com/a"] };
+    const both = InputSchema.safeParse({ ...base, proxy: { useApifyProxy: true, apifyProxyGroups: ["RESIDENTIAL"], proxyUrls: ["http://user:pass@127.0.0.1:8000"] } });
+    expect(both.success).toBe(false);
+    expect(both.success ? "" : both.error.issues.map((i) => i.message).join("\n")).toMatch(/cannot be combined/);
+    expect(InputSchema.safeParse({ ...base, proxy: { useApifyProxy: true, apifyProxyCountry: "cl" } }).success).toBe(false);
+    expect(InputSchema.safeParse({ ...base, proxy: { useApifyProxy: true, apifyProxyGroups: ["not a group"] } }).success).toBe(false);
+    expect(InputSchema.safeParse({ ...base, proxy: { apifyProxyGroups: ["RESIDENTIAL"] } }).success).toBe(false);
+    // a caller's own proxies alone stay valid
+    expect(InputSchema.safeParse({ ...base, proxy: { useApifyProxy: false, proxyUrls: ["http://user:pass@127.0.0.1:8000"] } }).success).toBe(true);
+  });
 });
 
 describe("url guard (R26)", () => {

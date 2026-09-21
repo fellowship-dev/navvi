@@ -6,7 +6,9 @@ import { chromium, type BrowserContext, type Page } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildCrawleeLaunchContext, profileDir } from "../src/browser/launch.js";
 import { RecordedChooser } from "../src/chooser/recorded.js";
-import { loadListSources, makeRequestGuard, runCrawl } from "../src/replay/crawler.js";
+import { ProxyConfiguration } from "crawlee";
+import { NavviError } from "../src/billing/budget.js";
+import { loadListSources, makeRequestGuard, proxyOptionsFor, resolveProxy, runCrawl, type CrawlActor, type CrawlProxyOptions } from "../src/replay/crawler.js";
 import { ScraperStore } from "../src/scraper/store.js";
 import { SCRAPER_VERSION, cacheKey, type CompiledScraper, type TraceStep } from "../src/scraper/schema.js";
 import { groupByTemplate } from "../src/template/index.js";
@@ -547,5 +549,151 @@ describe("crawler runs", () => {
     } finally {
       launchSpy.mockRestore();
     }
+  });
+
+  // The Console's proxy editor emits the groups and the country; before
+  // this the Zod input stripped them and `createProxyConfiguration()` was
+  // called with nothing, so selecting RESIDENTIAL quietly got datacenter IPs.
+  it("a run that selects Apify Proxy reaches createProxyConfiguration with the mapped groups and country, and still crawls", async () => {
+    const helper = await startHelperServer({ "/tools-1.html": { type: "text/html; charset=utf-8", body: `<!doctype html><title>One</title><h1>Internal tools</h1>` } });
+    const actor = makeActor(dir);
+    const startUrls = [`${helper.baseUrl}/tools-1.html`];
+    const key = keyFor(startUrls, { fields: ["heading"], profile: "store" });
+    const store = await ScraperStore.open({ actor });
+    await store.put(
+      seeded({
+        ...key,
+        mode: "record",
+        entry: { mode: "direct", url: startUrls[0]! },
+        fields: { heading: { alternatives: [{ selector: "h1", fingerprint: { samples: ["Internal tools"], shape: "text" } }] } },
+      }),
+    );
+    const calls: Array<CrawlProxyOptions | undefined> = [];
+    const spy = vi.spyOn(actor, "createProxyConfiguration").mockImplementation(async (options) => {
+      calls.push(options);
+      return undefined;
+    });
+    try {
+      const proxy = { useApifyProxy: true, apifyProxyGroups: ["RESIDENTIAL"], apifyProxyCountry: "CL" };
+      const summary = await runCrawl(fixtureInput({ startUrls, mode: "record", fields: F("heading"), proxy }), makeDeps(dir, actor, new RecordedChooser({ fixture: "crawler/empty" })));
+      expect(summary.status).toBe("succeeded");
+      expect(summary.items).toBe(1);
+      expect(calls).toEqual([{ useApifyProxy: true, groups: ["RESIDENTIAL"], countryCode: "CL" }]);
+      // nothing in an Apify Proxy selection is secret, so the summary echoes it whole
+      expect(summary.input?.proxy).toEqual(proxy);
+    } finally {
+      spy.mockRestore();
+      await helper.close();
+    }
+  });
+
+  it("a run with no proxy never calls createProxyConfiguration", async () => {
+    const helper = await startHelperServer({ "/tools-1.html": { type: "text/html; charset=utf-8", body: `<!doctype html><title>One</title><h1>Internal tools</h1>` } });
+    const actor = makeActor(dir);
+    const startUrls = [`${helper.baseUrl}/tools-1.html`];
+    const key = keyFor(startUrls, { fields: ["heading"], profile: "store" });
+    const store = await ScraperStore.open({ actor });
+    await store.put(
+      seeded({
+        ...key,
+        mode: "record",
+        entry: { mode: "direct", url: startUrls[0]! },
+        fields: { heading: { alternatives: [{ selector: "h1", fingerprint: { samples: ["Internal tools"], shape: "text" } }] } },
+      }),
+    );
+    const spy = vi.spyOn(actor, "createProxyConfiguration");
+    try {
+      const summary = await runCrawl(fixtureInput({ startUrls, mode: "record", fields: F("heading"), proxy: { useApifyProxy: false } }), makeDeps(dir, actor, new RecordedChooser({ fixture: "crawler/empty" })));
+      expect(summary.status).toBe("succeeded");
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+      await helper.close();
+    }
+  });
+});
+
+/**
+ * Apify Proxy's real options — the groups and the country the Console's
+ * proxy editor emits — reach Crawlee, and a caller's own proxies stay a
+ * separate, mutually exclusive path.
+ */
+describe("resolveProxy", () => {
+  const anyConfig = () => new ProxyConfiguration({ proxyUrls: ["http://127.0.0.1:9"] });
+
+  function spyActor(outcome: (() => ProxyConfiguration | undefined) | Error = anyConfig): { actor: Pick<CrawlActor, "createProxyConfiguration">; calls: Array<CrawlProxyOptions | undefined> } {
+    const calls: Array<CrawlProxyOptions | undefined> = [];
+    return {
+      calls,
+      actor: {
+        createProxyConfiguration: async (options) => {
+          calls.push(options);
+          if (outcome instanceof Error) throw outcome;
+          return outcome();
+        },
+      },
+    };
+  }
+
+  it("passes the Console's groups and country through verbatim, under the option names the SDK asks crawler code to use", async () => {
+    const { actor, calls } = spyActor();
+    const resolved = await resolveProxy({ useApifyProxy: true, apifyProxyGroups: ["RESIDENTIAL", "BUYPROXIES94952"], apifyProxyCountry: "CL" }, actor);
+    expect(calls).toEqual([{ useApifyProxy: true, groups: ["RESIDENTIAL", "BUYPROXIES94952"], countryCode: "CL" }]);
+    expect(resolved.proxyConfiguration).toBeInstanceOf(ProxyConfiguration);
+    // Crawlee's ProxyConfiguration owns rotation: nothing is pinned into the browser launch as well.
+    expect(resolved.launchProxyUrl).toBeUndefined();
+  });
+
+  it("asks for automatic selection when Apify Proxy carries no group, and invents no country", async () => {
+    const { actor, calls } = spyActor();
+    await resolveProxy({ useApifyProxy: true }, actor);
+    expect(calls).toEqual([{ useApifyProxy: true }]);
+    expect(proxyOptionsFor({ useApifyProxy: true, apifyProxyGroups: [] })).toEqual({ useApifyProxy: true });
+  });
+
+  it("does not call createProxyConfiguration at all when Apify Proxy is off", async () => {
+    const { actor, calls } = spyActor();
+    expect(await resolveProxy({ useApifyProxy: false }, actor)).toEqual({});
+    expect(await resolveProxy(undefined, actor)).toEqual({});
+    expect(await resolveProxy({}, actor)).toEqual({});
+    expect(calls).toEqual([]);
+    expect(proxyOptionsFor({ useApifyProxy: false })).toBeUndefined();
+  });
+
+  it("rotates a caller's own proxy URLs through Crawlee, and pins the first one at launch when the actor has no factory", async () => {
+    const own = ["http://proxy-user:hunter2-proxy@127.0.0.1:1", "http://127.0.0.1:2"];
+    const { actor, calls } = spyActor();
+    const resolved = await resolveProxy({ useApifyProxy: false, proxyUrls: own }, actor);
+    expect(calls).toEqual([{ useApifyProxy: false, proxyUrls: own }]);
+    expect(resolved.proxyConfiguration).toBeInstanceOf(ProxyConfiguration);
+    expect(resolved.launchProxyUrl).toBeUndefined();
+    // a CrawlActor without the Apify SDK's factory (charging is optional too): the first URL goes to the browser launch
+    expect(await resolveProxy({ proxyUrls: own }, {})).toEqual({ launchProxyUrl: own[0] });
+    expect(await resolveProxy({ proxyUrls: [] }, {})).toEqual({});
+  });
+
+  it("names the requested groups and country when Apify Proxy refuses them", async () => {
+    const { actor } = spyActor(new Error("You do not have access to proxy group"));
+    const error = await resolveProxy({ useApifyProxy: true, apifyProxyGroups: ["RESIDENTIAL"], apifyProxyCountry: "CL" }, actor).then(
+      () => null,
+      (e: unknown) => e as NavviError,
+    );
+    expect(error).toBeInstanceOf(NavviError);
+    expect(error?.status).toBe("configuration_error");
+    expect(error?.message).toContain("proxy groups RESIDENTIAL");
+    expect(error?.message).toContain("country CL");
+    expect(error?.message).toContain("You do not have access to proxy group");
+  });
+
+  it("never lets a refused custom proxy URL put its password in the message (R39)", async () => {
+    const own = ["http://proxy-user:hunter2-proxy@127.0.0.1:1"];
+    const { actor } = spyActor(new Error(`bad proxy url ${own[0]} (hunter2-proxy)`));
+    const error = await resolveProxy({ proxyUrls: own }, actor).then(
+      () => null,
+      (e: unknown) => e as NavviError,
+    );
+    expect(error?.status).toBe("configuration_error");
+    expect(error?.message).not.toContain("hunter2-proxy");
+    expect(error?.message).toContain("127.0.0.1:1");
   });
 });

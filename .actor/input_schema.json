@@ -219,7 +219,7 @@
     "proxy": {
       "title": "Proxy",
       "type": "object",
-      "description": "Apify Proxy or your own proxy URLs. A residential proxy is the answer to blocked_bot_detection.",
+      "description": "Apify Proxy or your own proxy URLs, never both. Pick 'Apify Proxy' and select the RESIDENTIAL group (optionally a country) when a run ends blocked_bot_detection: residential exit IPs are the fix, and Apify bills them by the gigabyte on your account. Datacenter groups are the cheap default. Your own proxies go in the custom proxy URL list instead; groups and country do not apply to them.",
       "editor": "proxy",
       "prefill": {
         "useApifyProxy": false

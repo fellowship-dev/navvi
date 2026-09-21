@@ -38,6 +38,56 @@ export const WRITERS = ["agent", "model", "claude", "codex"] as const;
 export const TRANSPORTS = ["gateway", "typesafe"] as const;
 
 export const PROFILES = ["store", "local"] as const;
+
+/**
+ * The proxy object exactly as Apify's `editor: "proxy"` emits it: the
+ * Console writes `useApifyProxy`, the selected Apify Proxy groups as
+ * `apifyProxyGroups` (`RESIDENTIAL`, `BUYPROXIES94952`, …), the optional
+ * two-letter country as `apifyProxyCountry`, and a caller's own proxies as
+ * `proxyUrls`. Those UI names are the ones the Apify SDK documents as the
+ * input-schema spellings of its own `groups` / `countryCode` options
+ * (`node_modules/apify/dist/proxy_configuration.d.ts`,
+ * `ProxyConfigurationOptions`), so modelling them here is what makes the
+ * Console's residential selection survive validation instead of being
+ * stripped. `crawler.ts` maps them onto `groups` / `countryCode`, the names
+ * the SDK asks crawler code to use.
+ *
+ * Apify Proxy and a caller's own `proxyUrls` are one choice, not two layers:
+ * Apify's `ProxyConfiguration` throws "Cannot combine custom proxies with
+ * Apify Proxy" on the combination, so the run is refused here, at validation,
+ * rather than letting one silently shadow the other.
+ */
+export const ProxySchema = z
+  .object({
+    useApifyProxy: z.boolean().optional(),
+    /** `APIFY_PROXY_VALUE_REGEX` from `@apify/consts`; the SDK rejects anything else. */
+    apifyProxyGroups: z.array(z.string().regex(/^[\w._~]+$/, "not an Apify Proxy group name")).optional(),
+    /** ISO 3166-1 alpha-2, uppercase, as the SDK's `COUNTRY_CODE_REGEX` requires. */
+    apifyProxyCountry: z
+      .string()
+      .regex(/^[A-Z]{2}$/, "not a two-letter upper-case ISO 3166-1 country code")
+      .optional(),
+    proxyUrls: z.array(z.string()).optional(),
+  })
+  .superRefine((proxy, ctx) => {
+    const own = proxy.proxyUrls?.length ?? 0;
+    if (proxy.useApifyProxy && own > 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["proxyUrls"],
+        message: "proxy.useApifyProxy cannot be combined with proxy.proxyUrls; pick Apify Proxy or your own proxy URLs, not both",
+      });
+    }
+    if (!proxy.useApifyProxy && (proxy.apifyProxyGroups?.length || proxy.apifyProxyCountry)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["useApifyProxy"],
+        message: "proxy.apifyProxyGroups and proxy.apifyProxyCountry need proxy.useApifyProxy: true",
+      });
+    }
+  });
+
+export type ProxyInput = z.infer<typeof ProxySchema>;
 export const BROWSERS = ["camoufox", "chromium"] as const;
 export const MODES = ["list", "record"] as const;
 /** R5: output types a field may declare; replay coerces the extracted text to them. */
@@ -146,7 +196,7 @@ export const BaseInputSchema = z
     browser: z.enum(BROWSERS).optional(),
     allowedDomains: z.array(z.string().min(1)).default([]),
     allowPrivateHosts: z.array(z.string().min(1)).default([]),
-    proxy: z.object({ useApifyProxy: z.boolean().optional(), proxyUrls: z.array(z.string()).optional() }).optional(),
+    proxy: ProxySchema.optional(),
     scriptId: z.string().optional(),
     forceRecompile: z.boolean().default(false),
     /** U14: the single field the two sources replace; still honoured, see `resolveSources`. */

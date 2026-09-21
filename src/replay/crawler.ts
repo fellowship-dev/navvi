@@ -8,13 +8,13 @@ import { buildCrawleeLaunchContext, restoreProfileCookies, saveProfileCookies } 
 import { hostOf, isAllowedRequestUrl, registrableDomain } from "../browser/policy.js";
 import { createChooser, NavviError, NeedsHumanError, type Chooser } from "../chooser/index.js";
 import { compile, type CompileResult } from "../compile/index.js";
-import { LIMITS, isAllowedUrl, resolveSources, type FieldType, type Profile, type RunInput } from "../input/schema.js";
+import { LIMITS, isAllowedUrl, resolveSources, type FieldType, type Profile, type ProxyInput, type RunInput } from "../input/schema.js";
 import type { RunSummary } from "../main.js";
 import { dismissConsent, runPreSteps, type Notifier } from "../prestep/index.js";
 import { coerceValues, extractPage, fieldTypesOf, fingerprintMatches, type ItemExtraction } from "../scraper/extract.js";
 import { cacheKey, validateScraper, type CompiledScraper, type Status, type TraceStep } from "../scraper/schema.js";
 import { ScraperStore, ScraperStoreError } from "../scraper/store.js";
-import { findPlaceholders, MissingSecretError, redactRunInput, resolveSecrets, type CommandRunner, type Secret } from "../secrets/resolve.js";
+import { findPlaceholders, MASK, maskUrlCredentials, MissingSecretError, redactRunInput, resolveSecrets, type CommandRunner, type Secret } from "../secrets/resolve.js";
 import { groupByTemplate, pickSampleUrls } from "../template/index.js";
 import { compileDetail, DETAIL_LINK_FIELD, detailLinkOf, extractDetail, hasDetailTemplate, mergeDetail, withDetailLink } from "./detail.js";
 import { entryModeFor, replayTrace, type ReplayPolicy, type StepFailureAction } from "./entry.js";
@@ -37,13 +37,33 @@ export const LIST_SOURCE_EXTENSIONS = [".txt", ".json", ".csv"] as const;
 
 export type RequestLabel = "compile" | "list" | "record";
 
+/**
+ * The proxy options the crawler actually passes to `Actor.createProxyConfiguration`.
+ * A subset of Apify's `ProxyConfigurationOptions`
+ * (`node_modules/apify/dist/proxy_configuration.d.ts`, which extends
+ * `@crawlee/core`'s `{ proxyUrls, newUrlFunction, tieredProxyUrls }`), named
+ * the way the SDK asks crawler code to name them: `groups` and `countryCode`
+ * rather than the input-schema spellings `apifyProxyGroups` /
+ * `apifyProxyCountry`. `useApifyProxy` is carried through because the SDK
+ * treats `{ useApifyProxy: false }` as "no proxy at all".
+ */
+export interface CrawlProxyOptions {
+  useApifyProxy?: boolean;
+  /** Apify Proxy groups, e.g. `["RESIDENTIAL"]` or `["BUYPROXIES94952"]`. */
+  groups?: string[];
+  /** Two-letter ISO 3166-1 country code the exit IPs are geolocated to. */
+  countryCode?: string;
+  /** A caller's own proxies, rotated by Crawlee; never combined with Apify Proxy. */
+  proxyUrls?: string[];
+}
+
 /** What the crawler needs from `Actor`; the static class and an instance both satisfy it. Charging is optional (R20). */
 export interface CrawlActor extends ChargingActor {
   openKeyValueStore(storeIdOrName?: string | null): Promise<KeyValueStore>;
   openDataset(datasetIdOrName?: string | null): Promise<Dataset>;
   isAtHome(): boolean;
   readonly config: Configuration;
-  createProxyConfiguration?(options?: { proxyUrls?: string[] }): Promise<ProxyConfiguration | undefined>;
+  createProxyConfiguration?(options?: CrawlProxyOptions): Promise<ProxyConfiguration | undefined>;
 }
 
 export interface NavigateContext {
@@ -400,6 +420,89 @@ function serialize(): <T>(fn: () => Promise<T>) => Promise<T> {
   };
 }
 
+// ---------------------------------------------------------------- the proxy
+
+/** The proxy options for a run, or undefined when the run wants no proxy at all. */
+export function proxyOptionsFor(proxy: ProxyInput | undefined): CrawlProxyOptions | undefined {
+  if (proxy?.useApifyProxy) {
+    const groups = proxy.apifyProxyGroups?.filter((g) => g.length > 0) ?? [];
+    return {
+      useApifyProxy: true,
+      // The SDK's own advice: the input-schema names `apifyProxyGroups` /
+      // `apifyProxyCountry` become `groups` / `countryCode` in crawler code.
+      ...(groups.length > 0 ? { groups } : {}),
+      ...(proxy.apifyProxyCountry ? { countryCode: proxy.apifyProxyCountry } : {}),
+    };
+  }
+  const own = proxy?.proxyUrls?.filter((url) => url.length > 0) ?? [];
+  return own.length > 0 ? { useApifyProxy: false, proxyUrls: own } : undefined;
+}
+
+/** `text` with the userinfo of any of `urls` masked, so a proxy password never reaches a message (R39). */
+function maskProxyUrlsIn(text: string, urls: readonly string[]): string {
+  let out = text;
+  for (const url of urls) {
+    out = out.split(url).join(maskUrlCredentials(url));
+    try {
+      const password = new URL(url).password;
+      if (password.length >= 3) out = out.split(password).join(MASK);
+    } catch {
+      // not a URL: the whole-string replacement above is all there is to do
+    }
+  }
+  return out;
+}
+
+/**
+ * The run's single proxy source, resolved once before the browser opens.
+ *
+ * Apify Proxy (`useApifyProxy`, with `apifyProxyGroups` and
+ * `apifyProxyCountry`) and a caller's own `proxyUrls` are one choice, not two
+ * layers: `parseInput` refuses the combination, mirroring Apify's own
+ * "Cannot combine custom proxies with Apify Proxy". It has to be refused
+ * rather than merged, because a launch-level `proxyUrl` silently wins:
+ * Crawlee only assigns a rotated proxy `if (this.proxyConfiguration &&
+ * !launchContext.proxyUrl)` (`@crawlee/browser` `_extendLaunchContext`), so
+ * passing both would pin one exit IP and quietly skip the rotation asked for.
+ * Whichever branch is live, Crawlee's `ProxyConfiguration` owns rotation for
+ * every browser the pool launches, and nothing is pinned into the launch
+ * context alongside it.
+ * `launchProxyUrl` is the fallback for a `CrawlActor` with no
+ * `createProxyConfiguration` (a minimal fake, or a caller embedding the
+ * crawler without the Apify SDK): own proxies then go straight to the browser
+ * launch, first URL only, unrotated.
+ */
+export async function resolveProxy(
+  proxy: ProxyInput | undefined,
+  actor: Pick<CrawlActor, "createProxyConfiguration">,
+): Promise<{ proxyConfiguration?: ProxyConfiguration | undefined; launchProxyUrl?: string | undefined }> {
+  const options = proxyOptionsFor(proxy);
+  if (!options) return {};
+  const fallback = options.proxyUrls?.[0];
+  if (!actor.createProxyConfiguration) return fallback ? { launchProxyUrl: fallback } : {};
+  // Names what was asked for, so an unavailable group is legible instead of an opaque proxy error.
+  const asked = [options.groups?.length ? `proxy groups ${options.groups.join(", ")}` : "the automatically selected proxy groups", options.countryCode ? `country ${options.countryCode}` : null]
+    .filter(Boolean)
+    .join(", ");
+  let proxyConfiguration: ProxyConfiguration | undefined;
+  try {
+    proxyConfiguration = await actor.createProxyConfiguration(options);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (options.proxyUrls) {
+      throw new NavviError("configuration_error", `input.proxy.proxyUrls was refused: ${maskProxyUrlsIn(reason, options.proxyUrls)}`);
+    }
+    // The platform's own reason is appended verbatim; it is the only authority on why.
+    throw new NavviError("configuration_error", `Apify Proxy with ${asked} is not usable on this account: ${reason}`);
+  }
+  if (proxyConfiguration) return { proxyConfiguration };
+  // The SDK declines to build one rather than throwing when Apify Proxy is
+  // asked for off the platform (no proxy password): say so instead of crawling
+  // from the local IP without a word.
+  if (options.useApifyProxy) ctxLog(`Apify Proxy was requested (${asked}) but no configuration was created; the run continues with no proxy`);
+  return fallback ? { launchProxyUrl: fallback } : {};
+}
+
 // ---------------------------------------------------------------- the run
 
 export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<RunSummary> {
@@ -506,6 +609,8 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   const anyTrace = plans.some((p) => p.scraper && entryModeFor(p.scraper) === "trace");
   const singleSession = mode === "list" && (anyTrace || plans.some((p) => !p.scraper));
 
+  const { proxyConfiguration, launchProxyUrl } = await resolveProxy(input.proxy, actor);
+
   // R40: one persistent profile per registrable domain and profile name.
   const firstHost = hostOf(urls[0]!);
   const launch = await buildCrawleeLaunchContext({
@@ -515,9 +620,8 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     profileName: input.profile,
     storageDir: deps.storageDir,
     freshProfile: input.freshProfile,
-    proxyUrl: input.proxy?.proxyUrls?.[0],
+    proxyUrl: launchProxyUrl,
   });
-  const proxyConfiguration = input.proxy?.useApifyProxy && actor.createProxyConfiguration ? await actor.createProxyConfiguration() : undefined;
 
   const profileDir = launch.userDataDir;
   const installGuard = async (context: BrowserContext): Promise<void> => {

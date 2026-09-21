@@ -99,6 +99,15 @@ describe("redactRunInput (R39)", () => {
     expect(maskUrlCredentials("socks5h://u:p@host:1080")).toBe(`socks5h://${MASK}@host:1080`);
   });
 
+  // The Apify Proxy selection carries no credential, so it is echoed
+  // whole; the masking of a caller's own URLs is unaffected by the new fields.
+  it("keeps the Apify Proxy groups and country, which hold no credential", () => {
+    const apify = { ...raw, proxy: { useApifyProxy: true, apifyProxyGroups: ["RESIDENTIAL"], apifyProxyCountry: "CL" } };
+    const out = redactRunInput(parseInput(apify));
+    expect(out.proxy).toEqual({ useApifyProxy: true, apifyProxyGroups: ["RESIDENTIAL"], apifyProxyCountry: "CL" });
+    expect(out.secrets).toEqual({ password: MASK });
+  });
+
   it("summaryFor echoes the input without the proxy password", () => {
     const summary = summaryFor("needs_human", parseInput(raw), "parked");
     const text = JSON.stringify(summary);
