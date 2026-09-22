@@ -23,6 +23,29 @@ import { defaultNavigator } from "./navigator.js";
 import { defaultPaginate } from "./paginate.js";
 
 /**
+ * Crawlee retires a Session after `maxUsageCount` requests, which defaults to
+ * **50**, and BrowserCrawler retires the *browser* when a session retires
+ * (`EVENT_SESSION_RETIRED` -> `browserPool.retireBrowserController`). So an
+ * unconfigured run tears the browser down and relaunches it every 50 requests.
+ *
+ * On the Apify Chrome image that relaunch fails: two client runs died with
+ * `Failed to launch browser ... /pw-browsers/chrome` at 50 and 49 requests,
+ * while a third that only reached 10 requests survived. Raising the browser
+ * pool's own `retireBrowserAfterPageCount` changed nothing, which is what
+ * proved the session pool was the trigger rather than the browser pool.
+ *
+ * A run replaying a pinned scraper has no reason to rotate sessions: it is not
+ * evading a block, and a fresh session buys nothing but a browser restart.
+ */
+export function buildSessionPoolOptions(singleSession: boolean) {
+  return {
+    maxPoolSize: singleSession ? 1 : 4,
+    sessionOptions: { maxUsageCount: 1_000_000 },
+  };
+}
+
+
+/**
  * The crawler shell (U8, KTD4): one PlaywrightCrawler owns the browser for
  * every phase. A `compile` request runs the pre-steps, the optional
  * navigator, the compiler and stores the scraper; `record` and `list`
@@ -674,7 +697,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       navigationTimeoutSecs: 60,
       useSessionPool: true,
       persistCookiesPerSession: false,
-      sessionPoolOptions: { maxPoolSize: singleSession ? 1 : 4 },
+      sessionPoolOptions: buildSessionPoolOptions(singleSession),
       preNavigationHooks: [async ({ page }) => {
         await guardContext(page.context());
         await deps.onPage?.(page);

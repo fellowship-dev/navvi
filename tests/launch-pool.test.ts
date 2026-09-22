@@ -51,3 +51,35 @@ describe("browser pool options", () => {
     expect(chromium.userDataDir).toBeUndefined();
   });
 });
+
+/**
+ * The real trigger behind the 2026-09-21 Apify failures.
+ *
+ * Crawlee's Session defaults to `maxUsageCount: 50` (@crawlee/core
+ * session_pool/session.js), and BrowserCrawler retires the *browser* when a
+ * session retires (@crawlee/browser browser-crawler.js: on
+ * EVENT_SESSION_RETIRED -> browserPool.retireBrowserController). So at exactly
+ * 50 requests the browser is torn down and relaunched -- and that relaunch is
+ * what fails on the Apify Chrome image.
+ *
+ * Store B died at 50 requests, then at 49 with the browser-pool bound
+ * already raised, which is what proved the browser pool was never the trigger.
+ * StoreC, which only reached 10 requests, survived.
+ *
+ * A run replaying a pinned scraper has no reason to rotate sessions at all.
+ */
+import { buildSessionPoolOptions } from "../src/replay/crawler.js";
+
+describe("session pool", () => {
+  it("does not rotate the session mid-run, whatever the pool size", () => {
+    for (const singleSession of [true, false]) {
+      const opts = buildSessionPoolOptions(singleSession);
+      expect(opts.sessionOptions?.maxUsageCount).toBeGreaterThanOrEqual(1_000_000);
+    }
+  });
+
+  it("keeps the pool size each mode needs", () => {
+    expect(buildSessionPoolOptions(true).maxPoolSize).toBe(1);
+    expect(buildSessionPoolOptions(false).maxPoolSize).toBe(4);
+  });
+});

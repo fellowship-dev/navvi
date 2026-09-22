@@ -1,7 +1,28 @@
-# Open: why a browser relaunch fails on the Apify Chrome image
+# Why a browser relaunch fails on the Apify Chrome image
 
-Status: **trigger avoided, root cause unknown.** `d99ad0c` stops navvi
-provoking this; it does not explain it.
+Status: **trigger found and fixed.** The relaunch itself is still unexplained.
+
+## Correction, 2026-09-21
+
+`d99ad0c` claimed the browser pool's `retireBrowserAfterPageCount: 100` was the
+trigger and raised it. **That was wrong.** Build 3.0.9 carried the change and
+failed identically — Store B at 536 s and 49 rows against 3.0.8's 551 s and
+48 rows, same error. Memory peaked at 25% of the 4096 MB limit, so it was not
+OOM either.
+
+**The real trigger is the session pool.** Crawlee's `Session` defaults to
+`maxUsageCount: 50` (`@crawlee/core` `session_pool/session.js`), and
+`BrowserCrawler` retires the *browser* when a session retires (`@crawlee/browser`
+`browser-crawler.js`: on `EVENT_SESSION_RETIRED` ->
+`browserPool.retireBrowserController`). So an unconfigured run tore the browser
+down and relaunched it **every 50 requests** — which is exactly where Store B
+died twice, and why StoreC, at 10 requests, survived.
+
+Fixed by setting `sessionOptions.maxUsageCount` in
+`buildSessionPoolOptions` (`src/replay/crawler.ts`). A run replaying a pinned
+scraper is not evading a block, so a fresh session buys nothing but a browser
+restart. The browser-pool bound from `d99ad0c` is kept — one browser per run is
+reasonable on its own terms — but it fixed nothing.
 
 ## What happened
 
