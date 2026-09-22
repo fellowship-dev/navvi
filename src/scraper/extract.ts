@@ -526,11 +526,28 @@ function isType(node: unknown, entity: string): boolean {
  * A dotted path, with brackets for a key that contains a dot or a dash --
  * `productData.prices[price-list-std]`, which Store B's payload needs.
  *
- * With `search`, an array or an `@graph` is walked to find the first node the
- * path resolves against, because a site is free to bury its Product node in a
- * graph beside its Organization node, and StoreA does.
+ * With an `entity`, the value is read only off a node the site typed that way,
+ * and the search for such a node goes exactly two places: through arrays (a
+ * page ships several blocks, and a block may itself be a list) and into
+ * `@graph` (one block holding several nodes), because a site is free to bury
+ * its Product beside its Organization, and StoreA does.
+ *
+ * It deliberately descends nowhere else. A Product hanging off `isSimilarTo`,
+ * `isRelatedTo`, `isAccessoryOrSparePartFor` or a `BreadcrumbList` item is a
+ * *different* product, and binding to it produces a row with a real name at a
+ * price that is not this page's -- the same failure as StoreA,
+ * 2026-09-22, where a walk that kept going until something answered bound
+ * `productName` to the `Organization` node and returned "StoreA" on all 33
+ * URLs that redirect away from their product page. Those rows carried a name, a
+ * SKU off the URL and a price from a surviving meta tag, so they passed every
+ * "did it extract?" check and would have entered a price index at invented
+ * prices. A plausible wrong row is worse than a blank one.
+ *
+ * `json-ld-needs-product-node` (bind) and `typedNodes` (investigate) read a
+ * block the same way. The gate, the compile and the replay must not disagree
+ * about what a declared block contains.
  */
-function readJsonPath(body: unknown, path: string, entity?: string): unknown {
+export function readJsonPath(body: unknown, path: string, entity?: string): unknown {
   const segments = path.replace(/\[([^\]]+)\]/g, ".$1").split(".").filter(Boolean);
   const direct = (node: unknown): unknown => {
     let current = node;
@@ -549,7 +566,8 @@ function readJsonPath(body: unknown, path: string, entity?: string): unknown {
     if (hit !== undefined) return hit;
   }
 
-  // With one, walk the graph but resolve only against nodes of that type.
+  // With one, resolve only against nodes of that type, and look for them only
+  // in the arrays and `@graph` a declared block is allowed to hide them in.
   const queue: unknown[] = [body];
   for (let guard = 0; queue.length > 0 && guard < 500; guard += 1) {
     const node = queue.shift();
@@ -559,7 +577,8 @@ function readJsonPath(body: unknown, path: string, entity?: string): unknown {
       const found = direct(node);
       if (found !== undefined) return found;
     }
-    queue.push(...Object.values(node as Record<string, unknown>));
+    const graph = (node as Record<string, unknown>)["@graph"];
+    if (graph !== undefined) queue.push(graph);
   }
   return undefined;
 }

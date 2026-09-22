@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CompiledScraperSchema, FieldAlternativeSchema, SCRAPER_VERSION } from "../src/scraper/schema.js";
+import { readJsonPath } from "../src/scraper/extract.js";
 
 /**
  * The extraction cascade, at the schema boundary.
@@ -100,33 +101,11 @@ describe("reading a value out of a JSON-LD graph", () => {
     ],
   };
 
-  const declared = (body: unknown, path: string, entity?: string) => {
-    // The resolution rule, exercised through the same helper extraction uses.
-    const segments = path.split(".");
-    const walk = (node: unknown): unknown => {
-      let cur = node;
-      for (const s of segments) {
-        if (cur === null || typeof cur !== "object") return undefined;
-        cur = (cur as Record<string, unknown>)[s];
-      }
-      return cur;
-    };
-    const typed = (n: unknown): boolean => {
-      if (!entity || n === null || typeof n !== "object") return false;
-      const t = (n as Record<string, unknown>)["@type"];
-      return (Array.isArray(t) ? t : [t]).some((x) => typeof x === "string" && x.toLowerCase() === entity.toLowerCase());
-    };
-    if (!entity) return walk(body);
-    const queue: unknown[] = [body];
-    while (queue.length) {
-      const node = queue.shift();
-      if (Array.isArray(node)) { queue.push(...node); continue; }
-      if (node === null || typeof node !== "object") continue;
-      if (typed(node)) { const hit = walk(node); if (hit !== undefined) return hit; }
-      queue.push(...Object.values(node as Record<string, unknown>));
-    }
-    return undefined;
-  };
+  // The real resolver replay calls, not a copy of it: a second spelling of the
+  // rule goes on passing on its own terms while the one that runs against live
+  // pages drifts -- and it was a live run, not a unit test, that caught the bug
+  // below in the first place.
+  const declared = (body: unknown, path: string, entity?: string) => readJsonPath(body, path, entity);
 
   it("takes the name from the Product, not from the store that sells it", () => {
     expect(declared(storeaGraph, "name", "Product")).toBe("Norvasc (R) Amlodipino 5mg 30 Comprimidos");
@@ -141,6 +120,62 @@ describe("reading a value out of a JSON-LD graph", () => {
   it("a page with no Product node yields nothing, which is the honest answer", () => {
     const redirected = { "@context": "https://schema.org", "@graph": [{ "@type": "Organization", name: "StoreA" }] };
     expect(declared(redirected, "name", "Product")).toBeUndefined();
+  });
+
+  it("a bare top-level Product block still reads without any graph", () => {
+    const bare = { "@context": "https://schema.org", "@type": "Product", name: "Norvasc", offers: { price: "3690" } };
+    expect(declared(bare, "name", "Product")).toBe("Norvasc");
+    expect(declared(bare, "offers.price", "Product")).toBe("3690");
+  });
+
+  /**
+   * The remaining half of the same rule.
+   *
+   * Requiring the node be typed `Product` stops the Organization from
+   * answering, but a walk that descends into every value still finds the
+   * Products a page hangs off `isSimilarTo`, `isRelatedTo` or
+   * `isAccessoryOrSparePartFor`, and the ones a `BreadcrumbList` carries as
+   * items. Those are *other* products. Binding to one yields a row with a real
+   * name at a price that is not this page's -- plausible, unfalsifiable at a
+   * glance, and worse than the blank it replaces. `@graph` is the only nesting
+   * a declared block may hide this page's own Product in, which is what the
+   * `json-ld-needs-product-node` gate and `typedNodes` already assume.
+   */
+  it("a Product hung off isSimilarTo is a different product and is not read", () => {
+    const withRelated = {
+      "@context": "https://schema.org",
+      "@graph": [
+        { "@type": "Organization", name: "StoreA" },
+        {
+          "@type": "WebPage",
+          isSimilarTo: { "@type": "Product", name: "Losartan 50mg", offers: { price: "1990" } },
+        },
+      ],
+    };
+    expect(declared(withRelated, "name", "Product")).toBeUndefined();
+    expect(declared(withRelated, "offers.price", "Product")).toBeUndefined();
+  });
+
+  it("a Product sitting in a BreadcrumbList item is not read either", () => {
+    const crumbs = {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        { "@type": "ListItem", position: 1, item: { "@type": "Product", name: "Ibuprofeno 400mg" } },
+      ],
+    };
+    expect(declared(crumbs, "name", "Product")).toBeUndefined();
+  });
+
+  it("the page's own Product still wins when a related one sits beside it", () => {
+    const both = {
+      "@context": "https://schema.org",
+      "@graph": [
+        { "@type": "WebPage", isRelatedTo: { "@type": "Product", name: "Losartan 50mg" } },
+        { "@type": "Product", name: "Norvasc (R) Amlodipino 5mg 30 Comprimidos" },
+      ],
+    };
+    expect(declared(both, "name", "Product")).toBe("Norvasc (R) Amlodipino 5mg 30 Comprimidos");
   });
 
   it("the schema carries the entity so a scraper can state it", () => {
