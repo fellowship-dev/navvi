@@ -52,8 +52,23 @@ function matches(url: string, match: string | RegExp): boolean {
  * session exists and the second carrying the product. So every match is kept
  * and the caller picks; taking the first would take the failure.
  */
-export function captureJson(page: Page, options: CaptureOptions): { responses: CapturedResponse[] } {
+export interface Capture {
+  responses: CapturedResponse[];
+  /**
+   * Resolves once every body read started so far has finished.
+   *
+   * Reading a response body is asynchronous, so a response that arrived is not
+   * yet a response that can be read. Extracting without waiting loses whichever
+   * payloads were still being parsed -- three Store B products came back
+   * empty on a full catalogue run for exactly this reason, and looked like
+   * pages the scraper had failed on rather than a race in the harness.
+   */
+  settled(): Promise<void>;
+}
+
+export function captureJson(page: Page, options: CaptureOptions): Capture {
   const responses: CapturedResponse[] = [];
+  const pending = new Set<Promise<void>>();
   const limit = options.limit ?? 20;
 
   const onResponse = (response: Response): void => {
@@ -62,16 +77,27 @@ export function captureJson(page: Page, options: CaptureOptions): { responses: C
     if (!matches(url, options.match)) return;
     const type = response.headers()["content-type"] ?? "";
     if (!/json/i.test(type)) return;
-    // Body reads are async and the page may navigate away mid-read; a failed
-    // read is a response we did not get, never a crash.
-    void response
+    // The page may navigate away mid-read; a failed read is a response we did
+    // not get, never a crash.
+    const read = response
       .json()
       .then((body: unknown) => { responses.push({ url, status: response.status(), body }); })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => { pending.delete(read); });
+    pending.add(read);
   };
 
   page.on("response", onResponse);
-  return { responses };
+  return {
+    responses,
+    async settled() {
+      // A read can start another read only in theory, but draining in a loop
+      // costs nothing and removes the question.
+      for (let guard = 0; pending.size > 0 && guard < 10; guard += 1) {
+        await Promise.all([...pending]);
+      }
+    },
+  };
 }
 
 /**

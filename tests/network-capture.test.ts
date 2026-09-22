@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractCaptured, pickResponse, readPath, type CapturedResponse } from "../src/browser/network-capture.js";
+import { captureJson, extractCaptured, pickResponse, readPath, type CapturedResponse } from "../src/browser/network-capture.js";
 
 /**
  * Tier 2 of the extraction cascade, and the thing that settles Store B.
@@ -93,3 +93,58 @@ describe("picking among several calls to the same endpoint", () => {
     expect(pickResponse([failed], "error")).toBeNull();
   });
 });
+
+/**
+ * The race a full catalogue run exposed. Three Store B products came back
+ * empty and scored as pages the scraper had failed on; the payloads had
+ * arrived, and their bodies were still being parsed when extraction ran.
+ *
+ * A response that arrived is not yet a response that can be read.
+ */
+describe("waiting for body reads", () => {
+  /** A Playwright page and response, reduced to what the capture touches. */
+  const fakePage = () => {
+    const handlers: ((r: unknown) => void)[] = [];
+    return {
+      page: { on: (_event: string, fn: (r: unknown) => void) => handlers.push(fn) },
+      emit: (r: unknown) => handlers.forEach((h) => h(r)),
+    };
+  };
+  const slowResponse = (url: string, body: unknown, delayMs: number) => ({
+    url: () => url,
+    status: () => 200,
+    headers: () => ({ "content-type": "application/json" }),
+    json: () => new Promise((resolve) => setTimeout(() => resolve(body), delayMs)),
+  });
+
+  it("settled() waits for a body that is still being parsed", async () => {
+    const { page, emit } = fakePage();
+    const capture = captureJson(page as never, { match: "detail" });
+
+    emit(slowResponse("https://api.example.com/detail/1", { productData: { name: "X" } }, 25));
+    // Exactly the mistake: reading immediately finds nothing.
+    expect(capture.responses).toHaveLength(0);
+
+    await capture.settled();
+    expect(capture.responses).toHaveLength(1);
+    expect(readPath(capture.responses[0]!.body, "productData.name")).toBe("X");
+  });
+
+  it("settled() resolves immediately when nothing is in flight", async () => {
+    const { page } = fakePage();
+    await expect(captureJson(page as never, { match: "detail" }).settled()).resolves.toBeUndefined();
+  });
+
+  it("a body that never parses does not hang the run", async () => {
+    const { page, emit } = fakePage();
+    const capture = captureJson(page as never, { match: "detail" });
+    emit({
+      url: () => "https://api.example.com/detail/2",
+      status: () => 200,
+      headers: () => ({ "content-type": "application/json" }),
+      json: () => Promise.reject(new Error("navigated away mid-read")),
+    });
+    await capture.settled();
+    expect(capture.responses).toHaveLength(0);
+  });
+})

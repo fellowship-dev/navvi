@@ -941,15 +941,16 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
    * Only a scraper that actually declares a `network` alternative pays for
    * this, so nothing changes for a scraper that does not.
    */
-  const captures = new WeakMap<Page, CapturedResponse[]>();
+  const captures = new WeakMap<Page, { responses: CapturedResponse[]; settled: () => Promise<void> }>();
   const wantsNetwork = plans.some((p) => p.scraper && Object.values(p.scraper.fields).some((f) => f.alternatives.some((a) => a.source === "network")));
 
   const startCapture = (page: Page): void => {
     if (!wantsNetwork || captures.has(page)) return;
-    const { responses } = captureJson(page, { match: /./, limit: 40 });
-    captures.set(page, responses);
+    captures.set(page, captureJson(page, { match: /./, limit: 40 }));
   };
-  const capturedFor = (page: Page): CapturedResponse[] => captures.get(page) ?? [];
+  const capturedFor = (page: Page): CapturedResponse[] => captures.get(page)?.responses ?? [];
+  /** Body reads are async: a response that arrived is not yet one that can be read. */
+  const settleCaptures = async (page: Page): Promise<void> => { await captures.get(page)?.settled(); };
 
   interface Extracted {
     scraper: CompiledScraper;
@@ -959,6 +960,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   }
 
   async function extractChecked(page: Page, scraper: CompiledScraper, sourceUrl: string): Promise<Extracted> {
+    await settleCaptures(page);
     const extraction = await extractPage(page, scraper, {
       sourceUrl,
       fields: [...fields, ...detailFieldNames],
