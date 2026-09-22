@@ -1,0 +1,39 @@
+<!doctype html>
+<!--
+  Synthetic, schema.org microdata: the third dialect a storefront declares
+  itself in, and the one where scoping is easiest to get wrong.
+
+  The footer carries its own Organization item with an itemprop="name" of
+  "Farmacia Ejemplo". A regex over `itemprop=` reads that as the product name —
+  the same defect as walking a JSON-LD @graph, one markup dialect over — so the
+  reader has to honour the itemscope stack.
+
+  The price is declared twice on purpose: `content="7490"` on the <meta> and
+  "$ 7.490" as rendered text. Reading the rendered form under a decimal parse
+  gives seven, which is why `machine-attribute-over-text` exists.
+-->
+<html lang="es">
+  <head>
+    <title>Ejemplo Paracetamol 500 mg</title>
+    <meta charset="utf-8" />
+  </head>
+  <body>
+    <main itemscope itemtype="https://schema.org/Product">
+      <h1 itemprop="name">Ejemplo Paracetamol 500 mg 16 Comprimidos</h1>
+      <meta itemprop="sku" content="410077" />
+      <span itemprop="brand" itemscope itemtype="https://schema.org/Brand">
+        <span itemprop="name">Laboratorio Ejemplo</span>
+      </span>
+      <div itemprop="offers" itemscope itemtype="https://schema.org/Offer">
+        <meta itemprop="price" content="7490" />
+        <meta itemprop="priceCurrency" content="CLP" />
+        <link itemprop="availability" href="https://schema.org/InStock" />
+        <span class="rendered">$ 7.490</span>
+      </div>
+    </main>
+    <footer itemscope itemtype="https://schema.org/Organization">
+      <span itemprop="name">Farmacia Ejemplo</span>
+      <span itemprop="telephone">600 000 0000</span>
+    </footer>
+  </body>
+</html>
