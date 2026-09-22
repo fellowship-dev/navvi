@@ -508,10 +508,18 @@ async function resolveDeclared(
   for (const block of blocks) {
     let parsed: unknown;
     try { parsed = JSON.parse(block.trim()); } catch { continue; }
-    const value = readJsonPath(parsed, alternative.path, true);
+    const value = readJsonPath(parsed, alternative.path, alternative.entity);
     if (value !== undefined && value !== null) return String(value);
   }
   return null;
+}
+
+/** schema.org `@type`, which may be a string or a list of them. */
+function isType(node: unknown, entity: string): boolean {
+  if (node === null || typeof node !== "object") return false;
+  const type = (node as Record<string, unknown>)["@type"];
+  const types = Array.isArray(type) ? type : [type];
+  return types.some((t) => typeof t === "string" && t.toLowerCase() === entity.toLowerCase());
 }
 
 /**
@@ -522,7 +530,7 @@ async function resolveDeclared(
  * path resolves against, because a site is free to bury its Product node in a
  * graph beside its Organization node, and StoreA does.
  */
-function readJsonPath(body: unknown, path: string, search = false): unknown {
+function readJsonPath(body: unknown, path: string, entity?: string): unknown {
   const segments = path.replace(/\[([^\]]+)\]/g, ".$1").split(".").filter(Boolean);
   const direct = (node: unknown): unknown => {
     let current = node;
@@ -533,16 +541,24 @@ function readJsonPath(body: unknown, path: string, search = false): unknown {
     return current;
   };
 
-  const hit = direct(body);
-  if (hit !== undefined || !search) return hit;
+  // Without an entity the top-level object is the whole contract: a bare
+  // `{"@type":"Product", ...}` block reads directly and nothing is searched.
+  if (!entity) return direct(body);
+  if (isType(body, entity)) {
+    const hit = direct(body);
+    if (hit !== undefined) return hit;
+  }
 
+  // With one, walk the graph but resolve only against nodes of that type.
   const queue: unknown[] = [body];
-  for (let guard = 0; queue.length > 0 && guard < 200; guard += 1) {
+  for (let guard = 0; queue.length > 0 && guard < 500; guard += 1) {
     const node = queue.shift();
     if (Array.isArray(node)) { queue.push(...node); continue; }
     if (node === null || typeof node !== "object") continue;
-    const found = direct(node);
-    if (found !== undefined) return found;
+    if (isType(node, entity)) {
+      const found = direct(node);
+      if (found !== undefined) return found;
+    }
     queue.push(...Object.values(node as Record<string, unknown>));
   }
   return undefined;

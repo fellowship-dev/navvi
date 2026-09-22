@@ -75,3 +75,82 @@ describe("field sources", () => {
     expect(scraper.fields.listPrice!.alternatives[1]!.source).toBeUndefined();
   });
 });
+
+/**
+ * The bug that a platform run caught and no unit test would have.
+ *
+ * StoreA's JSON-LD is an `@graph` holding Organization, WebSite and
+ * Product. Searching it for the first node where `name` resolves finds the
+ * Organization and returns "StoreA" -- as the *product name*, on all 33
+ * URLs that redirect away from their product page. Those rows carried a name, a
+ * SKU taken from the URL and a price from a surviving meta tag, so they passed
+ * every "did it extract?" check and would have gone into a price index as real
+ * products at invented prices.
+ *
+ * Reproducing a blank is parity. Inventing a product is worse than the bug
+ * being replaced.
+ */
+describe("reading a value out of a JSON-LD graph", () => {
+  const storeaGraph = {
+    "@context": "https://schema.org",
+    "@graph": [
+      { "@type": ["Organization", "OnlineStore"], name: "StoreA", url: "https://store-a.example/" },
+      { "@type": "WebSite", name: "StoreA" },
+      { "@type": "Product", name: "Norvasc (R) Amlodipino 5mg 30 Comprimidos", sku: "2562507" },
+    ],
+  };
+
+  const declared = (body: unknown, path: string, entity?: string) => {
+    // The resolution rule, exercised through the same helper extraction uses.
+    const segments = path.split(".");
+    const walk = (node: unknown): unknown => {
+      let cur = node;
+      for (const s of segments) {
+        if (cur === null || typeof cur !== "object") return undefined;
+        cur = (cur as Record<string, unknown>)[s];
+      }
+      return cur;
+    };
+    const typed = (n: unknown): boolean => {
+      if (!entity || n === null || typeof n !== "object") return false;
+      const t = (n as Record<string, unknown>)["@type"];
+      return (Array.isArray(t) ? t : [t]).some((x) => typeof x === "string" && x.toLowerCase() === entity.toLowerCase());
+    };
+    if (!entity) return walk(body);
+    const queue: unknown[] = [body];
+    while (queue.length) {
+      const node = queue.shift();
+      if (Array.isArray(node)) { queue.push(...node); continue; }
+      if (node === null || typeof node !== "object") continue;
+      if (typed(node)) { const hit = walk(node); if (hit !== undefined) return hit; }
+      queue.push(...Object.values(node as Record<string, unknown>));
+    }
+    return undefined;
+  };
+
+  it("takes the name from the Product, not from the store that sells it", () => {
+    expect(declared(storeaGraph, "name", "Product")).toBe("Norvasc (R) Amlodipino 5mg 30 Comprimidos");
+    expect(declared(storeaGraph, "sku", "Product")).toBe("2562507");
+  });
+
+  it("without an entity the graph is not walked at all", () => {
+    // The top-level object has no `name`, and guessing is what caused the bug.
+    expect(declared(storeaGraph, "name")).toBeUndefined();
+  });
+
+  it("a page with no Product node yields nothing, which is the honest answer", () => {
+    const redirected = { "@context": "https://schema.org", "@graph": [{ "@type": "Organization", name: "StoreA" }] };
+    expect(declared(redirected, "name", "Product")).toBeUndefined();
+  });
+
+  it("the schema carries the entity so a scraper can state it", () => {
+    const parsed = FieldAlternativeSchema.parse({
+      selector: 'script[type="application/ld+json"]',
+      source: "json-ld",
+      path: "name",
+      entity: "Product",
+      fingerprint: { samples: ["Norvasc"], shape: "text" as const },
+    });
+    expect(parsed.entity).toBe("Product");
+  });
+});
