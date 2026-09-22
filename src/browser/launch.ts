@@ -4,6 +4,7 @@ import type { PlaywrightCrawlerOptions } from "crawlee";
 import { chromium, type Browser, type BrowserContext, type LaunchOptions } from "playwright";
 import type { BrowserName } from "../input/schema.js";
 import { installSnapshot } from "./snapshot.js";
+import { resolveRelaunchKnobs, type LaunchCounter, type RelaunchKnobs } from "./relaunch.js";
 
 export interface LaunchSpec {
   browser: BrowserName;
@@ -141,6 +142,12 @@ export interface CrawleeLaunchPieces {
   userDataDir: string | undefined;
 }
 
+/** U16: the retirement knobs and launch counter a run wants the pool to use. */
+export interface LaunchDiagnostics {
+  knobs?: RelaunchKnobs;
+  counter?: LaunchCounter;
+}
+
 /**
  * KTD4: the Crawlee `launchContext` and `browserPoolOptions` for the one
  * PlaywrightCrawler. Camoufox: the firefox launcher with camoufox-js launch
@@ -149,8 +156,9 @@ export interface CrawleeLaunchPieces {
  * one it, only one browser may own the directory, so the pool never opens a
  * second one.
  */
-export async function buildCrawleeLaunchContext(spec: LaunchSpec): Promise<CrawleeLaunchPieces> {
+export async function buildCrawleeLaunchContext(spec: LaunchSpec, diagnostics: LaunchDiagnostics = {}): Promise<CrawleeLaunchPieces> {
   const userDataDir = await prepareProfileDir(spec);
+  const knobs = diagnostics.knobs ?? resolveRelaunchKnobs();
   // One browser for the whole run, profile or not.
   //
   // Crawlee's defaults retire a browser after 100 pages and launch a
@@ -162,11 +170,19 @@ export async function buildCrawleeLaunchContext(spec: LaunchSpec): Promise<Crawl
   // forced them (one browser may own a user data directory), which left every
   // `store` run -- that is, every unattended run -- on the defaults. A run has
   // no reason to churn browsers either way, and churning is what breaks.
+  //
+  // U16: `retireBrowserAfterPageCount` is a knob rather than a constant now,
+  // because forcing a relaunch cheaply is how the relaunch gets explained. It
+  // defaults to the value above, so nothing changes unless a run asks.
   const pool: CrawleeBrowserPoolOptions = {
     maxOpenPagesPerBrowser: 1_000,
-    retireBrowserAfterPageCount: 1_000_000,
+    retireBrowserAfterPageCount: knobs.retireBrowserAfterPageCount,
     closeInactiveBrowserAfterSecs: 3_600,
   };
+  if (diagnostics.counter) {
+    pool.preLaunchHooks = [(pageId, launchContext) => diagnostics.counter!.onPreLaunch(pageId, launchContext)];
+    pool.postLaunchHooks = [(pageId, controller) => diagnostics.counter!.onPostLaunch(pageId, controller)];
+  }
   if (spec.browser === "camoufox") {
     const { firefox } = await import("playwright");
     const options = await camoufoxLaunchOptions(spec);

@@ -25,7 +25,7 @@ describe(".actor/input_schema.json", () => {
     const known = new Set([...Object.keys(BaseInputSchema.shape), ...ACTOR_ONLY_KEYS]);
     for (const name of Object.keys(schema.properties)) expect(known.has(name), name).toBe(true);
     const captions = Object.values(schema.properties).map((p) => p.sectionCaption).filter(Boolean);
-    expect(captions).toEqual(["Prompt", "Target", "What to extract", "Navigation", "Crawl limits", "Browser and proxy", "Your key", "Advanced"]);
+    expect(captions).toEqual(["Prompt", "Target", "What to extract", "Navigation", "Crawl limits", "Browser and proxy", "Your key", "Advanced", "Debug: browser retirement (U16)"]);
   });
 
   it("restricts the published surface: profile store only, chooser jev or model, the caller keys secret, scriptId patterned, the store resource-typed", () => {
@@ -113,5 +113,37 @@ describe("actorInput (R23)", () => {
     expect(env).toEqual({ AI_GATEWAY_API_KEY: "op" });
     expect(actorInput(null, {})).toEqual({ input: {}, env: {} });
     expect(actorInput("nope", {}).input).toEqual({});
+  });
+});
+
+/**
+ * U16: the browser-retirement knobs are actor-only input keys, so a task can
+ * force a relaunch on one run without changing the actor's shared environment
+ * -- and so a diagnostics build leaves every other run exactly as it was.
+ */
+describe("actorInput: the U16 retirement knobs", () => {
+  it("moves them into the run env and strips them from the input", () => {
+    const raw = { startUrls: ["https://example.org/"], retireBrowserAfterPages: 7, sessionMaxUsageCount: 5, sessionMaxErrorScore: 1 };
+    const { input, env } = actorInput(raw, { PATH: "/bin" });
+    expect(env).toEqual({
+      PATH: "/bin",
+      NAVVI_RETIRE_BROWSER_AFTER_PAGES: "7",
+      NAVVI_SESSION_MAX_USAGE_COUNT: "5",
+      NAVVI_SESSION_MAX_ERROR_SCORE: "1",
+    });
+    expect(input).toEqual({ startUrls: ["https://example.org/"] });
+    // They must never reach the Zod input, which would reject them.
+    expect(() => parseInput({ ...input, mode: "record", fields: [{ name: "title", type: "text" }] })).not.toThrow();
+  });
+
+  it("ignores a nonsensical threshold instead of crawling with it", () => {
+    const { input, env } = actorInput({ startUrls: ["https://example.org/"], sessionMaxUsageCount: 0, retireBrowserAfterPages: "many" }, {});
+    expect(env).toEqual({});
+    expect(input).toEqual({ startUrls: ["https://example.org/"] });
+  });
+
+  it("leaves a run that sets none of them untouched", () => {
+    const { env } = actorInput({ startUrls: ["https://example.org/"] }, { PATH: "/bin" });
+    expect(env).toEqual({ PATH: "/bin" });
   });
 });

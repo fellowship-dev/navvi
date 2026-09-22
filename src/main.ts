@@ -1,4 +1,5 @@
 import { Actor } from "apify";
+import { causeChain, isLaunchFailure, RETIRE_AFTER_PAGE_COUNT_ENV, SESSION_MAX_ERROR_SCORE_ENV, SESSION_MAX_USAGE_COUNT_ENV } from "./browser/relaunch.js";
 import { ZodError } from "zod";
 import { parseInput, defaultBrowser, resolveSources, type RunInput } from "./input/schema.js";
 import { promptToInput } from "./input/prompt.js";
@@ -135,10 +136,28 @@ export async function run(raw: unknown, deps: CrawlDeps = {}): Promise<RunSummar
   return runCrawl(input, { ...deps, chooser });
 }
 
+/**
+ * U16: the browser-retirement thresholds, as actor-only input keys.
+ *
+ * They exist so the Apify relaunch failure can be *forced* -- ~20 URLs with
+ * `sessionMaxUsageCount: 5` reproduces in a minute what a catalogue run takes
+ * fifteen to reach. Input keys rather than actor environment variables because
+ * a task sets its own input, while the actor's environment is shared by every
+ * run of it. Unset means today's behaviour.
+ */
+const DEBUG_KEYS = ["retireBrowserAfterPages", "sessionMaxUsageCount", "sessionMaxErrorScore"] as const;
+
+const DEBUG_KEY_ENV: Record<string, string> = {
+  retireBrowserAfterPages: RETIRE_AFTER_PAGE_COUNT_ENV,
+  sessionMaxUsageCount: SESSION_MAX_USAGE_COUNT_ENV,
+  sessionMaxErrorScore: SESSION_MAX_ERROR_SCORE_ENV,
+};
+
 /** Actor-only input keys: caller keys (R23) become the run's env, `scraperStore` qualifies a bare `scriptId`. None of them reaches the parsed input. */
-export const ACTOR_ONLY_KEYS = ["typesafeApiKey", "gatewayApiKey", "anthropicApiKey", "scraperStore"] as const;
+export const ACTOR_ONLY_KEYS = ["typesafeApiKey", "gatewayApiKey", "anthropicApiKey", "scraperStore", ...DEBUG_KEYS] as const;
 
 const CALLER_KEY_ENV: Record<string, string> = { typesafeApiKey: "TYPESAFE_API_KEY", gatewayApiKey: "AI_GATEWAY_API_KEY", anthropicApiKey: "ANTHROPIC_API_KEY" };
+
 
 /**
  * Splits the actor input into the run input and the run's environment. A
@@ -149,9 +168,15 @@ const CALLER_KEY_ENV: Record<string, string> = { typesafeApiKey: "TYPESAFE_API_K
 export function actorInput(raw: unknown, base: NodeJS.ProcessEnv = process.env): { input: Record<string, unknown>; env: NodeJS.ProcessEnv } {
   const env: NodeJS.ProcessEnv = { ...base };
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return { input: {}, env };
-  const { typesafeApiKey, gatewayApiKey, anthropicApiKey, scraperStore, ...input } = raw as Record<string, unknown>;
+  const { typesafeApiKey, gatewayApiKey, anthropicApiKey, scraperStore, ...rest } = raw as Record<string, unknown>;
   for (const [key, value] of Object.entries({ typesafeApiKey, gatewayApiKey, anthropicApiKey })) {
     if (typeof value === "string" && value.trim().length > 0) env[CALLER_KEY_ENV[key]!] = value.trim();
+  }
+  const input: Record<string, unknown> = { ...rest };
+  for (const key of DEBUG_KEYS) {
+    const value = input[key];
+    delete input[key];
+    if (typeof value === "number" && Number.isInteger(value) && value >= 1) env[DEBUG_KEY_ENV[key]!] = String(value);
   }
   if (typeof scraperStore === "string" && scraperStore.length > 0 && typeof input.scriptId === "string" && input.scriptId.length > 0 && !input.scriptId.includes("/")) {
     input.scriptId = `${scraperStore}/${input.scriptId}`;
@@ -171,8 +196,14 @@ async function main() {
     await Actor.exit({ statusMessage: message, exitCode: summary.status === "needs_human" ? 3 : 0 });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await Actor.setValue("SUMMARY", { status: "no_items_found", error: message });
-    await Actor.fail(message);
+    // U16: a launch failure's own message says only "the original error is
+    // available in the `cause` property", and the cause is what the run log
+    // drops. Put it in the status message, where it cannot be missed. The full
+    // record, with the resolved paths, is the LAUNCH_FAILURE key.
+    const causes = isLaunchFailure(error) ? causeChain(error).slice(1) : [];
+    const detail = causes.length > 0 ? ` | cause: ${causes.join(" <- ")}` : "";
+    await Actor.setValue("SUMMARY", { status: "no_items_found", error: message, ...(causes.length > 0 ? { causes } : {}) });
+    await Actor.fail(`${message}${detail}`.slice(0, 1_000));
   }
 }
 

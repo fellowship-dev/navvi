@@ -5,6 +5,7 @@ import { PlaywrightCrawler, ProxyConfiguration, type Configuration, type Dataset
 import type { BrowserContext, Page } from "playwright";
 import { Charger, type ChargingActor } from "../billing/charge.js";
 import { buildCrawleeLaunchContext, restoreProfileCookies, saveProfileCookies } from "../browser/launch.js";
+import { createLaunchCounter, formatLaunchFailure, isLaunchFailure, launchFailureReport, resolveRelaunchKnobs, type RelaunchKnobs } from "../browser/relaunch.js";
 import { hostOf, isAllowedRequestUrl, registrableDomain } from "../browser/policy.js";
 import { createChooser, NavviError, NeedsHumanError, type Chooser } from "../chooser/index.js";
 import { compile, type CompileResult } from "../compile/index.js";
@@ -37,10 +38,15 @@ import { defaultPaginate } from "./paginate.js";
  * A run replaying a pinned scraper has no reason to rotate sessions: it is not
  * evading a block, and a fresh session buys nothing but a browser restart.
  */
-export function buildSessionPoolOptions(singleSession: boolean) {
+export function buildSessionPoolOptions(singleSession: boolean, knobs: RelaunchKnobs = resolveRelaunchKnobs()) {
+  const sessionOptions: { maxUsageCount: number; maxErrorScore?: number } = { maxUsageCount: knobs.sessionMaxUsageCount };
+  // U16: left at Crawlee's default (3) unless a repro run lowers it. The error
+  // score is the remaining known path to a retirement, and this build is meant
+  // to reproduce that path deliberately, not to paper over it.
+  if (knobs.sessionMaxErrorScore !== undefined) sessionOptions.maxErrorScore = knobs.sessionMaxErrorScore;
   return {
     maxPoolSize: singleSession ? 1 : 4,
-    sessionOptions: { maxUsageCount: 1_000_000 },
+    sessionOptions,
   };
 }
 
@@ -636,15 +642,22 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
 
   // R40: one persistent profile per registrable domain and profile name.
   const firstHost = hostOf(urls[0]!);
-  const launch = await buildCrawleeLaunchContext({
-    browser: input.browser ?? "chromium",
-    headed: input.headed,
-    profileDomain: firstHost ? registrableDomain(firstHost) : undefined,
-    profileName: input.profile,
-    storageDir: deps.storageDir,
-    freshProfile: input.freshProfile,
-    proxyUrl: launchProxyUrl,
-  });
+  // U16: one set of knobs for the pool and the session pool, and one counter
+  // so a launch failure can say whether it was the first launch or a relaunch.
+  const relaunchKnobs = resolveRelaunchKnobs(env);
+  const launchCounter = createLaunchCounter(ctxLog, env);
+  const launch = await buildCrawleeLaunchContext(
+    {
+      browser: input.browser ?? "chromium",
+      headed: input.headed,
+      profileDomain: firstHost ? registrableDomain(firstHost) : undefined,
+      profileName: input.profile,
+      storageDir: deps.storageDir,
+      freshProfile: input.freshProfile,
+      proxyUrl: launchProxyUrl,
+    },
+    { knobs: relaunchKnobs, counter: launchCounter },
+  );
 
   const profileDir = launch.userDataDir;
   const installGuard = async (context: BrowserContext): Promise<void> => {
@@ -697,7 +710,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       navigationTimeoutSecs: 60,
       useSessionPool: true,
       persistCookiesPerSession: false,
-      sessionPoolOptions: buildSessionPoolOptions(singleSession),
+      sessionPoolOptions: buildSessionPoolOptions(singleSession, relaunchKnobs),
       preNavigationHooks: [async ({ page }) => {
         await guardContext(page.context());
         await deps.onPage?.(page);
@@ -1135,7 +1148,22 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     return [requestFor("compile", sampleUrls[0]!, { label: "compile", templateKey: plan.templateKey, sampleUrls })];
   });
 
-  await crawler.run(initial);
+  try {
+    await crawler.run(initial);
+  } catch (error) {
+    // U16: the decisive evidence is the `cause` chain, which the Apify run log
+    // truncates. Record it before the error leaves this frame, and keep it in
+    // the key-value store so it survives the log.
+    if (isLaunchFailure(error)) {
+      const report = launchFailureReport(error, launchCounter.launches, relaunchKnobs, env);
+      ctxLog(formatLaunchFailure(report));
+      await actor
+        .openKeyValueStore()
+        .then((store) => store.setValue("LAUNCH_FAILURE", report))
+        .catch(() => undefined);
+    }
+    throw error;
+  }
   if (state.fatal) throw state.fatal;
   return summaryOf(input, state, plans, chooser, charger);
 }

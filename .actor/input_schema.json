@@ -353,6 +353,29 @@
       "type": "boolean",
       "description": "Discard the persisted browser profile for the start URLs' domain before the run.",
       "default": false
+    },
+    "retireBrowserAfterPages": {
+      "title": "Debug: retire browser after N pages",
+      "type": "integer",
+      "minimum": 1,
+      "description": "Diagnostics only. Forces the browser pool to retire and relaunch a browser every N pages, so a relaunch failure reproduces in a minute instead of fifteen. Leave unset for normal runs (one browser per run).",
+      "sectionCaption": "Debug: browser retirement (U16)",
+      "sectionDescription": "Thresholds for reproducing the Apify browser-relaunch failure deliberately. Leave all three unset unless you are diagnosing it.",
+      "editor": "number"
+    },
+    "sessionMaxUsageCount": {
+      "title": "Debug: session max usage count",
+      "type": "integer",
+      "minimum": 1,
+      "description": "Diagnostics only. Requests one session serves before it retires -- and retires the browser with it. Crawlee's own default is 50; navvi normally sets it high enough never to fire.",
+      "editor": "number"
+    },
+    "sessionMaxErrorScore": {
+      "title": "Debug: session max error score",
+      "type": "integer",
+      "minimum": 1,
+      "description": "Diagnostics only. Error score at which a session is marked bad and retired, retiring the browser. Unset leaves Crawlee's default of 3.",
+      "editor": "number"
     }
   },
   "required": []
