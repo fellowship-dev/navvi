@@ -91,3 +91,46 @@ That is fine for a few hundred pages, and untested for a long one: a leaking
 browser now has no recycling mechanism to rescue it. If a catalogue run ever
 grows past a few thousand pages, this needs to be understood rather than
 avoided.
+
+
+## 2026-09-21, third attempt: stop plugging triggers, instrument the failure
+
+Build 3.0.10 carried the session-pool fix and **still failed**, but much later:
+
+| build | change | runtime | rows |
+| --- | --- | --- | --- |
+| 3.0.8 | — | 551 s | 48 |
+| 3.0.9 | browser pool bound raised | 536 s | 49 |
+| 3.0.10 | session `maxUsageCount` raised | **932 s** | **84** |
+
+So `maxUsageCount: 50` was a genuine trigger — throughput nearly doubled — but
+not the only one. The remaining path is the session's **error score**:
+`session.js` `markBad()` calls `retire()` once `errorScore` reaches
+`maxErrorScore` (default **3**), and a retired session retires the browser just
+the same. Store B produces healing failures on some pages, so a run
+accumulates errors and eventually retires its session that way instead.
+
+**Three hypotheses, three builds, two partially right, the run still fails.**
+That is the wrong method. Every one of these paths ends in the same place: a
+browser relaunch that fails on this image. Enumerating the paths that retire a
+browser is unbounded; making the relaunch work, or learning why it cannot, is
+one question.
+
+**Do this first, before any further fix:**
+
+1. **Log the cause.** Wrap the crawler run so a launch failure prints
+   `err.cause?.message`, the resolved `executablePath`, and the values of
+   `APIFY_DEFAULT_BROWSER_PATH` and `PLAYWRIGHT_BROWSERS_PATH`. The run log
+   truncates the `cause` today, and it is the only thing that actually names the
+   problem.
+2. **Force the repro cheaply.** A build with `maxErrorScore: 1` and
+   `maxUsageCount: 5` over ~20 URLs provokes several relaunches in about a
+   minute, instead of waiting fifteen for a natural one.
+3. Only then decide whether the fix belongs in navvi's launch or teardown, or in
+   the Dockerfile.
+
+A plausible reading of the evidence, worth testing directly: the image's Chrome
+may not tolerate a second launch while the retiring browser still holds
+something (a lock, a user-data directory, a port), in which case the fix is
+ordering — await the old browser's exit before launching the replacement —
+rather than avoiding retirement at all.
