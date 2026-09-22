@@ -1,0 +1,7 @@
+{
+  "id": "spec-0172ca04a090",
+  "kind": "text",
+  "index": null,
+  "text": "{\"target\":{\"site\":\"Store B\",\"pageKind\":\"product\",\"briefTerm\":\"Store B\"},\"entity\":{\"name\":\"product\",\"briefTerm\":\"products\"},\"inputs\":{\"shape\":\"unknown\",\"description\":\"a dynamic set of products\",\"briefTerm\":\"a dynamic set of products\"},\"fields\":[{\"name\":\"product_name\",\"description\":\"the product's name as shown on its page\"},{\"name\":\"sku\"},{\"name\":\"list_price\"},{\"name\":\"promo_price\"},{\"name\":\"stock\"}]}",
+  "chooser": "model"
+}

@@ -1,0 +1,95 @@
+{
+  "heuristic": "retry-transport-not-an-answer",
+  "encounter": "2026-09-22. Nineteen timeouts were read as nineteen missing products, and a race reading response bodies produced three \"failures\" that were a measurement error.",
+  "cases": [
+    {
+      "name": "a timeout delivered no answer",
+      "observation": {
+        "outcome": {
+          "kind": "timeout"
+        }
+      },
+      "expect": {
+        "fires": true,
+        "actionIncludes": "retry this URL"
+      }
+    },
+    {
+      "name": "a reset delivered no answer",
+      "observation": {
+        "outcome": {
+          "kind": "reset"
+        }
+      },
+      "expect": {
+        "fires": true,
+        "actionIncludes": "retry this URL"
+      }
+    },
+    {
+      "name": "503 is the server declining for now",
+      "observation": {
+        "outcome": {
+          "kind": "http",
+          "status": 503
+        }
+      },
+      "expect": {
+        "fires": true,
+        "actionIncludes": "retry with backoff"
+      }
+    },
+    {
+      "name": "429 is the server declining for now",
+      "observation": {
+        "outcome": {
+          "kind": "http",
+          "status": 429
+        }
+      },
+      "expect": {
+        "fires": true,
+        "actionIncludes": "retry with backoff"
+      }
+    },
+    {
+      "name": "404 is an answer about this product",
+      "observation": {
+        "outcome": {
+          "kind": "http",
+          "status": 404
+        }
+      },
+      "expect": {
+        "fires": false,
+        "actionIncludes": "do not retry"
+      }
+    },
+    {
+      "name": "200 is an answer",
+      "observation": {
+        "outcome": {
+          "kind": "http",
+          "status": 200
+        }
+      },
+      "expect": {
+        "fires": false,
+        "actionIncludes": "do not retry"
+      }
+    },
+    {
+      "name": "403 belongs to the blocking check, not the retry loop",
+      "observation": {
+        "outcome": {
+          "kind": "http",
+          "status": 403
+        }
+      },
+      "expect": {
+        "fires": false,
+        "actionIncludes": "hand this to the blocking check"
+      }
+    }
+  ]
+}

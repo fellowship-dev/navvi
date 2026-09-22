@@ -1,0 +1,98 @@
+{
+  "heuristic": "every-field-collapsed-is-blocking",
+  "encounter": "StoreC, 2026-09-22. sku 0/111, stock 0/111, prices 3/111 and \"¡Lo sentimos!\" as the product name on every row: Apify's datacenter IPs served an error page. The same URLs read perfectly from a laptop.",
+  "cases": [
+    {
+      "name": "the StoreC run: every field gone, and the filled one is the apology",
+      "observation": {
+        "fields": {
+          "sku": {
+            "filled": 0,
+            "total": 111
+          },
+          "stock": {
+            "filled": 0,
+            "total": 111
+          },
+          "list_price": {
+            "filled": 3,
+            "total": 111
+          },
+          "product_name": {
+            "filled": 111,
+            "total": 111
+          }
+        },
+        "constant": [
+          "product_name"
+        ],
+        "canary": "failed"
+      },
+      "expect": {
+        "fires": true,
+        "becauseIncludes": "the canary page failed too",
+        "actionIncludes": "do not heal"
+      }
+    },
+    {
+      "name": "the same collapse with a canary that still resolves is drift",
+      "observation": {
+        "fields": {
+          "sku": {
+            "filled": 0,
+            "total": 111
+          },
+          "stock": {
+            "filled": 0,
+            "total": 111
+          }
+        },
+        "canary": "resolved"
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "the canary page still resolves",
+        "actionIncludes": "treat as drift"
+      }
+    },
+    {
+      "name": "one field surviving with varying values is an ordinary drift",
+      "observation": {
+        "fields": {
+          "sku": {
+            "filled": 0,
+            "total": 111
+          },
+          "product_name": {
+            "filled": 108,
+            "total": 111
+          }
+        }
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "a page that is served is a page that drifted"
+      }
+    },
+    {
+      "name": "a fill rate alone would have called the apology healthy",
+      "observation": {
+        "fields": {
+          "sku": {
+            "filled": 0,
+            "total": 111
+          },
+          "product_name": {
+            "filled": 111,
+            "total": 111
+          }
+        },
+        "canary": "failed"
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "a page that is served is a page that drifted"
+      }
+    }
+  ]
+}

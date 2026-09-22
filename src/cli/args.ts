@@ -9,7 +9,17 @@ import { BROWSERS, CHOOSERS, DECIDERS, MODES, PROFILES, TRANSPORTS, WRITERS, typ
 export const AGENT_MODES = ["stdio", "file"] as const;
 export const NOTIFY_CHANNELS = ["console", "telegram"] as const;
 
+/**
+ * U1 / U8b: the first argv token may name a command. `run` is the historical
+ * and default one — `navvi "<prompt>" <url...>` — so every existing invocation
+ * keeps parsing exactly as it did.
+ */
+export const COMMANDS = ["run", "spec", "heuristics"] as const;
+export type Command = (typeof COMMANDS)[number];
+const SUBCOMMANDS: readonly string[] = ["spec", "heuristics"];
+
 export interface CliArgs {
+  command: Command;
   prompt: string | undefined;
   urls: string[];
   mode: Mode | undefined;
@@ -39,6 +49,10 @@ export interface CliArgs {
   decider: Decider | undefined;
   /** U14: who answers the free-text questions. */
   writer: Writer | undefined;
+  /** U1 / U8: case rubrics carried into the spec, as `id=rule` (repeatable). */
+  rubrics: string[];
+  /** U1: a JSON file of case rubrics, either `{id: rule}` or an array of `{id, rule, source?}`. */
+  rubricsFile: string | undefined;
   /** U14: which API the decider is reached over (Jev's today). */
   deciderTransport: Transport | undefined;
   answers: string | undefined;
@@ -68,7 +82,7 @@ const BOOLEAN_FLAGS: ReadonlyArray<[string, keyof CliArgs]> = [
 const VALUE_FLAGS = [
   "--mode", "--fields", "--goal", "--from-url", "--out", "--max-pages", "--max-items", "--detail-fields", "--browser", "--profile",
   "--allow-domain", "--allow-private-host", "--secret", "--secrets-file", "--allow-mutation", "--script-id", "--chooser", "--answers",
-  "--resume", "--agent-mode", "--notify", "--storage", "--decider", "--writer", "--decider-transport",
+  "--resume", "--agent-mode", "--notify", "--storage", "--decider", "--writer", "--decider-transport", "--rubric", "--rubrics-file",
 ] as const;
 
 function isUrl(value: string): boolean {
@@ -95,6 +109,7 @@ function positiveInt(flag: string, value: string): number {
 
 export function defaultArgs(): CliArgs {
   return {
+    command: "run",
     prompt: undefined,
     urls: [],
     mode: undefined,
@@ -123,6 +138,8 @@ export function defaultArgs(): CliArgs {
     decider: undefined,
     writer: undefined,
     deciderTransport: undefined,
+    rubrics: [],
+    rubricsFile: undefined,
     answers: undefined,
     resume: undefined,
     agentMode: undefined,
@@ -138,7 +155,13 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   const args = defaultArgs();
   try {
     let onlyPositionals = false;
-    for (let i = 0; i < argv.length; i++) {
+    // Only the very first token selects a command, so a prompt is never eaten by one.
+    let start = 0;
+    if (argv.length > 0 && SUBCOMMANDS.includes(argv[0]!)) {
+      args.command = argv[0] as Command;
+      start = 1;
+    }
+    for (let i = start; i < argv.length; i++) {
       const token = argv[i]!;
       if (onlyPositionals || !token.startsWith("--") || token === "-") {
         positional(args, token);
@@ -249,6 +272,12 @@ function apply(args: CliArgs, flag: (typeof VALUE_FLAGS)[number], value: string)
     case "--decider-transport":
       args.deciderTransport = oneOf(flag, value, TRANSPORTS);
       break;
+    case "--rubric":
+      args.rubrics.push(value);
+      break;
+    case "--rubrics-file":
+      args.rubricsFile = value;
+      break;
     case "--answers":
       args.answers = value;
       break;
@@ -270,9 +299,19 @@ function apply(args: CliArgs, flag: (typeof VALUE_FLAGS)[number], value: string)
 export function usage(): string {
   return `Usage: navvi [<prompt>] <url...> [flags]
        navvi --mode list|record --fields a,b,c <url...> [flags]
+       navvi spec "<brief>" [flags]
+       navvi heuristics [<id>] [--json]
 
 Compile it once so you never drive it again. Prompt in, JSON out; the second
 run replays the compiled scraper with zero model calls and heals drift.
+
+Commands
+  (none)                    Compile and run, as above.
+  spec                      Turn a brief into a spec: what was asked for, and what the brief
+                            left unsaid. JSON on stdout (or --out); the open questions it
+                            could not answer are listed on stderr. Reads no page.
+  heuristics                List the heuristics that steer investigation and compiling, each
+                            with the encounter that produced it. Give an <id> for one.
 
 Input
   <prompt>                  What to extract or do, in plain words. Optional when --mode and --fields are given.
@@ -307,6 +346,9 @@ Sources (who answers the compile questions)
   --decider-transport <t>   gateway|typesafe: which API the jev decider is reached over. Default: gateway when
                             AI_GATEWAY_API_KEY is set, else typesafe. Give typesafe to force api.typesafe.ai
                             even with a Gateway key.
+  --rubric <id=rule>        A case rubric carried verbatim into the spec (repeatable), e.g.
+                            --rubric "list-price=the list price is the crossed-out one, never Precio Club".
+  --rubrics-file <file>     JSON of case rubrics: {id: rule} or [{id, rule, source?}].
   --chooser <name>          The older single flag: it sets the decider and leaves the writer derived, exactly
                             as before. --decider and --writer win over it.
   --agent-mode stdio|file   stdio: batches on stdout between ${"---NAVVI-QUESTIONS---"} and ${"---END---"}, answers on stdin.

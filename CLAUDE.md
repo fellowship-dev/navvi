@@ -1,7 +1,10 @@
 # Navvi v3
 
-Self-healing scraper compiler. The plan lives in `fellowship-dev/claude-buddy`
-under `specs/plans/2026-09-19-001-feat-jev-compiled-scraper-actor-plan.md`.
+Self-healing scraper compiler. The current plan lives in
+`fellowship-dev/claude-buddy` under
+`specs/plans/2026-09-22-007-navvi-prompt-to-scraper.md` — brief to spec to
+investigation to scraper, with the original compiler plan
+(`specs/plans/2026-09-19-001-feat-jev-compiled-scraper-actor-plan.md`) behind it.
 
 ## Verify
 
@@ -22,3 +25,7 @@ under `specs/plans/2026-09-19-001-feat-jev-compiled-scraper-actor-plan.md`.
   output become a selector or a script.
 - `storage/` holds browser profiles with live sessions. Never commit it,
   never copy it between machines.
+- A heuristic ships with its fixture in the same commit
+  (`src/heuristics/`, `tests/fixtures/heuristics/`). A rule with no eval is
+  prose, and prose does not execute: every finding of 2026-09-22 was already
+  written down in a plan document and was rediscovered anyway.

@@ -29,6 +29,17 @@ npx navvi "<what to extract or do>" <url...> [--out data.json|data.csv]
 
 Optional structure when the prompt is not enough: `--mode list|record --fields a,b,c --goal "<navigation>" --from-url <url> --max-pages N --follow-details`. A field may declare an output type, `--fields name,price:money,stock:boolean` (types: `text`, `money`, `integer`, `number`, `boolean`, `url`); the run coerces the value and a value that does not coerce is `null`. `npx navvi --help` lists every flag.
 
+## Two Commands That Read No Page
+
+```bash
+npx navvi spec "<brief>" [--out spec.json] [--rubric "id=rule"]
+npx navvi heuristics [<id>] [--json]
+```
+
+`spec` turns a brief into a structured spec and — the reason to run it — names what the brief left unsaid as open questions, with the brief quoted back. A model drafts it; the brief then decides how much of that draft survives, so a field the draft cannot quote the brief for is recorded as `inferred`, never as requested. Exit 0 either way: an open question is the artifact working. Read `openQuestions` and act on the `blocking` ones before compiling a scraper — a spec that still asks "which fields?" is not a spec you should build against. Pass the case's own rules in with `--rubric "id=rule"`.
+
+`heuristics` lists the rules that decide **what a model is even asked**: which tier to spend, which candidates to reject before a question is written, whether a bad run is drift or a site refusing you. Each names the encounter that produced it. Use it to understand why a compile went the way it did, or before adding a rule of your own.
+
 ## Who Answers the Questions
 
 Navvi never asks a model for a selector or code; it asks it to pick among options it enumerated from the page. A run configures **two sources, chosen independently**:

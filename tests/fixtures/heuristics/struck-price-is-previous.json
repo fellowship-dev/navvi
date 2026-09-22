@@ -1,0 +1,67 @@
+{
+  "heuristic": "struck-price-is-previous",
+  "encounter": "StoreC, 2026-09-22. The list price was struck through, and the compiled path to it ran fourteen levels deep from body.modal-open.",
+  "cases": [
+    {
+      "name": "StoreC strikes the list price and leaves the offer plain",
+      "observation": {
+        "candidates": [
+          {
+            "value": "5990",
+            "markup": "<del class=\"price old-price\"><span class=\"value\">$5.990</span></del>",
+            "selector": "del.price .value"
+          },
+          {
+            "value": "4490",
+            "markup": "<span class=\"price offer-price\"><span class=\"value\">$4.490</span></span>",
+            "selector": "span.offer-price .value"
+          }
+        ]
+      },
+      "expect": {
+        "fires": true,
+        "pick": "5990",
+        "becauseIncludes": "struck through",
+        "actionIncludes": "bind the list price to 5990"
+      }
+    },
+    {
+      "name": "one plain price is not a previous price",
+      "observation": {
+        "candidates": [
+          {
+            "value": "2390",
+            "markup": "<span class=\"price\">$2.390</span>"
+          }
+        ]
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "no candidate is struck through"
+      }
+    },
+    {
+      "name": "two struck prices need a rubric, not a guess",
+      "observation": {
+        "candidates": [
+          {
+            "value": "5990",
+            "markup": "<del>$5.990</del>"
+          },
+          {
+            "value": "5490",
+            "markup": "<s class=\"was-price\">$5.490</s>"
+          },
+          {
+            "value": "4490",
+            "markup": "<span>$4.490</span>"
+          }
+        ]
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "a rubric has to say which"
+      }
+    }
+  ]
+}

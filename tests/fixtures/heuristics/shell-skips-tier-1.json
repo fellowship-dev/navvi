@@ -1,0 +1,37 @@
+{
+  "heuristic": "shell-skips-tier-1",
+  "encounter": "Store B, 2026-09-22. 25 of 25 plain fetches came back as a JS shell.",
+  "cases": [
+    {
+      "name": "Store B's plain fetch is a shell",
+      "observation": {
+        "html": "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><title>Store B</title><link rel=\"stylesheet\" href=\"/_next/static/css/app.css\"></head><body><div id=\"__next\"></div><script src=\"/_next/static/chunks/framework.js\"></script><script src=\"/_next/static/chunks/main.js\"></script><script src=\"/_next/static/chunks/pages/_app.js\"></script><noscript>Necesitas JavaScript</noscript></body></html>"
+      },
+      "expect": {
+        "fires": true,
+        "becauseIncludes": "the content arrives later",
+        "actionIncludes": "skip tier 1"
+      }
+    },
+    {
+      "name": "a served page with declared data is tier 1 working",
+      "observation": {
+        "html": "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><meta property=\"og:title\" content=\"Paracetamol 500 mg 20 comprimidos\"><meta property=\"product:price:amount\" content=\"2390\"><meta property=\"product:retailer_item_id\" content=\"883052\"></head><body><h1>Paracetamol 500 mg 20 comprimidos</h1><p>Analgesico y antipiretico indicado para el alivio del dolor leve a moderado y estados febriles. Cada comprimido contiene 500 mg de paracetamol. Venta directa, sin receta. Laboratorio Mintlab. Despacho a todo Chile en 24 a 72 horas habiles segun comuna, retiro en tienda disponible. Revisa siempre la informacion del envase antes de consumir y consulta a tu quimico farmaceutico.</p><span class=\"price\">$2.390</span></body></html>"
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "already declares a product"
+      }
+    },
+    {
+      "name": "no content and no script is an empty page, not a shell",
+      "observation": {
+        "html": "<!doctype html><html><body><div id=\"app\"></div></body></html>"
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "an empty page, not a shell"
+      }
+    }
+  ]
+}

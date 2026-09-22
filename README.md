@@ -132,6 +132,44 @@ Agents: read [`SKILL.md`](SKILL.md); [`llms.txt`](llms.txt) indexes the docs.
   `{ url }` objects, or an object whose `urls`, `data` or `items` is one), so
   a backend endpoint can feed the daily target list directly.
 
+## Before the compile: `navvi spec` and `navvi heuristics`
+
+Two commands that read no page.
+
+`navvi spec "<brief>"` turns a sentence into a **spec**: the site, what one row
+is, what varies per run, the fields asked for — and, the part that earns it, the
+things the brief did *not* say, as open questions with the brief quoted back.
+
+```bash
+navvi spec "I need the product info of a dynamic set of products in Store B."
+```
+
+```
+navvi: spec for Store B (product pages), one row per product
+  inputs: unknown — "a dynamic set of products"
+  fields requested: none — the brief names no field
+  fields inferred (the brief did not ask for these): product_name, sku, list_price, promo_price, stock
+  open questions (2 blocking of 3):
+    ! [fields-unnamed] Which fields should the scraper return?
+        because the brief says "product info", which names no field; client answers
+    ! [inputs-shape] In what shape do the inputs arrive: a URL list, a SKU or code list, or search terms?
+        because the brief describes the inputs as "a dynamic set of products", which fits all three
+  not ready to investigate: answer the blocking questions and recompile the spec.
+```
+
+The spec is JSON on stdout (or `--out`), so a disagreement is settled by editing
+an artifact and recompiling rather than by reading HTML. A model drafts it; the
+brief then decides how much of that draft survives — a field the draft cannot
+quote the brief for is recorded as inferred, never as requested. Pass the case's
+own rules in with `--rubric "id=rule"` or `--rubrics-file`.
+
+`navvi heuristics` lists the rules that decide **what the model is even asked**:
+which tier to spend, which candidate to reject before a question is written, and
+whether a bad run is drift or a site refusing you. Each carries the encounter
+that produced it and is pinned by a fixture, so a rule that stops firing is a
+failing test. `navvi heuristics <id>` shows one with the observation shape it
+takes; `--json` gives the machine form.
+
 ## Choosers
 
 Navvi never lets a model write a selector or a script. It enumerates the

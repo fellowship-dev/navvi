@@ -1,0 +1,108 @@
+{
+  "heuristic": "key-names-carry-the-signal",
+  "encounter": "Store B, 2026-09-22. Three increasingly precise prompts could not make a model pick the list price out of the DOM; the page's own payload names them apart.",
+  "cases": [
+    {
+      "name": "the acceptance case: list price out of Store B's own payload",
+      "observation": {
+        "field": "list_price",
+        "leaves": [
+          {
+            "path": "productData.prices[price-list-std]",
+            "value": 3690
+          },
+          {
+            "path": "productData.prices[price-sale-std]",
+            "value": 3321
+          },
+          {
+            "path": "productData.itemId",
+            "value": "881926"
+          }
+        ]
+      },
+      "expect": {
+        "fires": true,
+        "pick": "productData.prices[price-list-std]",
+        "actionIncludes": "without asking a model to search a DOM"
+      }
+    },
+    {
+      "name": "and the promotional price out of the same payload",
+      "observation": {
+        "field": "promo_price",
+        "leaves": [
+          {
+            "path": "productData.prices[price-list-std]",
+            "value": 3690
+          },
+          {
+            "path": "productData.prices[price-sale-std]",
+            "value": 3321
+          }
+        ]
+      },
+      "expect": {
+        "fires": true,
+        "pick": "productData.prices[price-sale-std]"
+      }
+    },
+    {
+      "name": "a camelCase payload key names the field just as well as a hyphenated one",
+      "observation": {
+        "field": "list_price",
+        "leaves": [
+          {
+            "path": "product.listPrice",
+            "value": 3690
+          },
+          {
+            "path": "product.salePrice",
+            "value": 3321
+          }
+        ]
+      },
+      "expect": {
+        "fires": true,
+        "pick": "product.listPrice",
+        "becauseIncludes": "names list_price"
+      }
+    },
+    {
+      "name": "two keys that name it equally well are the small table Jev should see",
+      "observation": {
+        "field": "list_price",
+        "leaves": [
+          {
+            "path": "a.listPrice",
+            "value": 3690
+          },
+          {
+            "path": "b.list_price",
+            "value": 3690
+          }
+        ]
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "this is the small table Jev should be shown"
+      }
+    },
+    {
+      "name": "no captured key names the field",
+      "observation": {
+        "field": "bioequivalence",
+        "leaves": [
+          {
+            "path": "productData.itemId",
+            "value": "881926"
+          }
+        ]
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "no captured key names"
+      }
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "heuristic": "declared-covers-spec",
+  "encounter": "StoreA, 2026-09-22. The og:/product: meta tags answered the whole spec while the compiled scraper read body.one-col.christmas-pattern.",
+  "cases": [
+    {
+      "name": "StoreA states every requested field in its own meta tags",
+      "observation": {
+        "requested": [
+          "product_name",
+          "sku",
+          "brand",
+          "list_price",
+          "promo_price",
+          "stock"
+        ],
+        "declared": {
+          "product_name": "Paracetamol 500 mg 20 comprimidos",
+          "sku": "883052",
+          "brand": "Mintlab",
+          "list_price": "2990",
+          "promo_price": "2390",
+          "stock": "InStock"
+        }
+      },
+      "expect": {
+        "fires": true,
+        "becauseIncludes": "every requested field",
+        "actionIncludes": "stop at tier 1"
+      }
+    },
+    {
+      "name": "one uncovered field still costs a page",
+      "observation": {
+        "requested": [
+          "product_name",
+          "sku",
+          "stock"
+        ],
+        "declared": {
+          "product_name": "Ibuprofeno 400 mg",
+          "sku": "8820237",
+          "stock": null
+        }
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "misses stock"
+      }
+    },
+    {
+      "name": "an empty string is not a covered field",
+      "observation": {
+        "requested": [
+          "product_name"
+        ],
+        "declared": {
+          "product_name": "   "
+        }
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "misses product_name"
+      }
+    }
+  ]
+}

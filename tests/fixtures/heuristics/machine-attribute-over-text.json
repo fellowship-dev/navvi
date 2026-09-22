@@ -1,0 +1,47 @@
+{
+  "heuristic": "machine-attribute-over-text",
+  "encounter": "2026-09-22. Rendered \"$56.799\" parses to fifty-six under a decimal reading; the meta tag's content attribute says 56799 and cannot be misread.",
+  "cases": [
+    {
+      "name": "a Chilean thousands separator makes the rendered price ambiguous",
+      "observation": {
+        "field": "list_price",
+        "candidates": [
+          {
+            "source": "text",
+            "value": "$56.799",
+            "selector": "p.font-semibold.leading-16"
+          },
+          {
+            "source": "attribute",
+            "attribute": "content",
+            "value": "56799",
+            "selector": "meta[property='product:price:amount']"
+          }
+        ]
+      },
+      "expect": {
+        "fires": true,
+        "pick": "56799",
+        "becauseIncludes": "formatted for a person",
+        "actionIncludes": "survives locale"
+      }
+    },
+    {
+      "name": "nothing to prefer when only rendered text holds it",
+      "observation": {
+        "field": "stock",
+        "candidates": [
+          {
+            "source": "text",
+            "value": "Disponible"
+          }
+        ]
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "rendered text is the only source"
+      }
+    }
+  ]
+}

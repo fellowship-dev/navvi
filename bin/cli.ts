@@ -10,7 +10,11 @@ import { parseArgs, usage, type CliArgs } from "../src/cli/args.js";
 import { NotifyConfigurationError, createNotifier } from "../src/cli/notify.js";
 import { formatRows, type OutputFormat, type Row } from "../src/cli/output.js";
 import { createChooser, findOnPath, HARNESS_LABEL, loadAnswersFile, mergeAnswers, missingCredentialsMessage, NavviError, NeedsHumanError, readQuestionsFile, resolveDefaultChooser, type Chooser, type StoredAnswer } from "../src/chooser/index.js";
+import { bank, UnknownHeuristicError, type Overrides } from "../src/heuristics/index.js";
 import { defaultBrowser, parseFieldSpecs, type Chooser as ChooserId, type SourceSelection } from "../src/input/schema.js";
+import { heuristicBlock, heuristicsBlock, specBlock } from "../src/cli/render.js";
+import { briefToSpec, SpecParseError } from "../src/spec/spec.js";
+import { RubricSchema, type Rubric } from "../src/spec/schema.js";
 import { run as runNavvi, type RunSummary } from "../src/main.js";
 import type { Notifier } from "../src/prestep/human.js";
 import type { CrawlActor, CrawlDeps } from "../src/replay/crawler.js";
@@ -294,11 +298,23 @@ export async function main(argv: readonly string[], io: CliIo): Promise<number> 
     io.stdout.write(`${packageVersion()}\n`);
     return EXIT.ok;
   }
-  if (args.urls.length === 0 && args.fromUrls.length === 0) {
+  if (args.command === "heuristics") {
+    try {
+      return heuristics(args, io);
+    } catch (error) {
+      if (error instanceof UnknownHeuristicError) {
+        io.stderr.write(`navvi: ${error.message}\n`);
+        return EXIT.configuration;
+      }
+      throw error;
+    }
+  }
+  if (args.command === "run" && args.urls.length === 0 && args.fromUrls.length === 0) {
     io.stderr.write(`navvi: give at least one start URL (or --from-url).\n\n${usage()}`);
     return EXIT.configuration;
   }
   try {
+    if (args.command === "spec") return await spec(args, io);
     return await execute(args, io);
   } catch (error) {
     if (error instanceof CliError) {
@@ -392,6 +408,104 @@ async function resolveCliSources(args: CliArgs, io: CliIo): Promise<SourceSelect
   }
   if (args.deciderTransport) sources.deciderTransport = args.deciderTransport;
   return sources;
+}
+
+// ------------------------------------------------------- spec and heuristics
+
+/** `--rubric id=rule` and `--rubrics-file`: a case's domain knowledge, carried verbatim into the spec. */
+function collectRubrics(args: CliArgs, io: CliIo): Rubric[] {
+  const rubrics: Rubric[] = [];
+  if (args.rubricsFile) {
+    const file = resolve(io.cwd, args.rubricsFile);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(file, "utf8"));
+    } catch (error) {
+      throw new CliError(`--rubrics-file ${args.rubricsFile}: ${error instanceof Error ? error.message : "cannot read the file"}`);
+    }
+    const source = args.rubricsFile;
+    if (Array.isArray(parsed)) {
+      for (const entry of parsed) {
+        const result = RubricSchema.safeParse({ source, ...(typeof entry === "object" && entry !== null ? entry : {}) });
+        if (!result.success) throw new CliError(`--rubrics-file ${args.rubricsFile}: ${result.error.issues.map((i) => i.message).join("; ")}`);
+        rubrics.push(result.data);
+      }
+    } else if (typeof parsed === "object" && parsed !== null) {
+      for (const [id, rule] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof rule !== "string") throw new CliError(`--rubrics-file ${args.rubricsFile}: rubric "${id}" is not a string`);
+        rubrics.push({ id, rule, source });
+      }
+    } else {
+      throw new CliError(`--rubrics-file ${args.rubricsFile} must be a JSON object of id -> rule, or an array of {id, rule}`);
+    }
+  }
+  for (const raw of args.rubrics) {
+    const eq = raw.indexOf("=");
+    if (eq <= 0) throw new CliError(`--rubric must be "id=rule", got ${JSON.stringify(raw)}`);
+    rubrics.push({ id: raw.slice(0, eq).trim(), rule: raw.slice(eq + 1).trim(), source: "--rubric" });
+  }
+  const ids = new Set<string>();
+  for (const rubric of rubrics) {
+    if (ids.has(rubric.id)) throw new CliError(`rubric "${rubric.id}" is given twice`);
+    ids.add(rubric.id);
+  }
+  return rubrics;
+}
+
+/**
+ * U1: `navvi spec "<brief>"`. Reads no page. Exit 0 with a spec whose open
+ * questions are part of the data — an unanswered question is the artifact
+ * working, not the command failing.
+ */
+async function spec(args: CliArgs, io: CliIo): Promise<number> {
+  const brief = args.prompt;
+  if (!brief) throw new CliError(`give a brief: navvi spec "what you want scraped".`);
+  const rubrics = collectRubrics(args, io);
+  const sources = await resolveCliSources(args, io);
+  const chooser = chooserFor(sources, args, io, resolve(io.cwd, args.storage));
+  let result;
+  try {
+    result = await briefToSpec(brief, chooser, { rubrics });
+  } catch (error) {
+    if (error instanceof SpecParseError) throw new CliError(error.message, EXIT.short);
+    throw error;
+  }
+  const text = JSON.stringify(result, null, args.json ? 0 : 2) + "\n";
+  let dataLine: string;
+  if (args.out) {
+    const file = resolve(io.cwd, args.out);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, text);
+    dataLine = `spec -> ${file}`;
+  } else {
+    io.stdout.write(text);
+    dataLine = "spec on stdout";
+  }
+  if (!args.quiet) io.stderr.write(specBlock(result, dataLine));
+  return EXIT.ok;
+}
+
+/** U8b: `navvi heuristics [<id>]`. The bank, inspectable without reading code. */
+function heuristics(args: CliArgs, io: CliIo): number {
+  const overrides: Overrides = {};
+  const view = bank(overrides);
+  // The optional positional is the heuristic id, which the parser puts where a prompt would go.
+  const id = args.prompt;
+  if (args.json) {
+    const entries = (id === undefined ? view.list() : [view.get(id)]).map(({ heuristic, override }) => ({
+      id: heuristic.id,
+      title: heuristic.title,
+      stage: heuristic.stage,
+      decides: heuristic.decides,
+      encounter: heuristic.encounter,
+      observation: heuristic.jsonSchema,
+      ...(override ? { override } : {}),
+    }));
+    io.stdout.write(JSON.stringify(entries, null, 2) + "\n");
+    return EXIT.ok;
+  }
+  io.stdout.write(id === undefined ? heuristicsBlock(view.list()) : heuristicBlock(view.get(id)));
+  return EXIT.ok;
 }
 
 async function execute(args: CliArgs, io: CliIo): Promise<number> {

@@ -1,0 +1,82 @@
+{
+  "heuristic": "no-variation-no-field",
+  "encounter": "StoreA, 2026-09-22. productName came back \"StoreA\" on all 33 redirect samples, with a SKU from the URL and a price from a surviving meta tag, so every \"did it extract?\" check passed.",
+  "cases": [
+    {
+      "name": "productName is the site's name on all 33 samples",
+      "observation": {
+        "field": "product_name",
+        "values": [
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA",
+          "StoreA"
+        ]
+      },
+      "expect": {
+        "fires": true,
+        "becauseIncludes": "on all 33 samples",
+        "actionIncludes": "describing the site, not the record"
+      }
+    },
+    {
+      "name": "a real product name varies",
+      "observation": {
+        "field": "product_name",
+        "values": [
+          "Paracetamol 500 mg",
+          "Ibuprofeno 400 mg",
+          "Loratadina 10 mg"
+        ]
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "3 distinct values"
+      }
+    },
+    {
+      "name": "empty on every sample is also not a field",
+      "observation": {
+        "field": "stock",
+        "values": [
+          "",
+          "",
+          ""
+        ]
+      },
+      "expect": {
+        "fires": true,
+        "becauseIncludes": "and empty"
+      }
+    }
+  ]
+}

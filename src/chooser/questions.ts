@@ -78,6 +78,27 @@ export const premises = {
     (previousSamples.length > 0 ? ` (earlier pages gave ${previousSamples.map((s) => JSON.stringify(s)).join(", ")})` : "") +
     "? Pick none when no candidate is right: this page may simply not show it.",
 
+  /**
+   * U1 (S0): the brief into a draft spec. The draft is asked to **quote** the
+   * brief for every value it read there, because the quote is what the
+   * deterministic half checks; a value with no quote is a proposal, recorded as
+   * an open question rather than passed off as a requirement.
+   */
+  briefToSpec: (errors: readonly string[] = []): string => {
+    const base = [
+      "Parse the brief into a scraper spec as JSON matching the schema. Use only what the brief states; never invent a site, a URL or a field.",
+      'Schema: {"target":{"site":string,"pageKind":"product"|"listing"|"search"|"unknown","briefTerm"?:string},"entity":{"name":string,"briefTerm"?:string},"inputs":{"shape":"url_list"|"sku_list"|"search_terms"|"unknown","description":string,"briefTerm"?:string},"fields":[{"name":string,"description"?:string,"briefTerm"?:string}],"constraints"?:{"freshness"?:string,"volume"?:string,"cadence"?:string,"budget"?:string}}.',
+      "briefTerm: the exact words of the brief the value was read from. Omit it when the brief does not say so. A proposal with no quote is expected and is recorded as an open question; never invent a quote to justify one.",
+      "target.site: the site the brief names. pageKind: the kind of page one record lives on. entity.name: what one row is, singular.",
+      "inputs.shape: what varies per run. url_list when the caller supplies URLs, sku_list when codes, search_terms when words to search with. unknown when the brief does not say which, which is the common answer.",
+      "fields: the values to extract, in brief order, names as identifiers. When the brief asks only for something vague such as product info, still propose the fields that request usually means, each with no briefTerm.",
+      "constraints: only the ones the brief states, in its own words.",
+      "Answer with the JSON object only.",
+    ];
+    if (errors.length > 0) base.push(`The previous answer was rejected: ${errors.join("; ")}. Fix every listed problem.`);
+    return base.join(" ");
+  },
+
   /** Healing (U13, R42): re-decide one trace step whose recorded control no longer matches. */
   healStep: (op: string, name: string): string =>
     `The recorded ${op} step targeted the control "${name}", which no longer matches on this page. Which control should the ${op} step use instead? Pick none when no control fits.`,

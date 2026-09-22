@@ -1,0 +1,75 @@
+{
+  "heuristic": "json-ld-needs-product-node",
+  "encounter": "StoreA, 2026-09-22. The graph walk kept walking until something had a name and bound productName to the Organization node: \"StoreA\" on 33 redirect URLs.",
+  "cases": [
+    {
+      "name": "StoreA's redirect page declares an Organization and a WebSite, no Product",
+      "observation": {
+        "jsonLd": [
+          {
+            "@context": "https://schema.org",
+            "@graph": [
+              {
+                "@type": "Organization",
+                "name": "StoreA",
+                "url": "https://store-a.example"
+              },
+              {
+                "@type": "WebSite",
+                "name": "StoreA",
+                "url": "https://store-a.example"
+              }
+            ]
+          }
+        ],
+        "want": "Product"
+      },
+      "expect": {
+        "fires": true,
+        "becauseIncludes": "no Product node",
+        "actionIncludes": "rather than walking the graph"
+      }
+    },
+    {
+      "name": "a real product page declares one, nested in @graph",
+      "observation": {
+        "jsonLd": [
+          {
+            "@context": "https://schema.org",
+            "@graph": [
+              {
+                "@type": "Organization",
+                "name": "Store C"
+              },
+              {
+                "@type": "Product",
+                "name": "Ibuprofeno 400 mg",
+                "sku": "300123"
+              }
+            ]
+          }
+        ],
+        "want": "Product"
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "declares a Product node"
+      }
+    },
+    {
+      "name": "a block with no @type at all",
+      "observation": {
+        "jsonLd": [
+          {
+            "name": "StoreA"
+          }
+        ],
+        "want": "Product"
+      },
+      "expect": {
+        "fires": true,
+        "becauseIncludes": "no @type at all"
+      }
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "heuristic": "search-mirrors-detail",
+  "encounter": "Store B, 2026-09-22. The search endpoint returned the same structured shape as products/detail, which is why Phase B gets cheaper for waiting.",
+  "cases": [
+    {
+      "name": "Store B's search endpoint returns the detail shape",
+      "observation": {
+        "detail": {
+          "path": "/api/v2/products/detail",
+          "keys": [
+            "id",
+            "itemId",
+            "productName",
+            "brand",
+            "prices",
+            "sellers",
+            "laboratory",
+            "activeIngredient",
+            "bioequivalence",
+            "pum"
+          ]
+        },
+        "candidates": [
+          {
+            "path": "/api/v2/analytics/event",
+            "keys": [
+              "event",
+              "sessionId",
+              "ts"
+            ]
+          },
+          {
+            "path": "/api/v2/products/search",
+            "keys": [
+              "id",
+              "itemId",
+              "productName",
+              "brand",
+              "prices",
+              "sellers",
+              "laboratory",
+              "activeIngredient"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "fires": true,
+        "pick": "/api/v2/products/search",
+        "becauseIncludes": "shares 8 of 10 keys"
+      }
+    },
+    {
+      "name": "nothing captured mirrors the detail shape",
+      "observation": {
+        "detail": {
+          "path": "/api/v2/products/detail",
+          "keys": [
+            "id",
+            "itemId",
+            "productName",
+            "brand",
+            "prices",
+            "sellers",
+            "laboratory",
+            "activeIngredient",
+            "bioequivalence",
+            "pum"
+          ]
+        },
+        "candidates": [
+          {
+            "path": "/api/v2/cart",
+            "keys": [
+              "items",
+              "total"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "nothing here mirrors"
+      }
+    }
+  ]
+}
