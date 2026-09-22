@@ -15,6 +15,13 @@ list price, sale price and availability in its own `<head>` — a JSON-LD
 `body.one-col.christmas-pattern`, which is in the fixture too, fourteen levels
 from the answer.
 
+`storea-product-2.html` is the second sample of that same template, and it
+exists for the reason `storeb-detail-2.json` exists: a binding is compiled
+from a *sample*, and `no-variation-no-field` cannot say anything about one
+page. Name, sku, both prices and availability vary; brand, both currencies and
+condition are deliberately constant, so a run that asks for `brand` is told it
+is describing the site rather than the record.
+
 `storea-redirect.html` is the negative case and the reason the JSON-LD gate
 exists: an `@graph` with Organization and WebSite and no Product, plus a
 `product:price:amount` meta that survived the redirect. A graph walk that keeps
@@ -35,6 +42,14 @@ level down, alongside a BreadcrumbList block and one block the site broke.
 promotion. The nesting that matters is `prices` keyed by dashed currency codes
 (`price-list-std`), `appliedPromotions` keyed the same way, and a `promotions`
 array whose entries carry `isClubPromotion`.
+
+`storeb-shell.html` is what one plain fetch against that store actually
+returns: almost no visible text, no declaration of a product, and four script
+bundles that will fetch the content later. It is what makes
+`shell-skips-tier-1` fire, and the cascade skip tier 1 for the whole site
+rather than pay for it 25 times. It carries no WAF marker — not even inside its
+own comment, because the marker scan reads the raw source and a page with no
+product, no text and a challenge marker is a *different* diagnosis.
 
 `laptop-capture.har` is a hand-written HAR 1.2 export (U2e): the traffic one
 product page makes, as DevTools would have saved it on a laptop the store
