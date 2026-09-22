@@ -388,8 +388,12 @@ describe("crawler runs", () => {
     const routeSpy = vi.spyOn(contextProto, "route").mockImplementation(async function (this: BrowserContext, ...args: Parameters<BrowserContext["route"]>) {
       // a slow guard install: the second request must wait for it instead of navigating past it
       await new Promise((resolve) => setTimeout(resolve, 500));
-      await originalRoute.apply(this, args);
+      // playwright 1.60's `context.route()` resolves to a Disposable (`using`
+      // support). Returning it keeps the spy a faithful stand-in; swallowing it
+      // made the mock's type `Promise<void>`, which no typecheck ever read.
+      const disposable = await originalRoute.apply(this, args);
       guarded.add(this);
+      return disposable;
     });
     const originalGoto = pageProto.goto;
     const gotoSpy = vi.spyOn(pageProto, "goto").mockImplementation(function (this: Page, ...args: Parameters<Page["goto"]>) {
@@ -568,7 +572,12 @@ describe("crawler runs", () => {
         fields: { heading: { alternatives: [{ selector: "h1", fingerprint: { samples: ["Internal tools"], shape: "text" } }] } },
       }),
     );
-    const calls: Array<CrawlProxyOptions | undefined> = [];
+    // The spy is on the real Apify `Actor`, so it records Apify's wider
+    // `ProxyConfigurationOptions`, not navvi's narrower `CrawlProxyOptions`
+    // (whose `proxyUrls` is `string[]` where Apify's admits nulls). The
+    // assertion below is on the value, so recording the declared parameter
+    // type is both honest and enough.
+    const calls: Array<Parameters<typeof actor.createProxyConfiguration>[0]> = [];
     const spy = vi.spyOn(actor, "createProxyConfiguration").mockImplementation(async (options) => {
       calls.push(options);
       return undefined;

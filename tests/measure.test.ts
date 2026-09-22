@@ -17,7 +17,9 @@ let rows: MeasurementRow[];
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "navvi-measure-"));
-  rows = await runMeasurements({ choosers: ["agent", "jev", "model"], offline: true, env: {}, log: () => undefined });
+  // `agentLive` is required, and false is what this offline run means: the
+  // agent column is the recorded replay, never a real host agent over stdio.
+  rows = await runMeasurements({ choosers: ["agent", "jev", "model"], offline: true, agentLive: false, env: {}, log: () => undefined });
 }, 300_000);
 
 afterAll(() => {

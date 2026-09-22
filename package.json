@@ -30,6 +30,7 @@
     "start": "node dist/src/main.js",
     "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",
     "test:live": "NAVVI_LIVE=1 vitest run tests/live.test.ts",
     "scrape": "tsx src/main.ts",

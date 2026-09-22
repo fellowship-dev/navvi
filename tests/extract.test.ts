@@ -174,7 +174,9 @@ describe("extractPage", () => {
       expect(out.items).toHaveLength(30);
       expect(out.items[0]!.values).toEqual({ title: "Show HN: A self-healing scraper compiler", link: "https://example.org/story/45000000", points: "12 points" });
       expect(out.items[0]!.resolvedBy).toEqual({ title: 0, link: 0, points: 0 });
-      expect(out.items.every((i) => i.values.points !== null && /^\d+ points$/.test(i.values.points))).toBe(true);
+      // `values` is a Record, so an index also admits undefined under
+      // noUncheckedIndexedAccess; `!= null` rules out both, `!== null` did not.
+      expect(out.items.every((i) => i.values.points != null && /^\d+ points$/.test(i.values.points))).toBe(true);
       expect(out.items.every((i) => i.sourceUrl === page.url())).toBe(true);
       expect(out.values).toEqual(out.items[0]!.values);
     });

@@ -8,8 +8,13 @@ investigation to scraper, with the original compiler plan
 
 ## Verify
 
-- `npm run typecheck` and `npm test` on every change. Tests are offline:
-  recorded chooser answers, fixtures served from disk.
+- `npm run typecheck`, `npm run typecheck:tests` and `npm test` on every
+  change. Tests are offline: recorded chooser answers, fixtures served from
+  disk.
+- `npm run typecheck` reads `tsconfig.json`, which excludes `tests/`; vitest
+  only strips test types. `npm run typecheck:tests` (`tsconfig.test.json`,
+  same strictness) is the only command that checks them, so a change under
+  `tests/` is not verified without it.
 - `npm run demo` runs the two-version pharmacy proof offline.
 - `npm run test:live` needs a key and is required after changes under
   `src/chooser`, `src/compile`, `src/navigate`, `src/replay/heal.ts`,

@@ -24,6 +24,8 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Check TypeScript
         run: npm run typecheck
+      - name: Check TypeScript in the tests
+        run: npm run typecheck:tests
       - name: Run offline tests
         run: npm test
       - name: Build package and copy browser assets

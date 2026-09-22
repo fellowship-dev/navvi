@@ -26,7 +26,7 @@ import { AgentChooser, QUESTIONS_START, QUESTIONS_END, loadAnswersFile } from ".
 import { JevChooser, JEV_MAX_STATE_TOKENS, JEV_PRICE_PER_MILLION_INPUT_USD, TypeSafeEvaluationModel } from "../src/chooser/jev.js";
 import { ModelChooser, DEFAULT_MODEL_ID, DEFAULT_MODEL_STATE_CHARS, MODEL_PRICES } from "../src/chooser/model.js";
 import { RecordedChooser, RecordingChooser } from "../src/chooser/recorded.js";
-import type { CliRunner } from "../src/chooser/cli.js";
+import type { CliRunner, CliRunResult } from "../src/chooser/cli.js";
 import { createChooser } from "../src/chooser/index.js";
 import { Budget, BudgetExhaustedError, ModelUnavailableError, NavviError, NeedsHumanError } from "../src/billing/budget.js";
 
@@ -761,10 +761,19 @@ function recordingFetch(urls: string[]): typeof fetch {
 
 type CliBehaviour = "answers" | "signed-out" | "broken";
 
-/** Stands in for `claude -p` / `codex exec`: an answer, the signed-out failure, or an unrelated crash. */
+/**
+ * Stands in for `claude -p` / `codex exec`: an answer, the signed-out failure, or an unrelated crash.
+ *
+ * `Object.assign` rather than a cast: a function object that also carries a
+ * `calls` array overlaps no single declared type, so the old
+ * `as CliRunner & { calls: string[] }` was an error tsc would only accept
+ * through `as unknown as` -- and that double cast would have stopped checking
+ * the returned envelopes as well. This shape needs no cast at all. It survived
+ * because tests/ was excluded from every typecheck until U14.
+ */
 function cliRunner(behaviour: CliBehaviour, text = "from the subscription"): CliRunner & { calls: string[] } {
   const calls: string[] = [];
-  const runner = (async (cmd: string) => {
+  const runner = Object.assign(async (cmd: string): Promise<CliRunResult> => {
     calls.push(cmd);
     if (behaviour === "broken") return { code: 1, stdout: "", stderr: "segmentation fault" };
     if (behaviour === "signed-out") {
@@ -775,8 +784,7 @@ function cliRunner(behaviour: CliBehaviour, text = "from the subscription"): Cli
     const body = JSON.stringify({ answers: [{ id: "query", index: null, text }] });
     const envelope = { type: "result", is_error: false, result: body, total_cost_usd: 0.002, usage: { input_tokens: 90, output_tokens: 8 } };
     return { code: 0, stdout: JSON.stringify(envelope), stderr: "" };
-  }) as CliRunner & { calls: string[] };
-  runner.calls = calls;
+  }, { calls });
   return runner;
 }
 

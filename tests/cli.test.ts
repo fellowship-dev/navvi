@@ -11,6 +11,7 @@ import { telegramNotifier } from "../src/cli/notify.js";
 import { toCsv } from "../src/cli/output.js";
 import { QUESTIONS_END, QUESTIONS_START } from "../src/chooser/agent.js";
 import { BudgetExhaustedError } from "../src/billing/budget.js";
+import { zeroCharges } from "../src/billing/charge.js";
 import type { Answer, Chooser, Question } from "../src/chooser/chooser.js";
 import type { CrawlDeps } from "../src/replay/crawler.js";
 import { run as runNavvi, type RunSummary } from "../src/main.js";
@@ -129,6 +130,14 @@ function summary(over: Partial<RunSummary> = {}): RunSummary {
     traceReplays: 0,
     blockedRequests: 0,
     unhealed: 0,
+    // Three fields RunSummary requires that this literal never had, and a
+    // spread of a Partial cannot supply: each typed as `T | undefined` and
+    // nothing read the mismatch while tests/ was outside every typecheck
+    // (U14). The values are `summaryFor()`'s own defaults for a run that did
+    // nothing: no scraper pinned, nothing charged, no chooser to report ZDR.
+    scriptId: null,
+    charges: zeroCharges(),
+    zeroDataRetention: null,
     ...over,
   };
 }
