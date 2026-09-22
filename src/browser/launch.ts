@@ -151,9 +151,22 @@ export interface CrawleeLaunchPieces {
  */
 export async function buildCrawleeLaunchContext(spec: LaunchSpec): Promise<CrawleeLaunchPieces> {
   const userDataDir = await prepareProfileDir(spec);
-  const pool: CrawleeBrowserPoolOptions = userDataDir
-    ? { maxOpenPagesPerBrowser: 1_000, retireBrowserAfterPageCount: 1_000_000, closeInactiveBrowserAfterSecs: 3_600 }
-    : {};
+  // One browser for the whole run, profile or not.
+  //
+  // Crawlee's defaults retire a browser after 100 pages and launch a
+  // replacement. Two Apify runs died on that relaunch on 2026-09-21 -- the
+  // crawler finished cleanly ("50 requests: 50 succeeded") and the run then
+  // failed with `Failed to launch browser ... /pw-browsers/chrome`. `record`
+  // mode opens an extra sample page per request, so ~50 requests is already
+  // ~100 pages. These options used to apply only when a persistent profile
+  // forced them (one browser may own a user data directory), which left every
+  // `store` run -- that is, every unattended run -- on the defaults. A run has
+  // no reason to churn browsers either way, and churning is what breaks.
+  const pool: CrawleeBrowserPoolOptions = {
+    maxOpenPagesPerBrowser: 1_000,
+    retireBrowserAfterPageCount: 1_000_000,
+    closeInactiveBrowserAfterSecs: 3_600,
+  };
   if (spec.browser === "camoufox") {
     const { firefox } = await import("playwright");
     const options = await camoufoxLaunchOptions(spec);
