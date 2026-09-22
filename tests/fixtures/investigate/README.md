@@ -11,3 +11,13 @@ public knowledge the moment you open the page.
 promotion. The nesting that matters is `prices` keyed by dashed currency codes
 (`price-list-std`), `appliedPromotions` keyed the same way, and a `promotions`
 array whose entries carry `isClubPromotion`.
+
+`laptop-capture.har` is a hand-written HAR 1.2 export (U2e): the traffic one
+product page makes, as DevTools would have saved it on a laptop the store
+answers. It carries the shapes the importer has to survive rather than any real
+capture — an HTML document and a reload of it, a detail endpoint answering 401
+before it answers 200, a base64-encoded body, a JSON payload mislabelled
+`text/plain`, a CORS preflight, a truncated body, an entry with no `content.text`
+and an entry with no response at all. The `SECRET-` strings in its headers,
+cookies and query string are there to be tested for: they must not come out the
+other side.
