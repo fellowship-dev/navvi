@@ -45,3 +45,30 @@ before it answers 200, a base64-encoded body, a JSON payload mislabelled
 and an entry with no response at all. The `SECRET-` strings in its headers,
 cookies and query string are there to be tested for: they must not come out the
 other side.
+
+## Blocked, drift or healthy (`blocked.ts`)
+
+Five pages off one invented store, because the U3a apology rule is about a
+*corpus*: what makes an error page an error page is that it is the same document
+at every address.
+
+`apology.html` is the StoreC shape — a page that renders real text, keeps the
+store's nav and footer, declares no product, and is served for every URL asked
+for. `¡Lo sentimos!` is in it as the example, and nothing in the code looks for
+it.
+
+`product.html` and `product-redesign.html` are one product before and after a
+redesign: same JSON-LD Product, different markup, different class names, an
+extra nav item. The canary has to keep resolving across that gap — a canary
+sensitive to drift would report `blocked` on every redesign and stop healing
+exactly when healing is what is needed.
+
+`rendered-product.html` and `rendered-product-2.html` are two *different*
+products off one template with nothing declared: the case the apology rule must
+not call one document. Measured on these fixtures they overlap 0.38 against a
+0.92 threshold, while two reads of `apology.html` overlap 1.00.
+
+`challenge-incapsula.html` renders almost nothing — a challenge page has not run
+its JavaScript yet — so it is caught by `_Incapsula_Resource` in the source
+rather than by anything a reader would see. `forbidden.html` is a bare nginx 403,
+where the status is the whole signal.
