@@ -640,8 +640,25 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
 
   const { proxyConfiguration, launchProxyUrl } = await resolveProxy(input.proxy, actor);
 
-  // R40: one persistent profile per registrable domain and profile name.
-  const firstHost = hostOf(urls[0]!);
+  // R40: one persistent profile per registrable domain and profile name --
+  // but only for a run that has something to persist.
+  //
+  // U16: a persistent profile means `launchPersistentContext`, and Chromium
+  // guards a user data directory with a ProcessSingleton lock. When the pool
+  // retires a browser it launches the replacement before the old process has
+  // released that lock, and the replacement dies with "Failed to create a
+  // ProcessSingleton for your profile directory ... already in use by another
+  // instance of Chromium" -- surfaced by Crawlee as the opaque "Failed to
+  // launch browser ... /pw-browsers/chrome" that cost three builds and three
+  // wrong hypotheses. The path was never wrong; the directory was occupied.
+  //
+  // The `store` profile is the read-only one: no logins, no secrets, no form
+  // submits, and on the platform its storage does not outlive the run. It had
+  // nothing to persist and was paying for a profile with every relaunch. Only
+  // a `local` run gets one now, so an unattended run's relaunch is just a
+  // launch.
+  const wantsProfile = input.profile !== "store";
+  const firstHost = wantsProfile ? hostOf(urls[0]!) : null;
   // U16: one set of knobs for the pool and the session pool, and one counter
   // so a launch failure can say whether it was the first launch or a relaunch.
   const relaunchKnobs = resolveRelaunchKnobs(env);

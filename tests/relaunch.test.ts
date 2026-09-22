@@ -140,3 +140,41 @@ describe("launch failure evidence", () => {
     expect(lines.filter((l) => l.includes("succeeded"))).toEqual(["browser relaunch #2 succeeded"]);
   });
 });
+
+/**
+ * U16, the actual cause. Build 3.0.11's forced repro (Apify run
+ * beygdybuH6khLp2fx, 5 requests in 62 s with sessionMaxUsageCount: 5) put the
+ * reason in the LAUNCH_FAILURE record:
+ *
+ *   browserType.launchPersistentContext: Failed to create a ProcessSingleton
+ *   for your profile directory. This usually means that the profile is already
+ *   in use by another instance of Chromium.
+ *
+ * Not a wrong executable path, not memory, not Crawlee resolving the binary
+ * differently on the second launch. Chromium locks a user data directory, the
+ * pool launches the replacement before the retiring browser has released the
+ * lock, and Crawlee reports the loser as "Failed to launch browser".
+ *
+ * A `store` run -- every unattended run, every client price scrape -- was taking a
+ * persistent profile it has no use for: the store profile does no logins, holds
+ * no secrets, and on the platform its storage does not outlive the run. So it
+ * gets none, and there is no directory left to contend for.
+ */
+describe("the store profile takes no persistent directory", () => {
+  it("gives a store run no userDataDir, so a relaunch has no lock to lose", async () => {
+    const pieces = await buildCrawleeLaunchContext({ browser: "chromium", headed: false, profileDomain: undefined });
+    expect(pieces.userDataDir).toBeUndefined();
+    expect(pieces.launchContext.userDataDir).toBeUndefined();
+  });
+
+  it("still gives a local run its profile, which is what R40 is for", async () => {
+    const pieces = await buildCrawleeLaunchContext({
+      browser: "chromium",
+      headed: false,
+      profileDomain: "example.com",
+      profileName: "local",
+      storageDir: "/tmp/navvi-profile-test",
+    });
+    expect(pieces.userDataDir).toContain("example.com");
+  });
+});
