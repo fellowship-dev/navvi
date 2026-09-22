@@ -37,6 +37,8 @@ export interface ExtractOptions {
   sourceUrl?: string | undefined;
   /** Requested field names; those absent from the scraper are emitted as null (R4, R8). */
   fields?: readonly string[] | undefined;
+  /** JSON responses the page fetched, for `network` alternatives (U16 cascade). */
+  captured?: readonly { url: string; status: number; body: unknown }[] | undefined;
 }
 
 const squash = (s: string | null | undefined): string => String(s ?? "").replace(/\s+/g, " ").trim();
@@ -469,13 +471,122 @@ function pickAlternative(raws: ReadonlyArray<string | null>, alternatives: reado
  * Record mode yields one item; list mode one per item anchor. `values` and
  * `resolvedBy` mirror the first item (null-filled when there is none).
  */
+/**
+ * The cascade's declared sources, resolved before any selector runs.
+ *
+ * A declared alternative wins over a DOM one because it is a statement by the
+ * site rather than an inference about its styling. Order within the field is
+ * still respected -- a scraper that lists a DOM alternative first gets it
+ * first -- but a declared alternative that resolves ends the search, exactly as
+ * a selector that resolves does.
+ */
+async function resolveDeclared(
+  page: Page,
+  alternative: FieldAlternative,
+  captured: readonly { url: string; status: number; body: unknown }[],
+): Promise<string | null> {
+  const source = alternative.source ?? "dom";
+  if (source === "dom" || !alternative.path) return null;
+
+  if (source === "network") {
+    const match = alternative.match ?? "";
+    // Newest first: a page that retries leaves the failure behind too, and Cruz
+    // Verde's detail endpoint answers 401 before its anonymous session exists.
+    for (let i = captured.length - 1; i >= 0; i -= 1) {
+      const response = captured[i]!;
+      if (response.status >= 400 || !response.url.includes(match)) continue;
+      const value = readJsonPath(response.body, alternative.path);
+      if (value !== undefined && value !== null) return String(value);
+    }
+    return null;
+  }
+
+  // json-ld: every block on the page, first one carrying the path.
+  const blocks = await page
+    .$$eval('script[type="application/ld+json"]', (nodes) => nodes.map((n) => n.textContent ?? ""))
+    .catch(() => [] as string[]);
+  for (const block of blocks) {
+    let parsed: unknown;
+    try { parsed = JSON.parse(block.trim()); } catch { continue; }
+    const value = readJsonPath(parsed, alternative.path, true);
+    if (value !== undefined && value !== null) return String(value);
+  }
+  return null;
+}
+
+/**
+ * A dotted path, with brackets for a key that contains a dot or a dash --
+ * `productData.prices[price-list-std]`, which Store B's payload needs.
+ *
+ * With `search`, an array or an `@graph` is walked to find the first node the
+ * path resolves against, because a site is free to bury its Product node in a
+ * graph beside its Organization node, and StoreA does.
+ */
+function readJsonPath(body: unknown, path: string, search = false): unknown {
+  const segments = path.replace(/\[([^\]]+)\]/g, ".$1").split(".").filter(Boolean);
+  const direct = (node: unknown): unknown => {
+    let current = node;
+    for (const segment of segments) {
+      if (current === null || current === undefined || typeof current !== "object") return undefined;
+      current = (current as Record<string, unknown>)[segment];
+    }
+    return current;
+  };
+
+  const hit = direct(body);
+  if (hit !== undefined || !search) return hit;
+
+  const queue: unknown[] = [body];
+  for (let guard = 0; queue.length > 0 && guard < 200; guard += 1) {
+    const node = queue.shift();
+    if (Array.isArray(node)) { queue.push(...node); continue; }
+    if (node === null || typeof node !== "object") continue;
+    const found = direct(node);
+    if (found !== undefined) return found;
+    queue.push(...Object.values(node as Record<string, unknown>));
+  }
+  return undefined;
+}
+
 export async function extractPage(page: Page, scraper: CompiledScraper, options: ExtractOptions = {}): Promise<PageExtraction> {
   const sourceUrl = options.sourceUrl ?? page.url();
   const compiled = Object.keys(scraper.fields);
   const requested = options.fields ? [...new Set([...options.fields, ...compiled])] : compiled;
+  const captured = options.captured ?? [];
+
+  // Declared sources first: they need no DOM evaluation and cannot be confused
+  // by a page that looks the same as another.
+  //
+  // `resolvedBy` stays an index into the field's own alternatives, whichever
+  // source answered, because that is what healing and the summaries read.
+  const declared = new Map<string, { value: string; by: number }>();
+  for (const name of compiled) {
+    const alternatives = scraper.fields[name]!.alternatives;
+    for (const [index, alternative] of alternatives.entries()) {
+      if ((alternative.source ?? "dom") === "dom") continue;
+      const value = await resolveDeclared(page, alternative, captured);
+      if (value !== null && value !== "") {
+        declared.set(name, { value, by: index });
+        break;
+      }
+    }
+  }
+
+  // The DOM pass only sees DOM alternatives, so an index it reports is an index
+  // into that subset and has to be mapped back before anyone stores it.
+  const domIndexes = new Map<string, number[]>();
+  for (const name of compiled) {
+    const keep: number[] = [];
+    scraper.fields[name]!.alternatives.forEach((a, i) => { if ((a.source ?? "dom") === "dom") keep.push(i); });
+    domIndexes.set(name, keep);
+  }
+
   const specs: FieldSpec[] = compiled.map((name) => ({
     name,
-    alternatives: scraper.fields[name]!.alternatives.map((a) => ({ selector: a.selector, attr: a.attr })),
+    alternatives: domIndexes.get(name)!.map((i) => {
+      const a = scraper.fields[name]!.alternatives[i]!;
+      return { selector: a.selector, attr: a.attr };
+    }),
   }));
   const item = scraper.mode === "list" ? scraper.item : undefined;
   const arg: EvaluateArg = {
@@ -491,9 +602,17 @@ export async function extractPage(page: Page, scraper: CompiledScraper, options:
   const items: ItemExtraction[] = result.items.map((row) => {
     const out = nullFilled(requested, sourceUrl);
     specs.forEach((spec, i) => {
-      const picked = pickAlternative(row.candidates[i] ?? [], scraper.fields[spec.name]!.alternatives, result.baseUri);
+      const fromDeclared = declared.get(spec.name);
+      if (fromDeclared) {
+        out.values[spec.name] = fromDeclared.value;
+        out.resolvedBy[spec.name] = fromDeclared.by;
+        return;
+      }
+      const keep = domIndexes.get(spec.name)!;
+      const domAlternatives = keep.map((k) => scraper.fields[spec.name]!.alternatives[k]!);
+      const picked = pickAlternative(row.candidates[i] ?? [], domAlternatives, result.baseUri);
       out.values[spec.name] = picked?.value ?? null;
-      out.resolvedBy[spec.name] = picked && picked.value !== null ? picked.by : null;
+      out.resolvedBy[spec.name] = picked && picked.value !== null ? (keep[picked.by] ?? picked.by) : null;
     });
     return out;
   });

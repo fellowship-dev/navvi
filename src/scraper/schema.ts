@@ -35,11 +35,47 @@ export const FingerprintSchema = z.object({
   shape: z.enum(SHAPES),
 });
 
+/**
+ * Where a field's value comes from.
+ *
+ * `dom` is a CSS selector, which is what every scraper compiled before
+ * 2026-09-22 used and what an alternative with no `source` still means.
+ *
+ * The other two exist because selecting on the rendered page is the *hardest*
+ * way to read a value and was being used for every field of every site. A
+ * product page states what it is twice over -- in schema.org JSON-LD, and in
+ * the payload a single-page app fetches for itself -- and both are labelled by
+ * the site rather than inferred from styling. The client scrapers reached 27-44%
+ * coverage selecting on a modal-state class, a seasonal class and a Tailwind
+ * line-height; reading the declared values instead put all three at or near
+ * 100%.
+ */
+export const FIELD_SOURCES = ["dom", "json-ld", "network"] as const;
+export type FieldSource = (typeof FIELD_SOURCES)[number];
+
 export const FieldAlternativeSchema = z.object({
+  /**
+   * The CSS selector for a `dom` alternative. For the declared sources it is a
+   * label: the script tag being read, or the endpoint being matched. Kept
+   * required so every alternative says where it looked, and so a scraper
+   * written before this field parses unchanged.
+   */
   selector: z.string().min(1),
   attr: z.string().min(1).optional(),
+  /** Absent means `dom`, which is what every earlier scraper meant. */
+  source: z.enum(FIELD_SOURCES).optional(),
+  /** `json-ld` and `network`: the dotted path into the payload, `a.b[key-with-dashes]`. */
+  path: z.string().min(1).optional(),
+  /** `network`: substring of the response URL to read. */
+  match: z.string().min(1).optional(),
   fingerprint: FingerprintSchema,
-});
+}).refine(
+  (a) => (a.source === "json-ld" || a.source === "network" ? Boolean(a.path) : true),
+  { message: "a json-ld or network alternative needs a path" },
+).refine(
+  (a) => (a.source === "network" ? Boolean(a.match) : true),
+  { message: "a network alternative needs a match" },
+);
 
 /** R31: at least one alternative; healing only ever appends. `type` (R5) is the declared output type replay coerces to. */
 export const FieldSchema = z.object({
@@ -189,7 +225,10 @@ export function cacheKey(templateKey: string, input: CacheKeyInput): string {
 export const MERGE_API = ["appendFieldAlternative", "appendStepAlternative", "markHealed"] as const;
 
 function sameFieldAlternative(a: FieldAlternative, b: FieldAlternative): boolean {
-  return a.selector === b.selector && a.attr === b.attr;
+  // Two alternatives reading different sources are different alternatives even
+  // when their labels collide, so healing can add a DOM fallback beside a
+  // declared source without either replacing the other.
+  return a.selector === b.selector && a.attr === b.attr && (a.source ?? "dom") === (b.source ?? "dom") && a.path === b.path;
 }
 
 function sameLocator(a: LocatorAlternative, b: LocatorAlternative): boolean {

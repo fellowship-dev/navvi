@@ -6,6 +6,7 @@ import type { BrowserContext, Page } from "playwright";
 import { Charger, type ChargingActor } from "../billing/charge.js";
 import { buildCrawleeLaunchContext, restoreProfileCookies, saveProfileCookies } from "../browser/launch.js";
 import { createLaunchCounter, formatLaunchFailure, isLaunchFailure, launchFailureReport, resolveRelaunchKnobs, type RelaunchKnobs } from "../browser/relaunch.js";
+import { captureJson, type CapturedResponse } from "../browser/network-capture.js";
 import { hostOf, isAllowedRequestUrl, registrableDomain } from "../browser/policy.js";
 import { createChooser, NavviError, NeedsHumanError, type Chooser } from "../chooser/index.js";
 import { compile, type CompileResult } from "../compile/index.js";
@@ -730,6 +731,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       sessionPoolOptions: buildSessionPoolOptions(singleSession, relaunchKnobs),
       preNavigationHooks: [async ({ page }) => {
         await guardContext(page.context());
+        startCapture(page);
         await deps.onPage?.(page);
       }],
       requestHandler: async (ctx) => {
@@ -924,6 +926,31 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     return outcome.scraper;
   }
 
+  /**
+   * The JSON a page fetches about itself, for `network` field alternatives.
+   *
+   * A single-page app ships a shell: there is nothing to read in the HTML and
+   * the rendered DOM is the hardest place to read it from -- Store B shows
+   * three prices styled alike, which is how a compiled selector caught the Club
+   * price. The payload names them (`price-list-std`, `price-sale-std`).
+   *
+   * Capture starts before navigation so the first responses are not missed, and
+   * every response is kept: a page that retries leaves its failure behind too,
+   * and Store B's detail endpoint answers 401 before its session exists.
+   *
+   * Only a scraper that actually declares a `network` alternative pays for
+   * this, so nothing changes for a scraper that does not.
+   */
+  const captures = new WeakMap<Page, CapturedResponse[]>();
+  const wantsNetwork = plans.some((p) => p.scraper && Object.values(p.scraper.fields).some((f) => f.alternatives.some((a) => a.source === "network")));
+
+  const startCapture = (page: Page): void => {
+    if (!wantsNetwork || captures.has(page)) return;
+    const { responses } = captureJson(page, { match: /./, limit: 40 });
+    captures.set(page, responses);
+  };
+  const capturedFor = (page: Page): CapturedResponse[] => captures.get(page) ?? [];
+
   interface Extracted {
     scraper: CompiledScraper;
     items: ItemExtraction[];
@@ -932,7 +959,11 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   }
 
   async function extractChecked(page: Page, scraper: CompiledScraper, sourceUrl: string): Promise<Extracted> {
-    const extraction = await extractPage(page, scraper, { sourceUrl, fields: [...fields, ...detailFieldNames] });
+    const extraction = await extractPage(page, scraper, {
+      sourceUrl,
+      fields: [...fields, ...detailFieldNames],
+      captured: capturedFor(page),
+    });
     const items = scraper.mode === "record" && extraction.items.length === 0 ? [extraction] : extraction.items;
     const failed = new Set<string>();
     for (const item of items) for (const name of checkFields(scraper, item)) failed.add(name);
