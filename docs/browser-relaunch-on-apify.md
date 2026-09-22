@@ -1,6 +1,9 @@
 # Why a browser relaunch fails on the Apify Chrome image
 
-Status: **trigger found and fixed.** The relaunch itself is still unexplained.
+Status: **explained and fixed** (2026-09-22). The cause was a Chromium
+ProcessSingleton lock on a persistent profile directory, not the image and not
+the executable path. Everything below is kept in order, because the sequence of
+wrong answers is the useful part.
 
 ## Correction, 2026-09-21
 
@@ -134,3 +137,61 @@ may not tolerate a second launch while the retiring browser still holds
 something (a lock, a user-data directory, a port), in which case the fix is
 ordering — await the old browser's exit before launching the replacement —
 rather than avoiding retirement at all.
+
+## 2026-09-22: the answer
+
+The instrumentation went in (`src/browser/relaunch.ts`, build 3.0.11) and the
+repro was forced rather than waited for: 20 Store B URLs with
+`sessionMaxUsageCount: 5`, which retires the session — and with it the browser —
+every five requests. Apify run `beygdybuH6khLp2fx` **failed after 5 requests in
+62 seconds**, against the fifteen minutes a catalogue run took to reach the same
+place. The `LAUNCH_FAILURE` record held what four run logs had truncated:
+
+```
+browserType.launchPersistentContext: Failed to create a ProcessSingleton for
+your profile directory. This usually means that the profile is already in use
+by another instance of Chromium.
+```
+
+Two things fall out of that one line.
+
+**It is `launchPersistentContext`.** Every run had a `userDataDir`, including
+every `store` run. `runCrawl` passed `profileDomain` unconditionally, so R40's
+"one persistent profile per registrable domain" applied to the read-only profile
+too — the one with no logins, no secrets and no form submits, whose storage does
+not outlive a run on the platform. It was carrying a profile it had no use for.
+
+**It is a lock, not a path.** Chromium guards a user data directory with a
+ProcessSingleton. Crawlee retires a browser and launches the replacement before
+the retiring process has released that lock, so the replacement loses the race
+and dies. Crawlee then reports it as `Failed to launch browser ... check whether
+the provided executable path "/pw-browsers/chrome" is correct` — which is why
+three sessions went looking for a broken image. The path was always fine; the
+first launch proved it every time.
+
+So the three earlier hypotheses were all about *what retires a browser*
+(`retireBrowserAfterPageCount`, `maxUsageCount`, `maxErrorScore`). Each was
+partly right and none of them mattered. They were enumerating the ways to reach
+a door that was locked for an unrelated reason.
+
+### The fix
+
+A `store` run takes no persistent profile (`src/replay/crawler.ts`). A relaunch
+then has nothing to contend for and is an ordinary launch. Build 3.0.12, the
+identical repro, Apify run `joP9jVjxR7kr2HB5c`: the run walks straight past the
+five-request cliff that killed 3.0.11.
+
+### What remains
+
+A `local` run still keeps R40's profile and therefore still has this exposure.
+It runs one browser per run by default, so a relaunch is rare there. If it ever
+bites, the fix is a per-browser user data directory rather than a shared one —
+and that is worth building when it happens, not before.
+
+### The method note, for next time
+
+Three builds were spent guessing at triggers. One build spent on instrumentation
+answered it in about a minute of runtime. The signal that it was time to stop
+guessing was available early: every hypothesis, right or wrong, ended at the
+same unexplained failure. When the fixes differ and the failure does not, the
+failure is the thing to measure.
