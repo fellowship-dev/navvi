@@ -52,12 +52,12 @@ function probeOf(kind: Kind, url: string): UrlProbe {
       // The silent one: nothing for sale, so the price node is not rendered at all.
       return { url, status: 200, hasDeclaredProduct: true, priceCount: 0, inStock: false };
     case "redirect":
-      return { url, status: 200, redirectedTo: `${HOST}/categoria/medicamentos`, hasDeclaredProduct: false };
+      return { url, status: 200, redirectedTo: `${HOST}/categoria/medicamentos`, hasDeclaredProduct: false, isShell: false };
     case "gone":
       return { url, status: 404 };
     case "no-product":
       // StoreA's shape: a 200 that declares Organization and no Product.
-      return { url, status: 200, hasDeclaredProduct: false };
+      return { url, status: 200, hasDeclaredProduct: false, isShell: false };
     case "blocked":
       return { url, status: 403 };
     case "unanswered":
@@ -127,7 +127,7 @@ describe("classify", () => {
   });
 
   it("reads a 200 with no declared Product as dead, because it is the same blank in a different coat", () => {
-    const entry = classify({ url: `${HOST}/producto/x`, status: 200, hasDeclaredProduct: false });
+    const entry = classify({ url: `${HOST}/producto/x`, status: 200, hasDeclaredProduct: false, isShell: false });
     expect(entry.strata).toEqual(["dead"]);
     expect(entry.signature).toBe("dead:no-product");
   });
@@ -243,7 +243,7 @@ describe("chooseSample — the degenerate catalogues, answered honestly", () => 
       { url: "a", status: 404 },
       { url: "b", status: 404 },
       { url: "c", status: 200, redirectedTo: "https://farmacia.example/categoria/x" },
-      { url: "d", status: 200, hasDeclaredProduct: false },
+      { url: "d", status: 200, hasDeclaredProduct: false, isShell: false },
     ];
     const choice = chooseSample(probes);
     expect(choice.unfilled.map((entry) => entry.stratum)).toEqual(["out-of-stock", "discounted", "undiscounted"]);
@@ -284,5 +284,39 @@ describe("chooseSample — the degenerate catalogues, answered honestly", () => 
     expect(chooseSample([]).unfilled.map((entry) => entry.stratum)).toEqual([...STRATA] as Stratum[]);
     expect(chooseSample([{ url: "a", status: 403 }]).picks).toEqual([]);
     expect(chooseSample([{ url: "a", status: 403 }]).excluded[0]!.reason).toBe("blocked");
+  });
+  it("a shell is not a dead URL, however little it declares", () => {
+    // The first live run of the cascade: every Store B URL came back a 200
+    // with 2,863 characters and no declared Product, was classified dead, was
+    // dropped from the binding set, and the investigation read nothing at all.
+    // Both units' own tests passed throughout, because each was written against
+    // its own fixture.
+    const shell = classify({ url: `${HOST}/producto/x`, status: 200, hasDeclaredProduct: false, isShell: true });
+    expect(shell.strata).not.toContain("dead");
+    expect(shell.excluded).toBeUndefined();
+
+    // A real page that declares nothing is still dead -- the StoreA case.
+    const served = classify({ url: `${HOST}/producto/y`, status: 200, hasDeclaredProduct: false, isShell: false });
+    expect(served.strata).toContain("dead");
+    expect(served.signature).toBe("dead:no-product");
+
+    // Unknown shell state may not fire the rule: absent is not false.
+    const unsure = classify({ url: `${HOST}/producto/z`, status: 200, hasDeclaredProduct: false });
+    expect(unsure.strata).not.toContain("dead");
+  });
+
+  it("keeps a shell catalogue bindable end to end", () => {
+    // Store B in miniature: every URL a shell, none declaring a Product.
+    const probes = Array.from({ length: 8 }, (_, i) => ({
+      url: `${HOST}/producto/${i}`,
+      status: 200,
+      hasDeclaredProduct: false,
+      isShell: true,
+      priceCount: i % 2 === 0 ? 2 : 1,
+      inStock: i !== 3,
+    }));
+    const choice = chooseSample(probes, { size: 4 });
+    expect(choice.picks.length).toBe(4);
+    expect(choice.picks.every((pick) => !classify(pick.probe).strata.includes("dead"))).toBe(true);
   });
 });

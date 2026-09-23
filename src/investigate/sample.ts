@@ -46,6 +46,18 @@ export interface UrlProbe {
   redirectedTo?: string | undefined;
   /** Does the landed page declare a Product node (JSON-LD, microdata)? */
   hasDeclaredProduct?: boolean | undefined;
+  /**
+   * Did the plain fetch come back a JS shell — little visible text, a bundle to
+   * fill it, nothing declared? A shell declares no Product *and is not dead*,
+   * which is the distinction the first live run of the cascade found the hard
+   * way: every Store B URL was classified `dead:no-product` and dropped from
+   * the binding set, so the investigation read nothing at all. The answer lives
+   * in its payload, one render away. `shell-skips-tier-1` is the detector.
+   *
+   * Absent is not false here either: an unknown shell state must not let the
+   * no-Product rule fire, because the rule cannot tell the two apart alone.
+   */
+  isShell?: boolean | undefined;
   /** How many *distinct* price values the page shows. 2 or more means a discount is visible. */
   priceCount?: number | undefined;
   inStock?: boolean | undefined;
@@ -204,11 +216,21 @@ export function classify(probe: UrlProbe): Classification {
     const where = probe.redirectedTo === undefined ? "somewhere it did not report" : probe.redirectedTo;
     return { url, strata: ["dead"], signature: "dead:redirect", note: `redirects to ${where}, which is not its product page` };
   }
-  if (probe.hasDeclaredProduct === false) {
+  if (probe.hasDeclaredProduct === false && probe.isShell === false) {
     // StoreA, 2026-09-22: a 200 that declares Organization and no Product.
     // The graph walk bound productName to "StoreA" on all 33 of them, so
     // the row looked extracted. Same blank, wearing a different coat.
-    return { url, strata: ["dead"], signature: "dead:no-product", note: `answers ${status} but declares no Product node` };
+    //
+    // It takes `isShell === false` to say that, and the qualifier is the whole
+    // point. Store B's plain fetch declares no Product on *every* URL in the
+    // catalogue -- 2,863 characters of shell, with the answer in the payload
+    // the page fetches for itself. Without the qualifier this rule reads a
+    // perfectly healthy store as 100% dead, drops every URL from the binding
+    // set, and the investigation reads nothing. That is not a hypothetical: it
+    // is what the first live run of the cascade did, and the unit tests on both
+    // sides passed while it happened, because each was written against its own
+    // fixture.
+    return { url, strata: ["dead"], signature: "dead:no-product", note: `answers ${status} but declares no Product node and is not a shell` };
   }
 
   // --- live
