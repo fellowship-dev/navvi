@@ -20,6 +20,8 @@ jobs:
         run: npm ci
       - name: Validate actor browser image pins
         run: node scripts/check-image-pins.mjs
+      - name: Validate the architecture diagram against the import graph
+        run: node scripts/check-architecture.mjs
       - name: Install test browser
         run: npx playwright install --with-deps chromium
       - name: Check TypeScript

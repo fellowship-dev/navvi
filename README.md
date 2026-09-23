@@ -391,6 +391,14 @@ paragraph is updated with the observed numbers.
 With and without Jev on the same pages: questions, wait time, cost and heal
 rate live in [`docs/measurements.md`](docs/measurements.md).
 
+## Architecture
+
+Three layers — entry, the stages of a run, and the vocabulary they share — with
+a module-by-module diagram of every import between them in
+[`docs/architecture.md`](docs/architecture.md). It is generated from the code
+and `npm run check:architecture` fails CI when the two disagree, so it is the
+diagram and not a drawing of one.
+
 ## Development and tests
 
 ```bash

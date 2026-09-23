@@ -17,5 +17,6 @@
 - `npx navvi --help`: every flag in one screen.
 - `storage/key_value_stores/scraper-cache/<cacheKey>.json`: the compiled scraper produced by a run.
 - `storage/questions/<token>.json`: a parked question batch waiting for `--answers <file> --resume <token>`.
+- [docs/architecture.md](docs/architecture.md): the modules under `src/`, what each one owns, the import graph between them, the known cycles and the two orphans. Generated from the code and checked in CI.
 - [docs/measurements.md](docs/measurements.md): questions, wait time and cost with and without Jev on the same pages.
 - [LICENSE](LICENSE): MIT.
