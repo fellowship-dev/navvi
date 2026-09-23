@@ -10,7 +10,8 @@ import type { Answer, Chooser, ChooserUsage, Question } from "../src/chooser/cho
 import { RecordedChooser } from "../src/chooser/recorded.js";
 import { CredentialInPromptError } from "../src/input/prompt.js";
 import { briefContains, isVague, resolveInputShape, vagueTermIn } from "../src/spec/brief.js";
-import { blockingQuestions, isReadyToInvestigate, requestedFields, underspecifiedFields, SpecSchema, type Spec } from "../src/spec/schema.js";
+import { applyAnswers, parseAnswer } from "../src/make/answers.js";
+import { blockingQuestions, declaredFieldTypes, isReadyToInvestigate, requestedFields, underspecifiedFields, SpecSchema, type Spec } from "../src/spec/schema.js";
 import { SpecParseError, briefToSpec, specFromDraft, specQuestionId, type SpecDraft } from "../src/spec/spec.js";
 
 /**
@@ -212,6 +213,146 @@ describe("specFromDraft (the deterministic half)", () => {
   it("produces a spec that validates against its own schema", () => {
     expect(() => SpecSchema.parse(specFromDraft(STORE_B, STORE_B_DRAFT))).not.toThrow();
   });
+
+  it("proposes no column type: a guessed type is the invisible guess this artifact refuses", () => {
+    const spec = specFromDraft(STORE_B, STORE_B_DRAFT);
+    expect(spec.fields.every((field) => field.type === undefined)).toBe(true);
+    expect(declaredFieldTypes(spec)).toEqual({});
+  });
+});
+
+// ------------------------------------------- A9b: a request states its column
+
+/**
+ * A9b. `FieldRequest` carries the type of the column it asks for.
+ *
+ * The case is `stock`: *"is it in stock"* and *"how many are in stock"* are the
+ * same word and two different asks, and an untyped request cannot hold the
+ * difference — so navvi binds one and the consumer reads the other. The type
+ * is the client's to declare, and `--answer <field>:<type>` is how they say
+ * it.
+ */
+describe("a field request's column type", () => {
+  const untyped = (): Spec => specFromDraft(STORE_B, STORE_B_DRAFT);
+  const answerFields = (value: string, base: Spec = untyped()): Spec => applyAnswers(base, [parseAnswer(`fields=${value}`)]).spec;
+
+  it("expresses the stock ambiguity: stock:boolean and stock:integer are two different asks", () => {
+    const asBoolean = answerFields("productName,stock:boolean");
+    const asInteger = answerFields("productName,stock:integer");
+
+    expect(asBoolean.fields.find((field) => field.name === "stock")!.type).toBe("boolean");
+    expect(asInteger.fields.find((field) => field.name === "stock")!.type).toBe("integer");
+    // The point of the fix: the two requests are now different artifacts. Both
+    // readings were previously the identical `{ name: "stock" }`.
+    expect(asBoolean.fields).not.toEqual(asInteger.fields);
+    // And the column nobody typed is still untyped, rather than defaulted.
+    expect(asBoolean.fields.find((field) => field.name === "productName")!.type).toBeUndefined();
+  });
+
+  it("the declared type is part of the spec, so it survives being written and read back", () => {
+    const spec = answerFields("productName,listPrice:money,stock:boolean");
+    const round = SpecSchema.parse(JSON.parse(JSON.stringify(spec)));
+    expect(declaredFieldTypes(round)).toEqual({ listPrice: "money", stock: "boolean" });
+  });
+
+  it("the type stops being a side channel: a resume that does not repeat --answer keeps it", () => {
+    const first = applyAnswers(untyped(), [parseAnswer("fields=productName,listPrice:money")]);
+    expect(first.types).toEqual({ listPrice: "money" });
+
+    // The second run of `navvi make` reads `spec.json` and applies no answer.
+    // The types used to be re-derived from argv, so this returned `{}` and the
+    // investigation was handed five untyped columns.
+    const resumed = applyAnswers(SpecSchema.parse(JSON.parse(JSON.stringify(first.spec))), []);
+    expect(resumed.types).toEqual({ listPrice: "money" });
+  });
+
+  it("refuses a type the vocabulary does not have, naming the ones it does", () => {
+    expect(() => answerFields("stock:yesno")).toThrow(/unknown field type "yesno"/);
+    expect(() => answerFields("stock:yesno")).toThrow(/text, money, integer, number, boolean, url/);
+  });
+
+  /**
+   * Compatibility, not a failing-first case: the committed golden is a
+   * `spec.json` the previous version wrote. `type` is optional, so it still
+   * parses and every column is simply untyped — which is the truthful record
+   * of a brief that said "product info" and nothing about columns.
+   */
+  it("a spec written before this change still parses, with no column typed", () => {
+    const golden = SpecSchema.parse(JSON.parse(readFileSync(GOLDEN, "utf8")));
+    expect(golden.fields.map((field) => field.name)).toHaveLength(5);
+    expect(golden.fields.every((field) => field.type === undefined)).toBe(true);
+    expect(declaredFieldTypes(golden)).toEqual({});
+  });
+});
+
+// ------------------------------------------ A9c: "the client answered" exists
+
+/**
+ * A9c. `PROVENANCES` has a word for a binding whose ground is a person.
+ *
+ * An answered field is neither `brief` — the brief does not contain the word,
+ * and every provenance claim in a spec is supposed to be checkable against the
+ * brief printed above it — nor `inferred`, which is the line navvi prints
+ * under *"the brief did not ask for these"*.
+ */
+describe("the provenance of an answer", () => {
+  const storeB = (): Spec => specFromDraft(STORE_B, STORE_B_DRAFT);
+
+  it("a field the client named is `answered`, and the brief is not made to claim it", () => {
+    const spec = applyAnswers(storeB(), [parseAnswer("fields=productName,stock:boolean")]).spec;
+    const stock = spec.fields.find((field) => field.name === "stock")!;
+
+    expect(stock.provenance).toBe("answered");
+    // Why it cannot be `brief`: the assertion that would have made is false.
+    expect(briefContains(spec.brief, "stock")).toBe(false);
+    expect(stock.briefTerm).toBeUndefined();
+  });
+
+  it("an answered field is a request, and is never reported as something the brief did not ask for", () => {
+    const spec = applyAnswers(storeB(), [parseAnswer("fields=productName,stock:boolean")]).spec;
+    expect(requestedFields(spec).map((field) => field.name)).toEqual(["productName", "stock"]);
+    expect(underspecifiedFields(spec)).toEqual([]);
+  });
+
+  it("the site, the entity and the input shape a client answers are `answered` too", () => {
+    const spec = applyAnswers(storeB(), [parseAnswer("inputs=url_list"), parseAnswer("entity=presentation")]).spec;
+    expect(spec.inputs.provenance).toBe("answered");
+    expect(spec.entity.provenance).toBe("answered");
+    expect(spec.inputs.description).toContain("answered by the client");
+  });
+
+  it("a field whose word really is in the brief keeps `brief`, with the quote that proves it", () => {
+    const brief = "Get the name, list price and stock of these product URLs from StoreA";
+    const base = specFromDraft(brief, {
+      target: { site: "StoreA", pageKind: "product", briefTerm: "StoreA" },
+      entity: { name: "product", briefTerm: "product" },
+      inputs: { shape: "url_list", description: "the product URLs given per run", briefTerm: "product URLs" },
+      fields: [{ name: "name", briefTerm: "name" }],
+    });
+    const spec = applyAnswers(base, [parseAnswer("fields=name,stock:boolean,bioequivalent:boolean")]).spec;
+
+    const stock = spec.fields.find((field) => field.name === "stock")!;
+    expect(stock.provenance).toBe("brief");
+    expect(stock.briefTerm).toBe("stock");
+    expect(stock.type).toBe("boolean");
+    // The one word the brief does not contain is the one that is `answered`.
+    expect(spec.fields.find((field) => field.name === "bioequivalent")!.provenance).toBe("answered");
+  });
+
+  /**
+   * Compatibility, not a failing-first case. A `spec.json` an older navvi
+   * wrote records an answered input shape as `brief`; re-running the same
+   * command must not rewrite those bytes just to relabel them, because the
+   * staleness rule is over bytes and a rewrite re-runs every stage below.
+   */
+  it("a spec an older navvi answered is not rewritten just to relabel its provenance", () => {
+    const older: Spec = {
+      ...storeB(),
+      inputs: { shape: "url_list", description: "url_list — answered by the client, settling inputs-shape", provenance: "brief" },
+      openQuestions: [],
+    };
+    expect(applyAnswers(older, [parseAnswer("inputs=url_list")]).spec).toEqual(older);
+  });
 });
 
 describe("briefToSpec", () => {
@@ -302,7 +443,7 @@ describe("navvi spec", () => {
     expect(code).toBe(0);
     const spec = JSON.parse(readFileSync(out, "utf8")) as Spec;
     expect(spec).toEqual(JSON.parse(readFileSync(GOLDEN, "utf8")));
-    expect(io.stderr.text).toContain("fields requested: none — the brief names no field");
+    expect(io.stderr.text).toContain("fields requested: none — neither the brief nor an answer names a field");
     expect(io.stderr.text).toContain("[fields-unnamed] Which fields should the scraper return?");
     expect(io.stderr.text).toContain("not ready to investigate");
   });

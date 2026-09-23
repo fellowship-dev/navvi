@@ -1,7 +1,8 @@
 import type { BrowserContext, Page } from "playwright";
 import { captureJson } from "../browser/network-capture.js";
+import { refuseRevalidation } from "../browser/guards.js";
 import { launch, type LaunchedBrowser } from "../browser/launch.js";
-import { visibleText } from "../heuristics/rules/investigate.js";
+import { visibleText } from "../heuristics/index.js";
 import { dismissConsent } from "../prestep/consent.js";
 import { extractPage, fieldTypesOf, type PageExtraction } from "../scraper/extract.js";
 import type { CompiledScraper } from "../scraper/schema.js";
@@ -72,6 +73,24 @@ import type { Capture, Obstacle, PageResponse } from "../investigate/index.js";
  *    this that is a signal rather than a clock: through that pause the page
  *    was still taking delivery (62 responses at 7.0 s, 104 at 9.4 s), which is
  *    a page mid-render saying so.
+ *  - **A settle that runs out of budget hands back an unfinished measurement,
+ *    not a short page.** The cap is the same 25 s either way, and what it costs
+ *    depends entirely on what else the machine is doing: the same `navvi make`
+ *    on the same URL rendered 11,190 characters and bound 3 of 5 alone, and
+ *    3,219 characters with the consent banner still up and 0 of 5 while
+ *    `npm test` ran beside it. The second transcript is indistinguishable from
+ *    the site having changed unless the settle says which of the two it was, so
+ *    it does: see `Settle`.
+ *  - **A navigation that failed is not a page that was slow.** `goto` was
+ *    called with `.catch(() => undefined)`, which is right about one thing —
+ *    `networkidle` is a *condition*, and a site that never goes quiet fails it
+ *    with a finished page on screen, which is a visit worth carrying on with —
+ *    and wrong about the rest. A page that never loaded went on to be dismissed
+ *    at, polled at and capped at, for the full budget, and came back as an
+ *    empty capture: a third run indistinguishable from the first two. The
+ *    navigation's own account is kept now, and the address bar says which of
+ *    the two kinds of failure it was — a `goto` that rejects with `about:blank`
+ *    still in it brought back nothing.
  *
  *  - **Every request goes out with its conditional headers removed.** The
  *    reused context has a reused HTTP cache, and a second visit to a URL
@@ -140,12 +159,34 @@ export const CAPTURE_LIMIT = 200;
  */
 export interface Pages {
   fetch(url: string): Promise<PageResponse>;
-  capture(url: string): Promise<Capture>;
+  capture(url: string): Promise<DrivenCapture>;
   /** One reading of one URL through a compiled scraper, exactly as a replay would take it. */
   read(scraper: CompiledScraper, url: string): Promise<PageReading>;
   /** The full extraction, for the verify stage's fill rate. */
   extract(scraper: CompiledScraper, url: string): Promise<PageExtraction>;
   close(): Promise<void>;
+}
+
+/**
+ * A capture, and whether the render it was taken from ever finished.
+ *
+ * `Capture` is `investigate`'s vocabulary and says what was on the page;
+ * `settle` says whether navvi stayed long enough to be reading the page rather
+ * than a frame of it. It is a widening rather than a change to `Capture`
+ * because the driver is the only thing that can know it — a capture imported
+ * from a HAR has no settle to report — and because every existing consumer of
+ * a `Capture` keeps compiling and keeps behaving identically.
+ *
+ * Two callers want it. Tier 2 anchors its candidates against `text`, so a
+ * capped `text` is what turns a busy machine into "no captured leaf survived
+ * the filter"; and the canary is fingerprinted off `html`, so a capped `html`
+ * is a false "the site changed" filed against every replay from here on.
+ * Neither reads it yet: both live in `src/investigate/`, and the line that
+ * carries an unfinished measurement into the manuscript is an `Obstacle` kind
+ * that does not exist there yet.
+ */
+export interface DrivenCapture extends Capture {
+  settle: Settle;
 }
 
 export interface PagesOptions {
@@ -178,116 +219,168 @@ export async function plainFetch(url: string, fetchImpl: typeof fetch = fetch): 
 }
 
 /**
- * Waits until the page stops changing, or until `deadline`. Returns the length
- * of the rendered text it settled on.
+ * What one settle watched: the two readings, where each of them started and
+ * where each of them was when the watching stopped.
+ *
+ * Both trends are here because both are what "the page is still going" looks
+ * like, and they do not always move together: the Camoufox plateau in the
+ * header held the text at 3,174 characters while the payload count went 62 to
+ * 104, and a capture taken during a consent re-layout is the mirror image.
+ */
+export interface SettleTrend {
+  /** Characters of rendered visible text at the first poll, and at the last. */
+  textFrom: number;
+  text: number;
+  /** Payloads the page had taken delivery of at the first poll, and at the last. */
+  payloadsFrom: number;
+  payloads: number;
+  /** Polls taken, how many of them read something other than the poll before, and the wall clock they cost. */
+  polls: number;
+  changed: number;
+  /** For a settle, what the polls cost. For a navigation that never arrived, what the navigation cost. */
+  ms: number;
+  /**
+   * What the navigation said, when it said anything.
+   *
+   * Present whenever `page.goto` rejected — which is not the same as the page
+   * not being there. `waitUntil: "networkidle"` is a condition, and a site that
+   * never goes quiet fails it with a fully rendered page on screen; that is a
+   * run the settle below should and does carry on with. So this is evidence
+   * attached to whatever outcome the render then reached, rather than an
+   * outcome of its own — except when nothing arrived at all, which is
+   * `unreachable`.
+   */
+  arrival?: string | undefined;
+}
+
+/**
+ * How a settle ended.
+ *
+ * This is a union and not a number with a flag beside it because the two are
+ * not the same kind of fact. `quiesced` is a measurement: the page stopped, and
+ * what the capture holds is the page. `capped` is the *absence* of one: the
+ * budget ran out with the render still in flight, and what the capture holds is
+ * as far as navvi got. Returning the second dressed as the first is the defect
+ * this type exists to make unrepresentable — on 2026-09-23 a `navvi make` taken
+ * while the test suite was running captured 3,219 characters of an 11,190
+ * character page, bound 0 of 5 with "no captured leaf survived the filter", and
+ * read exactly like a site that had changed under us. The same run alone bound
+ * 3 of 5. A harness that reports a site regression when it was merely busy is
+ * the failure `scripts/live-investigate.ts`'s own header warns about, one layer
+ * out.
+ *
+ * `unreachable` is the third of them and it was swallowed for longer than the
+ * other two: `goto(...).catch(() => undefined)` threw the navigation's own
+ * account away, so a page that never loaded went on to be watched, polled and
+ * capped exactly like a page that loaded slowly, and both arrived at the
+ * transcript looking like the third thing again — a site that had changed. One
+ * `catch` conflated all three.
+ *
+ * `because` hangs off the two failing arms, so no caller can print the excuse
+ * without having first asked whether there is one.
+ */
+export type Settle =
+  | (SettleTrend & { outcome: "quiesced" })
+  | (SettleTrend & { outcome: "capped"; because: string })
+  | (SettleTrend & { outcome: "unreachable"; because: string });
+
+/**
+ * The sentence a capped settle carries: what was still moving when the budget
+ * ran out, in the numbers that were measured rather than in an adjective.
+ *
+ * A render that put nothing on the page gets its own sentence, because it is a
+ * different thing to have happened and because the loop below cannot report it
+ * any other way: an empty reading is never counted as stable — a page with no
+ * text on it has not finished arriving, whatever the DOM is doing — so a page
+ * that stays empty burns the whole budget and arrives here with two flat
+ * trends and nothing that moved.
+ */
+function whyUnsettled(trend: SettleTrend): string {
+  const clock = `${(trend.ms / 1000).toFixed(1)} s and ${trend.polls} poll${trend.polls === 1 ? "" : "s"}`;
+  const navigation = trend.arrival === undefined ? "" : `; the navigation had already said "${trend.arrival}"`;
+  if (trend.text === 0) return `the render never put a visible character on the page in ${clock}; there is nothing here that could have settled${navigation}`;
+  return (
+    `the render never held still for ${SETTLE_STABLE_POLLS} consecutive polls in ${clock}: ` +
+    `${trend.changed} of them read something new, text ${trend.textFrom} -> ${trend.text} characters, payloads ${trend.payloadsFrom} -> ${trend.payloads}${navigation}`
+  );
+}
+
+/**
+ * Where a page starts before anything has been navigated to, and where it stays
+ * when the navigation fails outright. A `goto` that rejects with this still in
+ * the address bar brought back nothing at all; one that rejects with the target
+ * there timed out on its wait condition over a page that exists.
+ */
+const NOWHERE = "about:blank";
+
+/**
+ * The navigation, kept rather than swallowed: the first line of what Playwright
+ * said, which is the part that names the failure (`net::ERR_NAME_NOT_RESOLVED`,
+ * `Timeout 60000ms exceeded`) before the call log that follows it.
+ */
+async function arriveAt(page: Page, url: string): Promise<string | undefined> {
+  try {
+    await page.goto(url, { waitUntil: "networkidle", timeout: 60_000 });
+    return undefined;
+  } catch (error: unknown) {
+    const said = (error instanceof Error ? error.message : String(error)).split("\n")[0]?.trim();
+    return said === undefined || said === "" ? "the navigation failed without saying why" : said;
+  }
+}
+
+/**
+ * Waits until the page stops changing, or until `deadline`, and says which of
+ * those two happened.
  *
  * "Stops changing" is two readings, not one: the visible text, and how many
  * payloads the page has taken delivery of so far. A page that is between its
  * own API calls has a still DOM and is not finished, and telling that apart
  * from a page that is finished is the whole job here — see the header for the
  * run where getting it wrong cost every field on the page.
+ *
+ * It used to answer with the text length and nothing else, and both call sites
+ * threw it away — the shape the `Settle` header argues against, in the file
+ * that invented it.
  */
-async function settleRender(page: Page, deadline: number, payloads: () => number): Promise<number> {
+async function settleRender(page: Page, deadline: number, payloads: () => number, arrival?: string | undefined): Promise<Settle> {
+  const startedAt = Date.now();
   let previousText = -1;
   let previousPayloads = -1;
+  let firstText = -1;
+  let firstPayloads = -1;
   let unchanged = 0;
+  let polls = 0;
+  let changed = 0;
   for (;;) {
     const current = visibleText(await page.content().catch(() => "")).length;
     const delivered = payloads();
+    polls += 1;
+    if (firstText < 0) {
+      firstText = current;
+      firstPayloads = delivered;
+    } else if (current !== previousText || delivered !== previousPayloads) {
+      changed += 1;
+    }
+    const trend: SettleTrend = {
+      textFrom: firstText,
+      text: current,
+      payloadsFrom: firstPayloads,
+      payloads: delivered,
+      polls,
+      changed,
+      ms: Date.now() - startedAt,
+      ...(arrival === undefined ? {} : { arrival }),
+    };
     if (current > 0 && current === previousText && delivered === previousPayloads) {
-      if (++unchanged >= SETTLE_STABLE_POLLS) return current;
+      if (++unchanged >= SETTLE_STABLE_POLLS) return { outcome: "quiesced", ...trend };
     } else {
       unchanged = 0;
     }
-    if (Date.now() > deadline) return current;
+    if (Date.now() > deadline) return { outcome: "capped", ...trend, because: whyUnsettled(trend) };
     previousText = current;
     previousPayloads = delivered;
     await page.waitForTimeout(SETTLE_POLL_MS);
   }
-}
-
-/**
- * The headers with which a browser asks "has this changed since I last saw
- * it?". A request carrying one of them can be answered `304 Not Modified`,
- * which is a header block and no body at all.
- */
-const REVALIDATION_HEADERS = ["if-none-match", "if-modified-since"] as const;
-
-/**
- * Takes the conditional headers off every request the page makes, so a server
- * that would have answered `304 Not Modified` has to answer `200` with the
- * body instead.
- *
- * This is the price of the reused context, and it went unpaid for a while.
- * Measured on store-b.example, 2026-09-23, twelve visits to three product URLs
- * through one Camoufox context:
- *
- * ```
- * visit  1 884669.html  json=56  detail=200  values={"productName":"Acido Acetilsalicilico…","listPrice":"4690"}
- * visit  4 884669.html  json=7   detail=304  values={"productName":null,"listPrice":null}
- * visit  7 884669.html  json=8   detail=304  values={"productName":null,"listPrice":null}
- * visit 10 884669.html  json=7   detail=304  values={"productName":null,"listPrice":null}
- * ```
- *
- * The first visit to a URL got `200 application/json` and bound three fields.
- * Every later visit to the same URL in the same context sent the ETag Cruz
- * Verde had handed it, got `304`, and bound nothing — while the page itself
- * rendered perfectly (11,190 characters of it), because the browser had the
- * body in its cache and navvi did not. That is the whole of the defect that
- * printed `determinism 3 replays x 3 URLs, 0 fields moved` over an extraction
- * in which all 27 readings were null: the investigation visits each URL once
- * and the replays visit it four more times, so the investigation bound from
- * payloads the replays could no longer see.
- *
- * It cannot be paid at the capture instead. A 304 carries no `content-type`,
- * so `captureJson`'s JSON filter drops it, and reading it anyway is not on
- * offer: Playwright counts 304 among the redirect statuses and answers
- * `response.json()` with *"Response body is unavailable for redirect
- * responses"* on both engines. The body the page is using exists only inside
- * the browser's cache. So the request has to be one the cache cannot satisfy.
- *
- * Half the work here is done by installing the route handler at all, and that
- * half is worth naming because it is not what the code appears to say. A
- * request Playwright is routing is a request the browser's HTTP cache does not
- * get to answer, so a payload sent with `Cache-Control: max-age=600` — which
- * the browser would otherwise reuse for ten minutes without asking anyone —
- * crosses the network on every visit. Measured against
- * `tests/repeat-visit.test.ts`'s fixture: four visits, four requests with this
- * installed, and exactly one without it. Stripping the validators is the other
- * half, for the endpoints that do ask: it is what makes the request they send
- * answerable with a body rather than with a 304.
- *
- * The surgery is otherwise the smallest that does that. A request with no
- * conditional header is continued untouched rather than re-sent with a header
- * list navvi rebuilt — `route.continue({ headers })` replaces the whole block,
- * and a rebuilt block is a different client to anything that fingerprints
- * header order. On a Store B product page that is every request but one.
- *
- * What it costs the run was measured rather than argued, and it does not
- * show. Two back-to-back passes over two store-b.example product pages, twice
- * each, one with this installed and one without, returned the same page to
- * the character — 3,871 and 3,555 characters of body text either way, off
- * HTML that agreed to within 200 bytes — in 25.9 s, 9.0 s, 9.9 s and 9.4 s
- * against 25.2 s, 9.2 s, 9.8 s and 9.6 s. A visit to a page like this waits
- * on its settle, not on its bytes, and one interception per request — about
- * 190 of them — does not show up against that. The pass that read nothing was
- * not the faster one; it was the same one with less to show for it.
- */
-async function refuseRevalidation(page: Page): Promise<void> {
-  await page.route("**/*", async (route) => {
-    try {
-      const headers = await route.request().allHeaders();
-      const conditional = REVALIDATION_HEADERS.filter((name) => name in headers);
-      if (conditional.length === 0) return await route.continue();
-      for (const name of conditional) delete headers[name];
-      return await route.continue({ headers });
-    } catch {
-      // The page navigated away or closed mid-interception. The request went
-      // with it; letting it through unmodified is the only thing left to try,
-      // and failing at that is not a fact about the site.
-      await route.continue().catch(() => undefined);
-    }
-  });
 }
 
 /**
@@ -327,8 +420,8 @@ export async function openPages(options: PagesOptions): Promise<Pages> {
     return consent.clicked.length > 0;
   };
 
-  /** Navigate, dismiss consent, let the render settle, hand back the page and what it fetched. */
-  const visit = async <T>(url: string, use: (page: Page, captured: ReturnType<typeof captureJson>, obstacles: Obstacle[]) => Promise<T>): Promise<T> => {
+  /** Navigate, dismiss consent, let the render settle, hand back the page, what it fetched, and how the settling ended. */
+  const visit = async <T>(url: string, use: (page: Page, captured: ReturnType<typeof captureJson>, obstacles: Obstacle[], settle: Settle) => Promise<T>): Promise<T> => {
     const page = await (await context()).newPage();
     const obstacles: Obstacle[] = [];
     try {
@@ -338,16 +431,41 @@ export async function openPages(options: PagesOptions): Promise<Pages> {
       // pass cannot double what a page is allowed to cost.
       const deadline = Date.now() + settleCap;
       const delivered = () => captured.responses.length;
-      await page.goto(url, { waitUntil: "networkidle", timeout: 60_000 }).catch(() => undefined);
-      await dismiss(page, url, obstacles);
-      await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => undefined);
-      await settleRender(page, deadline, delivered);
-      // The banner the first pass was too early for. Under Camoufox this is
-      // the one that clicks; under Chromium it finds the page already clear
-      // and costs one evaluate. See the header.
-      if (await dismiss(page, url, obstacles)) await settleRender(page, Math.max(deadline, Date.now() + SETTLE_FLOOR_MS), delivered);
+      const startedAt = Date.now();
+      const arrival = await arriveAt(page, url);
+      let settle: Settle;
+      if (arrival !== undefined && page.url() === NOWHERE) {
+        // Nothing arrived, so there is nothing to watch arriving. Polling a
+        // blank page for 25 s produces an empty capture, which is the reading
+        // that gets filed as "the site stopped answering" — and spending the
+        // budget to produce it makes every later URL in the run poorer as well.
+        settle = { outcome: "unreachable", because: arrival, textFrom: 0, text: 0, payloadsFrom: 0, payloads: 0, polls: 0, changed: 0, ms: Date.now() - startedAt, arrival };
+      } else {
+        await dismiss(page, url, obstacles);
+        await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => undefined);
+        settle = await settleRender(page, deadline, delivered, arrival);
+        // The banner the first pass was too early for. Under Camoufox this is
+        // the one that clicks; under Chromium it finds the page already clear
+        // and costs one evaluate. See the header.
+        if (await dismiss(page, url, obstacles)) {
+          const second = await settleRender(page, Math.max(deadline, Date.now() + SETTLE_FLOOR_MS), delivered, arrival);
+          // A visit is only as finished as its least finished pass, and the
+          // first one is kept when it capped: the second pass is granted the
+          // floor out of an exhausted budget, so its quiescence is a statement
+          // about the 3 s after a click and not about the render the first
+          // pass abandoned.
+          if (settle.outcome === "quiesced") settle = second;
+        }
+      }
+      // An unfinished measurement is a thing that stood between navvi and the
+      // page, so it goes where every other one goes: the manuscript records it,
+      // `reconcile.md` costs it, and a thin run stops reading as a site that
+      // changed.
+      if (settle.outcome !== "quiesced") {
+        obstacles.push({ kind: "unsettled", url, because: settle.because, evidence: `${settle.text} characters, ${settle.payloads} payloads, ${settle.polls} polls`, blocking: false });
+      }
       await captured.settled();
-      return await use(page, captured, obstacles);
+      return await use(page, captured, obstacles, settle);
     } finally {
       await page.close().catch(() => undefined);
     }
@@ -357,10 +475,10 @@ export async function openPages(options: PagesOptions): Promise<Pages> {
     fetch: (url) => plainFetch(url, fetchImpl),
 
     capture: (url) =>
-      visit(url, async (page, captured, obstacles) => {
+      visit(url, async (page, captured, obstacles, settle) => {
         const text = await page.evaluate(() => document.body?.innerText ?? "").catch(() => "");
         const html = await page.content().catch(() => "");
-        return { responses: captured.responses, text, html, obstacles };
+        return { responses: captured.responses, text, html, obstacles, settle };
       }),
 
     read: async (scraper, url) => readingOf(await readPage(scraper, url), fieldTypesOf(scraper)),

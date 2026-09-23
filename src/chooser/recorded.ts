@@ -130,6 +130,15 @@ export function normalizeOption(option: string): string {
  * the index answers the candidate, not the sample. Everything that identifies
  * the candidate is still compared: its path, its attribute, its position in the
  * list, and how many candidates there are.
+ *
+ * What dropping the values does **not** make page-independent is the *order*.
+ * `rankHealCandidates` ranks a heal question's options by value — a candidate
+ * whose value matches an earlier sample goes first — so two pages of one
+ * template can offer the same candidates in different positions, and a
+ * recording made on one genuinely does not answer the other. That is a property
+ * of the caller's question rather than of this check, and the caller answers it
+ * by recording a fixture per page: see `HEAL_FIXTURE_BY_PAGE` in
+ * `scripts/demo.ts`, and the one-in-three flake it was written for.
  */
 export function comparableOption(option: string): string {
   return optionIdentity(normalizeOption(option));

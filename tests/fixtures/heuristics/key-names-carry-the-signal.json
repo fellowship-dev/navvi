@@ -24,7 +24,29 @@
       "expect": {
         "fires": true,
         "pick": "productData.prices[price-list-std]",
-        "actionIncludes": "without asking a model to search a DOM"
+        "actionIncludes": "without asking a model to search a DOM",
+        "becauseIncludes": "a margin of 4"
+      }
+    },
+    {
+      "name": "a binding won on one token and no sense at all: the margin is what says so",
+      "observation": {
+        "field": "list_price",
+        "leaves": [
+          {
+            "path": "a.price",
+            "value": 3690
+          },
+          {
+            "path": "a.code",
+            "value": "881926"
+          }
+        ]
+      },
+      "expect": {
+        "fires": true,
+        "pick": "a.price",
+        "becauseIncludes": "a margin of 1"
       }
     },
     {
@@ -85,7 +107,7 @@
       },
       "expect": {
         "fires": false,
-        "becauseIncludes": "this is the small table Jev should be shown"
+        "becauseIncludes": "a margin of 0; this is the small table Jev should be shown"
       }
     },
     {

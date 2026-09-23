@@ -1,6 +1,7 @@
+import { bank, type Bank, type Overrides, type Verdict } from "../heuristics/index.js";
 import type { FieldType } from "../input/schema.js";
 import { typeMatches } from "../investigate/leaves.js";
-import type { FieldRecord, InventoryRecord, Manuscript, Obstacle, RejectionRecord } from "../investigate/manuscript.js";
+import type { FieldAlias, FieldRecord, InventoryRecord, Manuscript, Obstacle, RejectionRecord } from "../investigate/manuscript.js";
 import type { TypedValue } from "../scraper/extract.js";
 import type { Spec } from "../spec/schema.js";
 import { normalize } from "../util/text.js";
@@ -63,6 +64,15 @@ export interface ReconcileOptions {
    * absent too rather than empty.
    */
   disagreements?: readonly AlternativeDisagreement[] | undefined;
+  /**
+   * The case's heuristic overrides, for the one rule this stage asks.
+   *
+   * A disabled rule still answers — `Bank.run` returns `fires: false` with the
+   * note that silenced it — so a reconciliation that ranked a session id like
+   * any other leaf can say a person switched the rule off rather than that the
+   * rule looked and declined.
+   */
+  heuristics?: Overrides | undefined;
 }
 
 // --------------------------------------------------------------- small parts
@@ -207,13 +217,90 @@ function catalogue(manuscript: Manuscript): { leaves: InventoryRecord[]; evidenc
   return { leaves: [...byKey.values()], evidence: "rejected" };
 }
 
+/**
+ * U6c: the rule that says why a leaf is bookkeeping.
+ *
+ * `machine-value-is-not-a-fact` was the twelfth heuristic and, until this
+ * called it, the only one in the bank nothing executed — written down from the
+ * Store B encounter, fixtured, and then left to the arithmetic below. "A
+ * rule nothing executes is navvi's signature defect" is the bank's own sentence
+ * about it.
+ *
+ * It is asked here and not at bind time on purpose. This stage is the one that
+ * has the whole leaf catalogue with `anchored` already answered, and the
+ * artifact that needs the sentence is this one: the client reads
+ * `available` and has to be able to dismiss a row *for a reason*. The rule's
+ * other wiring point — refusing a leaf as a **binding** candidate, which is
+ * what its `decides` line is about — is `catalogueOf` in
+ * `src/investigate/investigate.ts` and is still open.
+ */
+const MACHINERY_RULE = "machine-value-is-not-a-fact";
+
+/**
+ * The rule's verdict on one leaf, or `undefined` when it did not fire.
+ *
+ * `anchored` is passed through exactly as the manuscript carries it, including
+ * `undefined`: the rule treats "nobody looked" as its own answer and declines
+ * rather than guessing from the key name, which is the whole reason it takes an
+ * observation instead of a path. A leaf whose values the rule's schema refuses
+ * is not this rule's business and is left alone.
+ */
+function machineryOf(rules: Bank, leaf: InventoryRecord): AvailableLeaf["machinery"] {
+  let verdict: Verdict;
+  try {
+    verdict = rules.run(MACHINERY_RULE, {
+      path: leaf.path,
+      values: leaf.values,
+      ...(leaf.anchored === undefined ? {} : { anchored: leaf.anchored }),
+    });
+  } catch {
+    return undefined;
+  }
+  if (!verdict.fires) return undefined;
+  return { heuristic: MACHINERY_RULE, because: verdict.because, action: verdict.action ?? "" };
+}
+
+/**
+ * A field record's aliases, tolerant of a manuscript written before an alias
+ * carried its own source.
+ *
+ * An older `investigation.json` spells them as bare strings. Nothing validates
+ * a `Manuscript` with a schema, so such a file still parses, and the only
+ * honest reading of a bare string is the assumption the old code made
+ * silently: that the alias is read exactly the way the binding is. That is true
+ * for the `network` case — the only one the old compile emitted — and it is the
+ * false assumption for tier 1, which is why a tier-1 alias out of an old
+ * manuscript still arrives carrying the binding's source and is still refused
+ * downstream for exactly the same reason it always was. Nothing gets better for
+ * an old file and nothing gets worse; a re-investigation is what closes it.
+ */
+export function aliasesOf(record: FieldRecord): FieldAlias[] {
+  return (record.aliases as ReadonlyArray<FieldAlias | string>).map((alias) =>
+    typeof alias !== "string"
+      ? alias
+      : {
+          path: alias,
+          source: record.source ?? "network",
+          ...(record.match === undefined ? {} : { match: record.match }),
+          ...(record.selector === undefined ? {} : { selector: record.selector }),
+          ...(record.attr === undefined ? {} : { attr: record.attr }),
+          ...(record.entity === undefined ? {} : { entity: record.entity }),
+        },
+  );
+}
+
+/** Aliases in a stable order: by path, so the same investigation reconciles the same twice. */
+function sortedAliases(aliases: readonly FieldAlias[]): FieldAlias[] {
+  return [...aliases].sort((a, b) => a.path.localeCompare(b.path));
+}
+
 /** Which `(match, path)` pairs a requested field already answers - bound or aliased. */
 function claimedPaths(manuscript: Manuscript): Set<string> {
   const claimed = new Set<string>();
   for (const record of manuscript.fields) {
     const match = record.match ?? "";
     if (record.path !== undefined) claimed.add(`${match} ${record.path}`);
-    for (const alias of record.aliases) claimed.add(`${match} ${alias}`);
+    for (const alias of aliasesOf(record)) claimed.add(`${alias.match ?? match} ${alias.path}`);
   }
   return claimed;
 }
@@ -402,7 +489,7 @@ function splitDisagreements(
   for (const disagreement of observed) {
     const bound = obtainable.find((field) => field.field === disagreement.field);
     const match = bound?.match ?? "";
-    const claimed = new Set([bound?.path, ...(bound?.aliases ?? [])].filter((path): path is string => path !== undefined));
+    const claimed = new Set([bound?.path, ...(bound?.aliases ?? []).map((alias) => alias.path)].filter((path): path is string => path !== undefined));
     const readings: TracedReading[] = [];
     const made: string[] = [];
     let unaccounted = false;
@@ -483,7 +570,9 @@ function splitDisagreements(
         ...(match === "" ? {} : { match }),
         path: fact.path,
         values: fact.values,
-        aliases: [...fact.aliases].sort(),
+        // Every one of these is another leaf of the same call, so they are
+        // `network` readings of the endpoint the split came out of.
+        aliases: sortedAliases(fact.aliases.map((path) => ({ path, source: "network" as const, ...(match === "" ? {} : { match }) }))),
         where: `network ${match === "" ? "" : `${match} `}${fact.path}`,
         splitFrom: disagreement.field,
         because:
@@ -496,7 +585,7 @@ function splitDisagreements(
         value: reading.value,
         outcome: "split",
         leaf: fact.path,
-        ...(fact.aliases.length > 0 ? { aliases: [...fact.aliases].sort() } : {}),
+        ...(fact.aliases.length > 0 ? { aliases: sortedAliases(fact.aliases.map((path) => ({ path, source: "network" as const, ...(match === "" ? {} : { match }) }))) } : {}),
         emitted: name,
         because: `${show(reading.value)} is ${fact.path}, a different leaf of the same call, so it is emitted as \`${name}\` bound to that leaf rather than ranked against ${disagreement.field}.`,
       });
@@ -591,7 +680,7 @@ export function reconcile(manuscript: Manuscript, spec: Spec, options: Reconcile
       ...(record.attr === undefined ? {} : { attr: record.attr }),
       ...(record.entity === undefined ? {} : { entity: record.entity }),
       values,
-      aliases: [...record.aliases].sort(),
+      aliases: sortedAliases(aliasesOf(record)),
       where: whereOf(record),
       because: record.because,
     });
@@ -643,6 +732,7 @@ export function reconcile(manuscript: Manuscript, spec: Spec, options: Reconcile
 
   // -------------------------------------------- available but not requested
 
+  const rules = bank(options.heuristics ?? {});
   const available: AvailableLeaf[] = [];
   for (const leaf of leaves) {
     if (claimed.has(`${leaf.match} ${leaf.path}`)) continue;
@@ -654,6 +744,7 @@ export function reconcile(manuscript: Manuscript, spec: Spec, options: Reconcile
     const signals: string[] = [];
     if (leaf.anchored === true) signals.push("its value was in what the page showed a reader");
     if (moves) signals.push(`it moves across the samples (${showValues(leaf.values)})`);
+    const machinery = machineryOf(rules, leaf);
     available.push({
       match: leaf.match,
       path: leaf.path,
@@ -661,12 +752,31 @@ export function reconcile(manuscript: Manuscript, spec: Spec, options: Reconcile
       ...(leaf.anchored === undefined ? {} : { anchored: leaf.anchored }),
       varies: moves,
       evidence,
+      ...(machinery === undefined ? {} : { machinery }),
       because:
         `nothing in the spec asked for this; ${signals.join(", and ")}` +
+        (machinery === undefined ? "" : `. ${MACHINERY_RULE} says it is the machine's own bookkeeping: ${machinery.because}`) +
         (evidence === "rejected" ? ". Seen only because it competed for a field the brief did name, so this catalogue is type-contingent and incomplete" : ""),
     });
   }
-  const rank = (leaf: AvailableLeaf): number => (leaf.anchored === true ? 0 : 1) + (leaf.varies ? 0 : 1);
+  /**
+   * The order, and the one judgement in it that is no longer arithmetic.
+   *
+   * The two signals still rank the rows - shown to a reader, and moves across
+   * the samples - because both are evidence and the count of them is what a
+   * reader is being offered. What the arithmetic could never say is *why*
+   * `telemetry.renderedAt` belongs at the bottom. It sorted last because it was
+   * not anchored, which is the same rank a perfectly ordinary declared field
+   * gets on a tier the investigation did not anchor at all, and the row carried
+   * no sentence a client could disagree with. A silent sort is a judgement with
+   * no recorded ground.
+   *
+   * So a leaf the bank actually called machinery sorts below every leaf it did
+   * not, by a term large enough that no combination of the two signals can lift
+   * it back - and the row says which rule said so and on what evidence.
+   */
+  const rank = (leaf: AvailableLeaf): number =>
+    (leaf.machinery === undefined ? 0 : 4) + (leaf.anchored === true ? 0 : 1) + (leaf.varies ? 0 : 1);
   available.sort((a, b) => rank(a) - rank(b) || a.match.localeCompare(b.match) || a.path.localeCompare(b.path));
 
   // ------------------------------------------------------------ ambiguities
@@ -774,7 +884,7 @@ export function reconcile(manuscript: Manuscript, spec: Spec, options: Reconcile
     obtainable.push(...split.emitted);
     // A leaf that is now a column is not a leaf nobody asked for. Saying both
     // in one artifact would make the reader decide which sentence to believe.
-    const columns = new Set(split.emitted.flatMap((field) => [`${field.match ?? ""} ${field.path}`, ...field.aliases.map((alias) => `${field.match ?? ""} ${alias}`)]));
+    const columns = new Set(split.emitted.flatMap((field) => [`${field.match ?? ""} ${field.path}`, ...field.aliases.map((alias) => `${alias.match ?? field.match ?? ""} ${alias.path}`)]));
     for (let index = available.length - 1; index >= 0; index--) {
       if (columns.has(`${available[index]!.match} ${available[index]!.path}`)) available.splice(index, 1);
     }
@@ -854,6 +964,8 @@ export function costOf(obstacle: Obstacle): string {
         return "one fewer sample in the comparison; the binding is made on a narrower set";
       case "deferred":
         return "one extra render at investigation to tell a shell from a refusal, and nothing at replay";
+      case "unsettled":
+        return "nothing here is evidence about the site: the render budget ran out mid-page or the navigation never arrived, so a field this run could not bind may be a field this run did not wait for - re-run it on a quiet machine before believing a gap";
     }
   })();
   return obstacle.blocking ? `blocking - ${base}` : base;

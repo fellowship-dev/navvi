@@ -1,0 +1,22 @@
+{
+  "id": "heal.stock",
+  "kind": "choice",
+  "index": 0,
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "note": "main/article/div/p/span = Disponible — recorded offline on the atorvastatina v2 page: the options are this code's own offer, the index was answered by hand (no model ran)",
+  "options": [
+    "main/article/div/p/span = Disponible",
+    "main/article/div/h1 = Atorvastatina 20 mg x 30 comprimidos",
+    "main/article/div/p/span = Laboratorio:",
+    "main/article/div/p/span = Abbott",
+    "main/article/div/p/span = Stock:",
+    "main/article/div/p/span = SKU:",
+    "main/article/div/p/span = FA-0008",
+    "main/article/div/div/p = Atorvastatina 20 mg de Abbott. Medicamento de venta directa…",
+    "main/section/h2 = Productos relacionados",
+    "main/section/ul/li/a = Salbutamol 100 mcg inhalador 200 dosis",
+    "main/section/ul/li/a = Clotrimazol 1% crema 20 g",
+    "main/section/ul/li/a = Vitamina C 1 g x 30 comprimidos efervescentes"
+  ]
+}

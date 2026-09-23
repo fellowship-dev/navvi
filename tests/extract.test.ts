@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Page } from "playwright";
 import { launch, type LaunchedBrowser } from "../src/browser/launch.js";
 import { getCandidates, resolveLeaf } from "../src/browser/snapshot.js";
-import { extractPage, fingerprintMatches, resolveUrl, shapeOf } from "../src/scraper/extract.js";
+import { extractPage, fingerprintMatches, readValues, resolveUrl, shapeOf } from "../src/scraper/extract.js";
 import { validateScraper, type CompiledScraper } from "../src/scraper/schema.js";
 import { startFixtureServer, type FixtureServer } from "./server.js";
 
@@ -233,6 +233,38 @@ describe("extractPage", () => {
       const none = await extractPage(page, doc, { sourceUrl: page.url() });
       expect(none.values.price).toBe("Consultar");
       expect(none.resolvedBy.price).toBe(0);
+    });
+  });
+
+  /**
+   * The reading `src/replay/determinism.ts` judges, and the distinction it
+   * could not see before: `values` is null-filled so a row has every requested
+   * column whatever the page answered (R4, R8), which makes `field in values` a
+   * fact about the scraper. `readValues` asks the page instead.
+   */
+  it("the reading a determinism replay judges omits what nothing resolved, and keeps what a type refused", async () => {
+    const doc = scraper({
+      fields: {
+        name: { alternatives: [{ selector: "h1", fingerprint: { samples: [], shape: "text" } }] },
+        price: { alternatives: [{ selector: ".precio", fingerprint: { samples: [], shape: "money" } }] },
+        sku: { alternatives: [{ selector: ".sku", fingerprint: { samples: [], shape: "text" } }] },
+      },
+    });
+    await withPage("/fixtures/search-form.html", async (page) => {
+      await page.setContent(`<h1>Producto</h1><span class="precio">Consultar</span>`);
+      const out = await extractPage(page, doc, { sourceUrl: page.url() });
+      expect(out.values, "the row keeps every column: that is the output contract").toEqual({ name: "Producto", price: "Consultar", sku: null });
+      expect(out.resolvedBy).toEqual({ name: 0, price: 0, sku: null });
+
+      const reading = readValues(out, { name: "text", price: "money", sku: "text" })[0]!;
+      // `sku` is absent, not null: no alternative of it resolved, so the page
+      // stated nothing — which is what `Stability.absent` is about.
+      expect(Object.keys(reading).sort()).toEqual(["name", "price"]);
+      expect("sku" in reading).toBe(false);
+      // `price` stays, as null. The page answered "Consultar" and the declared
+      // money type refused the answer: a type question, not a coverage one.
+      expect(reading.price).toBeNull();
+      expect(reading.name).toBe("Producto");
     });
   });
 

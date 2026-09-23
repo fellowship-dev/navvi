@@ -1,6 +1,6 @@
 import { parseFieldSpecs, type FieldType } from "../input/schema.js";
 import { briefContains } from "../spec/brief.js";
-import { INPUT_SHAPES, OPEN_QUESTION_SUBJECTS, blockingQuestions, type InputShape, type OpenQuestion, type OpenQuestionSubject, type Spec } from "../spec/schema.js";
+import { INPUT_SHAPES, OPEN_QUESTION_SUBJECTS, blockingQuestions, declaredFieldTypes, type InputShape, type OpenQuestion, type OpenQuestionSubject, type Spec } from "../spec/schema.js";
 
 /**
  * U11: `--answer <key>=<value>`, and what it is allowed to do to a spec.
@@ -38,18 +38,20 @@ import { INPUT_SHAPES, OPEN_QUESTION_SUBJECTS, blockingQuestions, type InputShap
  * half. So a key that is neither a question id nor a subject names both lists
  * and fails.
  *
- * ## The provenance this file stretches, named rather than hidden
+ * ## What an answer is the provenance of
  *
- * `FieldRequest.provenance` has exactly two values, `brief` and `inferred`, and
- * the client's own answer is neither: the brief did not name these fields, and
- * navvi did not infer them. It is recorded as `brief`, because the alternative
- * is worse in a way a reader would not catch — `underspecifiedFields()` filters
- * on `inferred`, so `specBlock` would print five client-chosen columns under
- * *"fields inferred (the brief did not ask for these)"*, which is a false
- * statement about where they came from. `briefTerm` is set only when the word
- * really is in the brief, which is the field that was built to be checkable,
- * and the answers themselves are recorded verbatim in `make.json`. Widening
- * `PROVENANCES` is `src/spec/`'s call and not this file's.
+ * `FieldRequest.provenance` now has a third value, `answered`, and it is what
+ * this file writes. The two it had, `brief` and `inferred`, are the only two a
+ * drafted spec can produce, and an answer is neither: the brief did not name
+ * these fields, and navvi did not infer them — a person was shown the open
+ * question and settled it. Recording that as `brief`, which is what this file
+ * did, made the spec assert the brief contained words it does not.
+ *
+ * A field whose name the brief *does* contain keeps `brief`, checked with the
+ * spec module's own `briefContains`, and carries the `briefTerm` that proves
+ * it. So the two provenances stay exactly as falsifiable as they were: one is
+ * checkable against the brief printed above it, the other against the answers
+ * recorded verbatim in `make.json`.
  */
 
 export interface Answer {
@@ -75,13 +77,16 @@ export class AnswerError extends Error {
   }
 }
 
-/** The declared column types an answer carried, which the spec has nowhere to keep. See `applyAnswers`. */
+/** The declared column types of a spec's fields, by field name. See `declaredFieldTypes`. */
 export type FieldTypes = Record<string, FieldType>;
 
 export interface AppliedAnswers {
   spec: Spec;
   matched: MatchedAnswer[];
-  /** Types given as `name:type` inside an answer. The spec has no slot for these; the ledger keeps them. */
+  /**
+   * The answered spec's declared column types, read back off it — a view, not
+   * a second place they live. `spec.fields[].type` is the ground.
+   */
   types: FieldTypes;
 }
 
@@ -142,29 +147,28 @@ export function matchAnswer(answer: Answer, spec: Spec): MatchedAnswer {
 export function applyAnswers(spec: Spec, answers: readonly Answer[]): AppliedAnswers {
   let next: Spec = structuredClone(spec);
   const matched: MatchedAnswer[] = [];
-  const types: FieldTypes = {};
 
   for (const answer of answers) {
     const match = matchAnswer(answer, next);
-    next = applyOne(next, match, types);
+    next = applyOne(next, match);
     matched.push(match);
   }
 
   const settled = new Set(matched.map((match) => match.question?.id).filter((id): id is string => id !== undefined));
   next = { ...next, openQuestions: next.openQuestions.filter((question) => !settled.has(question.id)) };
-  return { spec: next, matched, types };
+  return { spec: next, matched, types: declaredFieldTypes(next) };
 }
 
-function applyOne(spec: Spec, match: MatchedAnswer, types: FieldTypes): Spec {
+function applyOne(spec: Spec, match: MatchedAnswer): Spec {
   switch (match.subject) {
     case "fields":
-      return applyFields(spec, match, types);
+      return applyFields(spec, match);
     case "inputs":
       return applyInputs(spec, match);
     case "target":
-      return { ...spec, target: { ...spec.target, site: match.value, provenance: "brief" } };
+      return { ...spec, target: { ...spec.target, site: match.value, provenance: "answered" } };
     case "entity":
-      return { ...spec, entity: { name: match.value, provenance: "brief" } };
+      return { ...spec, entity: { name: match.value, provenance: "answered" } };
     case "constraints":
       return applyConstraint(spec, match);
   }
@@ -176,14 +180,19 @@ function applyOne(spec: Spec, match: MatchedAnswer, types: FieldTypes): Spec {
  * The names become the spec's field list, in the order the client wrote them,
  * which is the order every artifact downstream reports in. The optional `:type`
  * suffix is parsed by `parseFieldSpecs` — the repository's one spelling of
- * `name:type`, the same one `--fields` uses — and comes back out separately
- * because **`FieldRequest` has no type**: the spec records what was asked for,
- * not what column it lands in. That is a real gap in the artifact above this
- * one, and until `src/spec/` closes it the types ride in `make.json` as a
- * parameter of the investigate stage and are named in its stage block, rather
- * than being quietly dropped or quietly invented.
+ * `name:type`, the same one `--fields` uses — and lands on the request itself,
+ * as `FieldRequest.type`.
+ *
+ * It used to come back out separately and ride in `make.json` as a parameter
+ * of the investigate stage, because `FieldRequest` had no type. Two things
+ * were wrong with that beyond the tidiness: the declaration was not part of
+ * the artifact the client approves, so nothing downstream could quote it back
+ * at them; and it was re-derived from argv on every run, so a resume that did
+ * not repeat `--answer` compiled the same spec with every column untyped.
+ * `stock:boolean` and `stock:integer` are two different asks (see
+ * `FieldRequest.type`) and which one was made is now stored, not passed.
  */
-function applyFields(spec: Spec, match: MatchedAnswer, types: FieldTypes): Spec {
+function applyFields(spec: Spec, match: MatchedAnswer): Spec {
   const names = match.value.split(",").map((part) => part.trim()).filter((part) => part.length > 0);
   if (names.length === 0) throw new AnswerError(`--answer ${match.key}: name at least one field`);
   let parsed: Array<{ name: string; type?: FieldType }>;
@@ -194,7 +203,6 @@ function applyFields(spec: Spec, match: MatchedAnswer, types: FieldTypes): Spec 
   }
 
   const fields = parsed.map((field) => {
-    if (field.type) types[field.name] = field.type;
     // `briefTerm` is checked against the brief text by whoever reads it, so it
     // is set only when the word really is there — and checked with the spec
     // module's own `briefContains`, which matches on word boundaries. A naive
@@ -203,8 +211,18 @@ function applyFields(spec: Spec, match: MatchedAnswer, types: FieldTypes): Spec 
     // naming `promoPrice` for a brief that said "product info" has not made
     // that word appear in the brief, and claiming it did would make the spec
     // unfalsifiable.
-    const term = briefContains(spec.brief, field.name) ? { briefTerm: field.name } : {};
-    return { name: field.name, provenance: "brief" as const, ...term };
+    //
+    // The same check decides the provenance, because it is the same question:
+    // when the brief contains the word, the brief is the ground and the quote
+    // proves it; when it does not, the ground is the person who answered, and
+    // that is `answered` rather than a `brief` nobody could check.
+    const named = briefContains(spec.brief, field.name);
+    return {
+      name: field.name,
+      ...(named ? { briefTerm: field.name } : {}),
+      ...(field.type === undefined ? {} : { type: field.type }),
+      provenance: named ? ("brief" as const) : ("answered" as const),
+    };
   });
   return { ...spec, fields };
 }
@@ -224,14 +242,19 @@ function applyInputs(spec: Spec, match: MatchedAnswer): Spec {
    * it re-ran: a full re-investigation of a live catalogue caused by nothing
    * but running the same command twice. The staleness rule is over bytes, so
    * every writer above it has to be idempotent or the rule is a liability.
+   *
+   * The test is "not inferred" rather than "already `answered`" for the same
+   * reason: a `spec.json` an older navvi wrote records an answered shape as
+   * `brief`, and re-running the same command must not rewrite those bytes just
+   * to relabel them. It settles at the shape the client asked for either way.
    */
-  if (spec.inputs.shape === shape && spec.inputs.provenance === "brief") return spec;
+  if (spec.inputs.shape === shape && spec.inputs.provenance !== "inferred") return spec;
   return {
     ...spec,
     inputs: {
       shape: shape as InputShape,
       description: `${match.value} — answered by the client${match.question ? `, settling ${match.question.id}` : ""}`,
-      provenance: "brief",
+      provenance: "answered",
     },
   };
 }

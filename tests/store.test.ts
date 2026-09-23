@@ -61,6 +61,36 @@ describe("ScraperStore (R5)", () => {
     expect((await store.load({ cacheKey: key, profile: "local" })).cacheHit).toBe(true);
   });
 
+  /**
+   * U9c: one key, one document. The canary was filed under `canary-<cacheKey>`
+   * beside the scraper for a day, which is a second record that can disagree
+   * with the first — a `--force-recompile` that fails leaves the old canary
+   * next to the new scraper. Carrying it on the document makes that
+   * unrepresentable: the write that replaces the scraper replaces its canary.
+   */
+  it("keeps a canary on the document it belongs to, through the store and the mirror", async () => {
+    const canary = { url: "https://example.com/j/1", recordedAt: "2026-09-23", status: 200, declaredProduct: false, textChars: 812, words: ["empleos", "jobs", "python"] };
+    const doc = { ...withKey("example.com_jobs-canary"), canary };
+    await store.put(doc);
+    expect((await store.get(doc.cacheKey))?.canary).toEqual(canary);
+    expect(await (await actor.openKeyValueStore()).getValue("SCRAPER")).toEqual(doc);
+
+    // Recompiled with nothing worth fingerprinting: the same key, and the old
+    // canary is gone rather than left standing beside a document that has none.
+    await store.put({ ...doc, canary: null });
+    expect((await store.get(doc.cacheKey))?.canary).toBeNull();
+  });
+
+  it("loads a scraper written before scrapers carried canaries", async () => {
+    const raw = await actor.openKeyValueStore("scraper-cache");
+    const legacy = withKey("example.com_jobs-legacy") as Record<string, unknown>;
+    expect("canary" in legacy).toBe(false);
+    await raw.setValue("example.com_jobs-legacy", legacy);
+    const loaded = await store.get("example.com_jobs-legacy");
+    expect(loaded).not.toBeNull();
+    expect(loaded!.canary).toBeUndefined();
+  });
+
   it("rejects an unknown version on read", async () => {
     const raw = await actor.openKeyValueStore("scraper-cache");
     await raw.setValue("bad-version", { ...withKey("bad-version"), version: 2 });

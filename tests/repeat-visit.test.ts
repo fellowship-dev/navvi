@@ -1,11 +1,18 @@
 import http from "node:http";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Actor } from "apify";
+import { MemoryStorage } from "crawlee";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { launch, type LaunchedBrowser } from "../src/browser/launch.js";
+import { RecordedChooser } from "../src/chooser/recorded.js";
+import { parseInput } from "../src/input/schema.js";
 import { openPages, type Pages } from "../src/make/index.js";
-import type { CompiledScraper } from "../src/scraper/schema.js";
+import { runCrawl, type CrawlDeps } from "../src/replay/crawler.js";
+import { cacheKey, validateScraper, type CompiledScraper } from "../src/scraper/schema.js";
+import { ScraperStore } from "../src/scraper/store.js";
+import { groupByTemplate } from "../src/template/index.js";
 
 /**
  * U11: the driver reading the same URL more than once through one context.
@@ -70,6 +77,9 @@ const PRODUCTS: Record<string, { name: string; list: number; sale: number; cache
   // The neighbouring contract, which asks nothing at all for ten minutes. It
   // is the harder one: there is no request to strip a header from.
   "900303": { name: "Ejemplo Analgesico 500 mg 16 Comprimidos", list: 8990, sale: 8990, cache: "max-age=600" },
+  // The crawler's copy of the same contract. Kept separate so the two drivers'
+  // request tallies cannot be read for one another.
+  "900304": { name: "Ejemplo Descongestionante 10 mg 20 Comprimidos", list: 5290, sale: 4761, cache: "no-cache" },
 };
 
 /**
@@ -117,6 +127,10 @@ async function payloadServer(): Promise<PayloadServer> {
 
     if (url.pathname === "/product.html") {
       const sku = url.searchParams.get("sku") ?? "";
+      // `?revalidate=1`: the page asks its own conditional question instead of
+      // waiting for the browser's cache to ask one for it. See the crawler
+      // suite at the foot of this file for why that distinction is the test.
+      const conditional = url.searchParams.get("revalidate") === "1" ? `, { headers: { "If-None-Match": '"${sku}-v1"' } }` : "";
       // The document itself is never cached, so a repeated visit is always a
       // real navigation and the only thing the browser can reuse is the
       // payload — which is the whole subject here.
@@ -128,7 +142,7 @@ async function payloadServer(): Promise<PayloadServer> {
     <h1 id="name">Cargando…</h1>
     <p>Los precios de esta ficha viven únicamente en la respuesta que la página pide para sí misma.</p>
     <script>
-      fetch("/payload-${sku}.json")
+      fetch("/payload-${sku}.json"${conditional})
         .then((response) => response.json())
         .then((payload) => { document.getElementById("name").textContent = payload.productData.name; })
         .catch(() => { document.getElementById("name").textContent = "Ficha sin respuesta"; });
@@ -291,4 +305,121 @@ describe("a payload-bound scraper replayed through the driver", () => {
     expect(second[0]?.listPrice).toBe("4690");
     expect(second[0]?.productName).toBe(PRODUCTS[sku]!.name);
   });
+});
+
+/**
+ * The same defect, one driver over.
+ *
+ * 89e9633 fixed `make`'s driver and nothing else. `replay/crawler.ts` already
+ * routed every request — for the URL policy — and continued it untouched, so
+ * it had the half of the fix that comes free with routing (the browser's cache
+ * never gets to answer) and not the half that has to be written (the request
+ * goes out without its validators). A crawl that visits two pages sharing one
+ * payload endpoint therefore read that payload once and revalidated it after,
+ * and on the default browser every `network`-source field on the second page
+ * came back null.
+ *
+ * Nothing caught it because nothing looked: `tests/server.ts` never sends an
+ * ETag, so no page the suite serves has ever been revalidated, and the tests
+ * above exercise `openPages`, which had the fix.
+ *
+ * The request tally is the assertion that matters. On Chromium the values pass
+ * straight through the defect — Playwright reports a revalidated resource to
+ * the `response` event as the 200 the browser assembled — so a test that only
+ * read the rows would pin nothing.
+ */
+describe("the crawler's second visit to a payload endpoint", () => {
+  const FIELDS = ["productName", "listPrice"];
+  let dir: string;
+
+  beforeAll(() => { dir = mkdtempSync(join(tmpdir(), "navvi-crawl-revalidate-")); });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("goes out without its validators, so every visit is answered with a body", async () => {
+    const sku = "900304";
+    const product = PRODUCTS[sku]!;
+    // Two pages of one template that fetch the same payload, and the second
+    // visit is the one the live defect was about. But the browser's cache is
+    // not what this can assert against: a request Playwright routes is a
+    // request the cache does not get to answer, and the crawler has routed
+    // every request since long before 89e9633 — so on Chromium no validator is
+    // ever sent and the missing half is invisible. `?revalidate=1` makes the
+    // page ask the conditional question itself, which is the same request the
+    // cache would have sent, minus the engine's opinion about when to send it.
+    // That is exactly the half the crawler was missing, and it fails on every
+    // engine without it.
+    const urls = [`${server.baseUrl}/product.html?sku=${sku}&revalidate=1`, `${server.baseUrl}/product.html?sku=${sku}&revalidate=1&again=1`];
+    const templateKey = [...groupByTemplate(urls).keys()][0]!;
+    expect(groupByTemplate(urls).get(templateKey)).toHaveLength(2);
+
+    const actor = new Actor({ storageClient: new MemoryStorage({ localDataDirectory: mkdtempSync(join(dir, "storage-")), persistStorage: false }) });
+    const store = await ScraperStore.open({ actor });
+    const key = cacheKey(templateKey, { fields: FIELDS, profile: "store" });
+    const alternative = (path: string, shape: "text" | "int", sample: string) => ({
+      selector: `payload-${sku}.json`,
+      source: "network" as const,
+      path,
+      match: "payload-",
+      fingerprint: { samples: [sample], shape },
+    });
+    await store.put(
+      validateScraper({
+        version: 1,
+        templateKey,
+        cacheKey: key,
+        profile: "store",
+        chooser: "agent",
+        mode: "record",
+        entry: { mode: "direct", url: urls[0]! },
+        trace: [],
+        pagination: { mode: "none" },
+        detail: null,
+        createdAt: NOW.toISOString(),
+        fields: {
+          productName: { alternatives: [alternative("productData.name", "text", product.name)] },
+          listPrice: { alternatives: [alternative("productData.prices[price-list-std]", "int", String(product.list))] },
+        },
+      }),
+    );
+
+    const log: string[] = [];
+    const deps: CrawlDeps = {
+      actor,
+      chooser: new RecordedChooser({ fixture: "crawler/empty" }),
+      env: {},
+      storageDir: mkdtempSync(join(dir, "st-")),
+      attended: false,
+      // One at a time, or the two visits race and the second may go out before
+      // the first has taught the cache anything.
+      maxConcurrency: 1,
+      // This test is about revalidation, and healing is not part of its
+      // subject. It has to say so, because `crawler/empty` is the fixture that
+      // refuses *every* question: under load a field occasionally reads null,
+      // the crawler licenses a repair, the fixture refuses it, and since
+      // 2026-09-23 that refusal is rethrown rather than swallowed — so the run
+      // stopped on its first page and the revalidation tally was never taken.
+      // A declining healer keeps the subject fixed. (The same fixture was
+      // being asked the same accidental question in `tests/crawler.test.ts`'s
+      // login-trace test, found the same day.)
+      healer: async () => ({ healed: false, reason: "this test is about revalidation, not repair" }),
+      log: (message) => log.push(message),
+    };
+    const summary = await runCrawl(
+      parseInput({ browser: "chromium", allowPrivateHosts: ["127.0.0.1"], mode: "record", profile: "store", fields: FIELDS.map((name) => ({ name })), startUrls: urls }),
+      deps,
+    );
+
+    // Under the defect this reads [304, 304]: the request goes out with the
+    // validator the page attached, the server answers with a header block and
+    // no body, `captureJson` drops it for want of a content-type, and both
+    // rows come back null.
+    expect(server.answered(sku)).toEqual([200, 200]);
+    expect(server.conditional(sku)).toBe(0);
+
+    const items = (await (await actor.openDataset()).getData()).items as Array<Record<string, unknown>>;
+    expect(items).toHaveLength(2);
+    expect(items.map((item) => item.productName)).toEqual([product.name, product.name]);
+    expect(items.map((item) => item.listPrice)).toEqual([String(product.list), String(product.list)]);
+    expect(summary.status).toBe("succeeded");
+  }, 60_000);
 });

@@ -523,7 +523,7 @@ async function make(args: CliArgs, io: CliIo): Promise<number> {
       report: (text) => {
         if (!args.quiet) io.stderr.write(text);
       },
-      ...(args.offline ? {} : { openPages: () => openPages({ browser: args.browser ?? defaultBrowser(io.env), headed: args.headed, storageDir }) }),
+      ...(args.offline ? {} : { openPages: () => openPages({ browser: args.browser ?? defaultBrowser(io.env), headed: args.headed, storageDir, ...(args.settleCapMs === undefined ? {} : { settleCapMs: args.settleCapMs }) }) }),
       // Resolved, announced and credential-checked only if a brief actually
       // has to be compiled. A resume never gets here.
       openChooser: async () => {

@@ -151,6 +151,44 @@ export const PaginationSchema = z.object({
 });
 export const DetailSchema = z.object({ linkField: fieldName, fields: FieldsSchema });
 
+/**
+ * U9c: the fingerprint of a page that was definitely served, recorded when
+ * this scraper was compiled.
+ *
+ * It is the one boolean separating "your scraper broke" from "the site started
+ * refusing you". At the first repair of a total collapse a genuine redesign
+ * and a genuine refusal are bit-for-bit the same run, and the canary is all
+ * there is to tell them apart -- so `licenseToHeal` refuses to repair a total
+ * collapse it cannot check one against.
+ *
+ * This is the only definition of the shape. `investigate/blocked.ts`, which
+ * records and checks one, keeps the stage-layer name `CanaryFingerprint` as an
+ * alias of this type -- a legal downward edge, where an import the other way
+ * would point up a layer and `scripts/check-architecture.mjs` would refuse it.
+ * It was genuinely spelled twice for part of 2026-09-23, with a mutual
+ * assignability assertion holding the two together; one definition is better
+ * than a test that the two definitions agree.
+ */
+export const CanarySchema = z.object({
+  /** A URL that resolved when this was recorded. */
+  url: z.string().min(1),
+  /** When. Drift is expected over the interval; refusal is not. */
+  recordedAt: z.string().min(1),
+  status: z.number().int(),
+  /** Did it declare a product to a machine then? The load-bearing conjunct: an apology page keeps half the words and declares nothing. */
+  declaredProduct: z.boolean(),
+  /** Characters of visible text then. A block collapses this; a redesign does not. */
+  textChars: z.number().int().min(0),
+  /**
+   * Its most frequent words, sorted. Frequency is the right selector here
+   * because the *frequent* words of a product page are its furniture -- the
+   * nav, the footer, the store's name -- and not the product. That is exactly
+   * what the canary needs: something that survives a redesign of the product
+   * tile and disappears when the site stops serving you a page at all.
+   */
+  words: z.array(z.string()),
+});
+
 export const CompiledScraperSchema = z
   .object({
     version: z.literal(SCRAPER_VERSION),
@@ -167,6 +205,28 @@ export const CompiledScraperSchema = z
     detail: DetailSchema.nullable(),
     createdAt: z.string().min(1),
     healedAt: z.string().min(1).optional(),
+    /**
+     * U9c. Three states, and the third is why this is `nullish` rather than
+     * `optional`:
+     *
+     *  - a fingerprint: recorded off the page that compiled this scraper;
+     *  - `null`: a canary was looked for on that page and deliberately not
+     *    taken -- too few words to disprove anything, or a page that could not
+     *    be read. A decision already made, not a gap;
+     *  - absent: written before scrapers carried canaries at all. Nobody
+     *    looked. Every scraper on disk before 2026-09-23 reads this way, and
+     *    they must keep loading, so the key cannot be required.
+     *
+     * `canaryOrigin` is the one place that reads the difference. It matters
+     * because the two absences want opposite treatment: a gap is filled by the
+     * first run that replays the scraper cleanly, and a refusal is left alone.
+     *
+     * It lives here and not beside the scraper in the cache store because a
+     * side-car falls out of step -- a `--force-recompile` that failed leaves
+     * the old canary next to a new scraper, which is one document claiming two
+     * things. The store keeps the two together by writing one record.
+     */
+    canary: CanarySchema.nullish(),
   })
   .superRefine((doc, ctx) => {
     if (doc.mode === "list" && !doc.item) {
@@ -190,7 +250,27 @@ export type StepTarget = z.infer<typeof StepTargetSchema>;
 export type StepExpect = z.infer<typeof ExpectSchema>;
 export type Pagination = z.infer<typeof PaginationSchema>;
 export type Detail = z.infer<typeof DetailSchema>;
+export type Canary = z.infer<typeof CanarySchema>;
 export type Shape = (typeof SHAPES)[number];
+
+/**
+ * Why a scraper has no canary -- which is a different question from whether it
+ * has one.
+ *
+ * `unrecorded` and `refused` both leave the gate unable to check anything, and
+ * they are not the same fact: `refused` is a decision taken against a real
+ * page and is not revisited, while `unrecorded` is a scraper compiled before
+ * the field existed and is filled in by the first run that replays it
+ * cleanly. Collapsing them would either strand every already-written scraper
+ * without a canary forever, or re-take a fingerprint that was already judged
+ * too thin to disprove anything.
+ */
+export type CanaryOrigin = "recorded" | "refused" | "unrecorded";
+
+export function canaryOrigin(scraper: CompiledScraper): CanaryOrigin {
+  if (scraper.canary === undefined) return "unrecorded";
+  return scraper.canary === null ? "refused" : "recorded";
+}
 
 function formatIssues(error: z.ZodError): string {
   return error.issues.map((i) => `${i.path.join(".") || "scraper"}: ${i.message}`).join("\n");
@@ -234,10 +314,15 @@ export function cacheKey(templateKey: string, input: CacheKeyInput): string {
 
 /**
  * Merge rules (R31, R32). Every function is pure and returns a new document.
- * Alternatives are only ever appended; nothing here can rename, retype or
- * remove a field, and appending to an unknown field throws.
+ * Nothing here can add, rename, retype or remove a field, and naming a field
+ * the scraper does not have throws.
+ *
+ * Three of the four only append. `promoteFieldAlternative` reorders one
+ * field's alternatives, which is the one operation that is not an append, so
+ * the argument that it is safe is made at the function rather than inherited
+ * from this paragraph.
  */
-export const MERGE_API = ["appendFieldAlternative", "appendStepAlternative", "markHealed"] as const;
+export const MERGE_API = ["appendFieldAlternative", "appendStepAlternative", "markHealed", "promoteFieldAlternative"] as const;
 
 function sameFieldAlternative(a: FieldAlternative, b: FieldAlternative): boolean {
   // Two alternatives reading different sources are different alternatives even
@@ -286,4 +371,39 @@ export function appendStepAlternative(scraper: CompiledScraper, stepIndex: numbe
 
 export function markHealed(scraper: CompiledScraper, at: string | Date = new Date()): CompiledScraper {
   return { ...scraper, healedAt: at instanceof Date ? at.toISOString() : at };
+}
+
+/**
+ * U9b: move one alternative to the front of its field, keeping the others in
+ * order.
+ *
+ * A reorder is not an append, so the argument that it is safe has to be made
+ * rather than inherited from the other three: every alternative is retained,
+ * so a promotion loses no reading and a later run can overturn it; the
+ * fingerprint check still guards the value whichever alternative produced it;
+ * and the cascade's semantics -- first one that answers wins -- mean the only
+ * thing that changes is which alternative is asked first, which is the entire
+ * point. It cannot add, rename, retype or remove anything, exactly like the
+ * other three.
+ *
+ * Top-level fields only, because `judgePromotions` counts `resolvedBy` and a
+ * detail extraction does not vote. An option with no caller would be an
+ * untested path through the one function here that reorders.
+ *
+ * The decision that calls this lives in `replay/heal.ts` (`judgePromotions`) --
+ * what the run measured is a replay question; what a document may become is
+ * this file's.
+ */
+export function promoteFieldAlternative(scraper: CompiledScraper, field: string, from: number): CompiledScraper {
+  const existing = scraper.fields[field];
+  if (!existing) {
+    throw new Error(`unknown field "${field}"; the merge API cannot add or rename fields`);
+  }
+  const alternative = existing.alternatives[from];
+  if (!Number.isInteger(from) || !alternative) {
+    throw new Error(`unknown alternative ${from} for "${field}"; it has ${existing.alternatives.length}`);
+  }
+  if (from === 0) return scraper;
+  const updated: Field = { ...existing, alternatives: [alternative, ...existing.alternatives.filter((_, index) => index !== from)] };
+  return { ...scraper, fields: { ...scraper.fields, [field]: updated } };
 }

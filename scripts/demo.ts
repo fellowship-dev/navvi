@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Actor } from "apify";
 import { LogLevel, MemoryStorage, log as crawleeLog } from "crawlee";
-import type { Answer, Chooser, ChooserUsage, Question } from "../src/chooser/chooser.js";
+import { ConfigurationError, type Answer, type Chooser, type ChooserUsage, type Question } from "../src/chooser/chooser.js";
 import { createChooser } from "../src/chooser/index.js";
 import { RecordedChooser } from "../src/chooser/recorded.js";
 import { defaultChooser, parseInput } from "../src/input/schema.js";
@@ -47,6 +47,10 @@ export interface DemoOptions {
   onPhase?: ((phase: DemoPhase, context: DemoPhaseContext) => Promise<void> | void) | undefined;
   /** Reuse a running fixture server instead of starting one. */
   server?: FixtureServer | undefined;
+  /** Crawl order, a permutation of `DEMO_PRODUCTS`; defaults to it. Which page takes the heal is a function of this and `maxConcurrency`. */
+  products?: readonly string[] | undefined;
+  /** Pages in flight; defaults to `DEMO_MAX_CONCURRENCY`. */
+  maxConcurrency?: number | undefined;
 }
 
 export type DemoRow = Record<string, unknown>;
@@ -81,11 +85,73 @@ export const DEMO_PROMPT = "name, laboratory, price and stock of each pharmacy p
 const OUT_OF_STOCK = ["ibuprofeno-400-mg", "losartan-50-mg"];
 const EXPECTED_UNMAPPED = ["Sin stock", "Precio oferta"];
 
-export const productUrls = (baseUrl: string): string[] => DEMO_PRODUCTS.map((slug) => `${baseUrl}/demo/pharmacy/producto/${slug}.html`);
+export const productUrls = (baseUrl: string, products: readonly string[] = DEMO_PRODUCTS): string[] =>
+  products.map((slug) => `${baseUrl}/demo/pharmacy/producto/${slug}.html`);
+
+/** Pages the crawler keeps in flight. Half of which page can take the heal; see `healFirstPages`. */
+export const DEMO_MAX_CONCURRENCY = 2;
+
+/**
+ * The pages a run may ask a heal question about, and the fixture recorded on each.
+ *
+ * A recorded answer is an index into the options a question offered, and for a
+ * heal question those options are **page-dependent**: `rankHealCandidates`
+ * scores a candidate whose value equals an earlier sample, so a page carrying a
+ * different set of prices or related products orders them differently.
+ * `heal/pharmacy` was recorded on amoxicilina, and replaying it on
+ * atorvastatina — the page with two price spans — answers a different question,
+ * which `RecordedChooser` refuses.
+ *
+ * So the batch is routed by the page it is healing, the way the out-of-stock
+ * price fixture already was. Until 2026-09-23 the demo instead rested on an
+ * unwritten invariant — amoxicilina must take the heal first — and which page
+ * the crawler happened to reach first decided whether it passed, about one
+ * full-suite run in three.
+ */
+export const HEAL_FIXTURE_BY_PAGE: Readonly<Record<string, string>> = {
+  "amoxicilina-500-mg": "heal/pharmacy",
+  "atorvastatina-20-mg": "heal/pharmacy-atorvastatina",
+  // The two pages with no price to find. Both are recorded on ibuprofeno: what
+  // is compared is the candidate, not the value, and these two pages offer the
+  // same candidates in the same order.
+  "ibuprofeno-400-mg": "heal/pharmacy-nostock",
+  "losartan-50-mg": "heal/pharmacy-nostock",
+};
+
+/**
+ * The pages that can be asked about *every* broken field, and so need a full
+ * four-question recording rather than the price-only one.
+ *
+ * The crawler holds `maxConcurrency` pages at once and opens the next one only
+ * after one of them has finished — healing, storing and all — so by the time
+ * page N+1 starts, a repair for every field is already in the template. Only
+ * the first `maxConcurrency` pages of the crawl order can be asked the whole
+ * batch.
+ *
+ * A later page can still be asked about *one* field, when the repair the first
+ * page found does not reach it: the two out-of-stock pages have no price to
+ * find, and atorvastatina's price sits behind a class no other page carries, so
+ * whichever of those two heals first leaves the other asking about price. That
+ * is why `HEAL_FIXTURE_BY_PAGE` is the authority and this is only the subset
+ * `tests/acceptance.test.ts` can check cheaply; a page outside the map is
+ * refused by name in `recordedChooser`, not answered from another page's
+ * recording.
+ */
+export function healFirstPages(products: readonly string[] = DEMO_PRODUCTS, maxConcurrency = DEMO_MAX_CONCURRENCY): string[] {
+  return products.slice(0, maxConcurrency);
+}
 
 const isHealBatch = (batch: Question[]): boolean => batch.some((q) => q.id.startsWith("heal."));
 
-/** Routes every batch to the recorded fixture the AE8 test uses: out-of-stock pages have no price candidate. */
+/** `fieldState` opens every heal question with `Healing on <url>`; the product page is the slug in it. */
+const HEALING_ON = /^Healing on \S*\/([^/\s]+)\.html(?:\n|$)/;
+
+function healingPage(batch: readonly Question[]): string | null {
+  const pages = new Set(batch.map((q) => HEALING_ON.exec(q.state)?.[1]).filter((slug): slug is string => slug !== undefined));
+  return pages.size === 1 ? [...pages][0]! : null;
+}
+
+/** Routes every batch to the recorded fixture the AE8 test uses: a heal batch by the page it is healing, everything else to the compile answers. */
 class RoutingRecordedChooser implements Chooser {
   readonly name = "recorded" as const;
   private readonly inner = new Map<string, RecordedChooser>();
@@ -103,10 +169,27 @@ class RoutingRecordedChooser implements Chooser {
   }
 }
 
-// Route by the known fixture page, not batch size: concurrent healing can leave
-// only price broken on an in-stock page, and no-stock pages contain related prices.
-function recordedChooser(): Chooser {
-  return new RoutingRecordedChooser((batch) => (isHealBatch(batch) && batch.every((q) => q.id === "heal.price" && /^Healing on \S+\/(?:ibuprofeno-400-mg|losartan-50-mg)\.html(?:\n|$)/.test(q.state)) ? "heal/pharmacy-nostock" : "heal/pharmacy"));
+/**
+ * Route by the page being healed, not by batch size: concurrent healing can
+ * leave only price broken on an in-stock page, and no-stock pages contain
+ * related prices, so the shape of the batch says nothing about which page it
+ * came from. A batch from a page nobody recorded is refused by name rather
+ * than answered from another page's recording.
+ */
+export function recordedChooser(): Chooser {
+  return new RoutingRecordedChooser((batch) => {
+    if (!isHealBatch(batch)) return "heal/pharmacy";
+    const page = healingPage(batch);
+    const fixture = page === null ? undefined : HEAL_FIXTURE_BY_PAGE[page];
+    if (fixture) return fixture;
+    throw new ConfigurationError(
+      `the demo has no recorded heal answers for ${page === null ? "an unidentified page" : `"${page}"`}, and a recording made on another product page answers a different question — ` +
+        `heal options are ordered by value, so they are page-dependent.\n` +
+        `  asked: ${batch.map((q) => q.id).join(", ")}\n` +
+        `  recorded: ${Object.keys(HEAL_FIXTURE_BY_PAGE).join(", ")}\n` +
+        `  Add the page to HEAL_FIXTURE_BY_PAGE in scripts/demo.ts and record tests/recorded/<fixture>/<question>.json for it.`,
+    );
+  });
 }
 
 function liveChooser(env: NodeJS.ProcessEnv): Chooser {
@@ -143,7 +226,8 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
   const actor = new Actor({ storageClient: storage });
   // Local init only: no platform env, no graceful-shutdown handlers; exit({ exit: false }) tears the client down.
   await actor.init({ storage, gracefulShutdown: false });
-  const urls = productUrls(server.baseUrl);
+  const urls = productUrls(server.baseUrl, options.products);
+  const maxConcurrency = options.maxConcurrency ?? DEMO_MAX_CONCURRENCY;
   const chooserName = options.live ? defaultChooser(env) : undefined;
   const input = parseInput({
     startUrls: urls,
@@ -188,7 +272,7 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
       env,
       storageDir: mkdtempSync(join(dir, "st-")),
       attended: false,
-      maxConcurrency: 2,
+      maxConcurrency,
       log: (message) => say(`  navvi: ${message}`),
     };
     const t0 = performance.now();

@@ -101,6 +101,48 @@ export interface RejectionRecord {
 }
 
 /**
+ * Another reading of the same fact, carrying **its own** source.
+ *
+ * It used to be a bare path, and the bare path was a silent assumption: that
+ * an alias is read exactly the way the binding is, so the binding's `source`,
+ * `match`, `selector`, `attr` and `entity` apply to it. For tier 2 that is
+ * provably true — `narrow` builds a candidate's aliases out of other leaves of
+ * the same flattened payload, so the binding's endpoint plus the alias path is
+ * a complete alternative — and for tier 1 it is false. `bindRole` collects
+ * every declaration of one role, and those are different kinds: a JSON-LD path
+ * rides in as `json-ld` with an `entity`, an OpenGraph property as `dom` with
+ * `meta[property=...]` and `attr: "content"`. Compiling the second under the
+ * first's source emits an alternative that can never resolve.
+ *
+ * So the compile refused to emit any of them, and `rationale.md` reported
+ * every tier-1 alias as "stated elsewhere, not compiled" — a fact about this
+ * record's shape being reported as a fact about the site. This type is what
+ * closes it: an alias says how to read itself, in the same words the binding
+ * uses, so `src/compile/proven.ts` can emit it without inventing anything.
+ *
+ * **Compatibility.** A manuscript written before this carries `aliases` as an
+ * array of strings. Nothing validates `Manuscript` with a schema, so an old
+ * file parses; `aliasesOf` in `src/reconcile/reconcile.ts` is the one reader
+ * and it accepts both, reading a bare string as the old assumption — the
+ * binding's own source — which is what the old compile did with it and is
+ * still right for the `network` case that was the only one it compiled.
+ */
+export interface FieldAlias {
+  /** Spelled as the binding's own `path` is spelled for this source. */
+  path: string;
+  /** The `FIELD_SOURCES` value an alternative for this alias has to carry. */
+  source: FieldSource;
+  /** For `network`: the endpoint the path is read out of. */
+  match?: string;
+  /** The script tag for `json-ld`, a real CSS selector for `dom`, the endpoint for `network`. */
+  selector?: string;
+  /** For `dom`: the attribute it reads; absent means the element's text. */
+  attr?: string;
+  /** For `json-ld` and microdata: the schema.org type the path is read from. */
+  entity?: string;
+}
+
+/**
  * One field's answer, with the path and every verdict behind it.
  *
  * `tier` absent means nothing cheap covered it and tier 3 was asked; `askModel`
@@ -123,8 +165,13 @@ export interface FieldRecord {
   entity?: string;
   /** The bound value on each binding sample, in sample order. */
   values?: TypedValue[];
-  /** Other paths carrying the same value; free alternatives for the compile. */
-  aliases: string[];
+  /**
+   * Other readings carrying the same value; free alternatives for the compile.
+   *
+   * Each one says how to read itself. See `FieldAlias`, and its note on what an
+   * older manuscript's bare strings mean.
+   */
+  aliases: FieldAlias[];
   because: string;
   askModel: boolean;
   rejected: RejectionRecord[];
@@ -196,8 +243,15 @@ export interface Obstacle {
    * next person to read the manuscript needs and that no other line states.
    * (2026-09-22, the first live run: three Store B shells read as three
    * Imperva interstitials and the whole investigation stopped.)
+   *
+   * `unsettled` is the run saying it did not finish measuring: the render
+   * budget ran out with the page still moving, or the navigation never
+   * arrived at all. What was captured is as far as navvi got and not a fact
+   * about the site. Not blocking — the run goes on with what it has — and it
+   * is the line that tells the reader of a thin manuscript that the harness
+   * was starved rather than that the site changed.
    */
-  kind: "consent" | "challenge" | "status" | "apology" | "shell" | "excluded" | "deferred";
+  kind: "consent" | "challenge" | "status" | "apology" | "shell" | "excluded" | "deferred" | "unsettled";
   url?: string;
   because: string;
   evidence?: string;

@@ -1,6 +1,6 @@
 import { isUsableResponse, newestUsableResponse } from "../browser/network-capture.js";
 import { bank, type Bank } from "../heuristics/index.js";
-import { declaresProduct } from "../heuristics/rules/investigate.js";
+import { declaresProduct } from "../heuristics/index.js";
 import type { TypedValue } from "../scraper/extract.js";
 import { bindField } from "./bind.js";
 import { classifyRun, recordCanary, settleDeferred, type ApologyOptions, type CanaryFingerprint, type PageResponse, type RunVerdict } from "./blocked.js";
@@ -8,7 +8,7 @@ import { coversSpec, readDeclared, type DeclaredSource } from "./declared.js";
 import { UNASKED, agree, answered, unservable, type Agreement, type Observation } from "../agree/agree.js";
 import { safeUrl, type CapturedResponse } from "./har.js";
 import { anchors, flatten, type Leaf } from "./leaves.js";
-import type { FieldRecord, InventoryRecord, Manuscript, Obstacle, RejectionRecord, RequestedField, SamplePickRecord, SourceRecord, TierRecord, VerdictLog } from "./manuscript.js";
+import type { FieldAlias, FieldRecord, InventoryRecord, Manuscript, Obstacle, RejectionRecord, RequestedField, SamplePickRecord, SourceRecord, TierRecord, VerdictLog } from "./manuscript.js";
 import { KIND_PRECEDENCE, acceptedRoles, resolutionOrder, roleOfDeclared, type DeclaredRole } from "./roles.js";
 import { NO_SHELLS_YET, bindable, type SampleChoice } from "./sample.js";
 
@@ -67,6 +67,22 @@ export interface Capture {
   html?: string | undefined;
   /** What the render had to get past: a consent dialog dismissed, a WAF that let it through. */
   obstacles?: readonly Obstacle[] | undefined;
+  /**
+   * Whether the render the capture was taken from ever finished.
+   *
+   * Optional, and absent is the honest answer for a capture imported from a
+   * HAR: nobody watched that page settle, so nobody may claim it did. The
+   * driver that renders live supplies it (`DrivenCapture` in
+   * `src/make/pages.ts`), and only `quiesced` means the capture holds the page
+   * rather than a frame of it.
+   *
+   * Declared structurally rather than imported. `Settle` is the page driver's
+   * type and the driver is an entry-layer module; a stage importing it would
+   * be an arrow pointing up. This is the part of it this module is allowed to
+   * act on — the discriminant and the excuse — and `DrivenCapture` widens it
+   * with the trend numbers for callers that can see them.
+   */
+  settle?: { outcome: "quiesced" | "capped" | "unreachable"; because?: string | undefined } | undefined;
 }
 
 /**
@@ -186,7 +202,26 @@ function byRole(sources: readonly DeclaredSource[], role: DeclaredRole): Declare
 interface DeclaredBinding {
   source: DeclaredSource;
   values: TypedValue[];
-  aliases: string[];
+  aliases: FieldAlias[];
+}
+
+/**
+ * A declared finding, as an alias of whatever was bound.
+ *
+ * Every field `DeclaredSource` already carries — the kind it rides in as, the
+ * selector that resolves it, the attribute, the entity — is exactly what an
+ * alternative for it needs, and tier 1 was throwing all of it away and keeping
+ * the path. An OpenGraph property and a JSON-LD path are read in completely
+ * different ways, and the record said only that they said the same thing.
+ */
+function aliasOfDeclared(source: DeclaredSource): FieldAlias {
+  return {
+    path: source.path,
+    source: source.source,
+    selector: source.selector,
+    ...(source.attr === undefined ? {} : { attr: source.attr }),
+    ...(source.entity === undefined ? {} : { entity: source.entity }),
+  };
 }
 
 /**
@@ -220,7 +255,7 @@ function bindRole(samples: readonly DeclaredSample[], role: DeclaredRole): Decla
   const chosen = shared[0];
   if (chosen === undefined) return undefined;
   const values = perSample.map((found) => found.find((source) => source.path === chosen.path && source.kind === chosen.kind)!.value);
-  return { source: chosen, values, aliases: shared.slice(1).map((source) => source.path) };
+  return { source: chosen, values, aliases: shared.slice(1).map(aliasOfDeclared) };
 }
 
 // ----------------------------------------------------------- the inventory
@@ -407,6 +442,8 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
    */
   const captures: Capture[] = [];
   let capturesTaken = false;
+  /** The first render that did not finish, in its own words, for `canaryBecause`. */
+  let unsettled: string | undefined;
   const takeCaptures = async (): Promise<Capture[]> => {
     if (capturesTaken) return captures;
     capturesTaken = true;
@@ -416,8 +453,27 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
       const taken = await capture(url);
       captures.push(taken);
       for (const obstacle of taken.obstacles ?? []) obstacles.push(obstacle);
-      // A rendered page is the better canary when the plain fetch was a shell:
-      // the fingerprint has to be of a page that was actually served.
+      /**
+       * A rendered page is the better canary when the plain fetch was a shell:
+       * the fingerprint has to be of a page that was actually served.
+       *
+       * **And it has to be of a whole one.** A canary taken off a half-drawn
+       * page fingerprints the frame navvi happened to catch, and every replay
+       * from then on compares a finished page against it and reports drift —
+       * a false "the site changed" filed for the life of the scraper, from one
+       * busy machine at compile time. Under Phase F's gate that false mismatch
+       * is also what licenses healing, so the cheapest possible mistake here
+       * buys a healer permission to recompile a working field.
+       *
+       * Refusing to record one is already this module's answer when the page
+       * was a shell — `canaryBecause` exists for exactly that — so an
+       * unfinished render takes the same road: no canary, and the sentence
+       * says the render was starved rather than that the site was empty.
+       */
+      if (taken.settle !== undefined && taken.settle.outcome !== "quiesced") {
+        unsettled ??= `${safeUrl(url)} ${taken.settle.because ?? `ended ${taken.settle.outcome}`}`;
+        continue;
+      }
       if (taken.html !== undefined && taken.html !== "") rendered.push({ url, status: 200, body: taken.html });
     }
     return captures;
@@ -836,7 +892,11 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
       record.match = endpointMatch(chosen);
       record.path = binding.path!;
       record.values = binding.values ?? [];
-      record.aliases = binding.aliases;
+      // A tier-2 alias is another leaf of the same flattened payload, so the
+      // endpoint it is read out of is the binding's. `bindField` deals in paths
+      // because that is all a payload has; the source is attached here, where
+      // the tier is known.
+      record.aliases = binding.aliases.map((path) => ({ path, source: "network" as const, match: endpointMatch(chosen) }));
       record.because = binding.because;
       record.askModel = false;
       boundKeys.add(chosen);
@@ -947,7 +1007,9 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
     ...(canary === undefined ? {} : { canary }),
     canaryBecause:
       canary === undefined
-        ? `no canary was recorded: none of the ${fetched.length} page(s) read was a page a reader was served — a fingerprint taken off a shell resolves against anything, and a canary that always resolves turns every future refusal into drift`
+        ? unsettled !== undefined
+          ? `no canary was recorded: the render did not finish (${unsettled}), so the only page that could have been fingerprinted was a frame of one — and a canary taken off a half-drawn page is a false "the site changed" filed against every replay from here on`
+          : `no canary was recorded: none of the ${fetched.length} page(s) read was a page a reader was served — a fingerprint taken off a shell resolves against anything, and a canary that always resolves turns every future refusal into drift`
         : `${safeUrl(canary.url)} fingerprinted: ${canary.words.length} words and ${canary.textChars} characters of text${canary.declaredProduct ? ", declaring a product" : ", declaring no product"}`,
     verdict: uncovered.length === 0 ? "covered" : "partial",
     because:
@@ -1054,7 +1116,15 @@ function takeByKeyNames(samples: readonly DeclaredSample[], field: RequestedFiel
   if (source.attr !== undefined) record.attr = source.attr;
   if (source.entity !== undefined) record.entity = source.entity;
   record.values = binding.values ?? [];
-  record.aliases = binding.aliases;
+  // Tier 1's aliases are whole declarations, not paths off one document: the
+  // binding may be a JSON-LD path and its alias an OpenGraph property, read
+  // through a different selector entirely. Each one is looked back up so it
+  // carries how to read itself; a path with no declaration behind it on the
+  // first sample is dropped rather than compiled under the binding's source.
+  record.aliases = binding.aliases
+    .map((path) => samples[0]!.sources.find((entry) => entry.path === path))
+    .filter((entry): entry is DeclaredSource => entry !== undefined)
+    .map(aliasOfDeclared);
   covered.push(field.name);
 }
 

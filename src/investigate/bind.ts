@@ -28,7 +28,17 @@ export interface Binding {
   /** The path the heuristics settled on, when they did. */
   path?: string;
   values?: TypedValue[];
-  /** Other paths carrying the same value as the bound one; free alternatives for the compile. */
+  /**
+   * Other paths carrying the same value as the bound one; free alternatives
+   * for the compile.
+   *
+   * Paths and not `FieldAlias`es, and deliberately: this function is handed a
+   * flat table of `{path, value}` and has no idea what a path is read through.
+   * The caller does — tier 2 knows the endpoint, tier 1 has the whole
+   * `DeclaredSource` — so the caller attaches the source. What used to happen
+   * instead was that nobody attached one and the compile assumed the binding's,
+   * which is false for tier 1 and is A6.
+   */
   aliases: string[];
   because: string;
   /**

@@ -1,0 +1,22 @@
+{
+  "id": "heal.price",
+  "kind": "choice",
+  "index": 0,
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "note": "main/article/aside/span.tachado = $ 12.990 — recorded offline on the atorvastatina v2 page: the options are this code's own offer, the index was answered by hand (no model ran)",
+  "options": [
+    "main/article/aside/span.tachado = $ 12.990",
+    "main/section/ul/li/span = $ 9.990",
+    "main/section/ul/li/span = $ 5.290",
+    "main/section/ul/li/span = $ 9.190",
+    "main/section/ul/li/span = $ 6.490",
+    "main/article/aside/span = $ 10.390",
+    "main/article/div/h1 = Atorvastatina 20 mg x 30 comprimidos",
+    "main/article/div/p/span = Laboratorio:",
+    "main/article/div/p/span = Abbott",
+    "main/article/div/p/span = Stock:",
+    "main/article/div/p/span = Disponible",
+    "main/article/div/p/span = SKU:"
+  ]
+}

@@ -95,6 +95,10 @@ describe("the two thresholds", () => {
    * the page moves — and it is dropped as a fallback, where it costs nothing
    * to drop and is only ever reached on the page whose markup already moved.
    */
+  // Reached through a real compile in `tests/compile-proven.test.ts` ("holds a
+  // dom alias behind a declared binding to the fallback bar"): a selector
+  // handed to `gateAlternative` here proves the policy, and proves nothing
+  // about whether anything in navvi can produce an alternative held to it.
   it("keeps a merely fragile selector as a sole reading and drops it as a fallback", () => {
     const selector = "article > div > div > div > div > div > span";
     const audit = auditSelector(selector);

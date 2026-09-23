@@ -1,7 +1,7 @@
 import type { FieldType } from "../input/schema.js";
 import type { TypedValue } from "../scraper/extract.js";
 import type { FieldSource } from "../scraper/schema.js";
-import type { Obstacle } from "../investigate/manuscript.js";
+import type { FieldAlias, Obstacle } from "../investigate/manuscript.js";
 
 /**
  * U4/U5: the argument, and the schema it proves.
@@ -57,8 +57,15 @@ export interface ObtainableField {
   entity?: string;
   /** The bound value on each binding sample, in sample order. */
   values: TypedValue[];
-  /** Other paths carrying the same value — free alternatives for the compile. */
-  aliases: string[];
+  /**
+   * Other readings carrying the same value — free alternatives for the compile.
+   *
+   * Each carries its own `source`, `selector`, `attr` and `entity`, the same
+   * shape the binding above it carries, so `src/compile/` can emit one without
+   * assuming it is read the way the binding is. It is not: a tier-1 binding may
+   * be a JSON-LD path and its alias an OpenGraph property on a `<meta>` element.
+   */
+  aliases: FieldAlias[];
   /** One line naming where it came from, for a reader who will not open the JSON. */
   where: string;
   /**
@@ -113,6 +120,12 @@ export interface NotObtainableField {
  * `telemetry.sessionId` (varying, never shown). Naming a session id as
  * available and letting the reader dismiss it is honest; guessing which key
  * names are noise is a word list nobody can check.
+ *
+ * `telemetry.sessionId` sorting last used to be the *whole* of that judgement:
+ * a bare arithmetic rank put it at the bottom and nothing anywhere said why a
+ * reader should dismiss it. A judgement with no recorded ground is the class of
+ * defect this repository keeps hitting, so the reason is now asked of the bank
+ * and carried on the row. See `machinery`.
  */
 export interface AvailableLeaf {
   match: string;
@@ -123,6 +136,23 @@ export interface AvailableLeaf {
   /** It is not the same value on every sample. */
   varies: boolean;
   evidence: LeafEvidence;
+  /**
+   * The bank's answer to "is this the machine talking to itself", when it had
+   * one.
+   *
+   * Present only when `machine-value-is-not-a-fact` **fired**: no page showed
+   * the value to a reader and every sample of it reads as a token, a clock or
+   * a build stamp. Absent means the rule abstained or was overridden, which is
+   * not the same claim as "this is a fact about the record" — the rule says so
+   * itself in `because` when it declines, and the row is ordered as if it had
+   * never been asked.
+   *
+   * It orders the list and it is the sentence a reader dismisses the row on.
+   * Nothing downstream drops a leaf for carrying it: the catalogue's whole
+   * point is that the client sees what the site offered, including the parts
+   * navvi thinks are bookkeeping.
+   */
+  machinery?: { heuristic: string; because: string; action: string };
   because: string;
 }
 
@@ -239,8 +269,8 @@ export interface TracedReading {
   outcome: TraceOutcome;
   /** The leaf that carried this value, for every outcome but `unaccounted`. */
   leaf?: string;
-  /** Other paths of the same endpoint carrying the same fact on every sample. */
-  aliases?: string[];
+  /** Other readings of the same endpoint carrying the same fact on every sample. */
+  aliases?: FieldAlias[];
   /** The field this became, for `split`. */
   emitted?: string;
   because: string;

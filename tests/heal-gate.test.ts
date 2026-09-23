@@ -15,12 +15,11 @@ import {
   judgePromotions,
   licenseToHeal,
   observeResolutions,
-  promoteFieldAlternative,
   type HealEvidence,
   type ResolutionTally,
 } from "../src/replay/heal.js";
 import { stateOf, transitionOf } from "../src/scraper/machine.js";
-import { SCRAPER_VERSION, cacheKey, validateScraper, type CompiledScraper } from "../src/scraper/schema.js";
+import { SCRAPER_VERSION, cacheKey, canaryOrigin, promoteFieldAlternative, validateScraper, type CompiledScraper } from "../src/scraper/schema.js";
 import { ScraperStore } from "../src/scraper/store.js";
 import { groupByTemplate } from "../src/template/index.js";
 import { startFixtureServer, type FixtureServer } from "./server.js";
@@ -283,12 +282,8 @@ describe("U9b: an alternative that keeps working outranks one that keeps failing
     expect(judgePromotions(scraperWith(2), tally)).toEqual([]);
   });
 
-  it("promotion cannot add, rename or reach past a field's alternatives", () => {
-    const scraper = scraperWith(2);
-    expect(() => promoteFieldAlternative(scraper, "nope", 1)).toThrow(/unknown field/);
-    expect(() => promoteFieldAlternative(scraper, "productName", 7)).toThrow(/unknown alternative/);
-    expect(promoteFieldAlternative(scraper, "productName", 0)).toBe(scraper);
-  });
+  // What a promotion may and may not do to a document is a merge rule and is
+  // covered where the other three are, in `tests/merge.test.ts`.
 });
 
 // ------------------------------------------------- U9c, end to end in a run
@@ -403,6 +398,57 @@ describe("U9c through a real run: the canary is what makes a total collapse repa
     expect(refusal).toContain(stateOf("refused")!.what);
     expect(refusal).toContain(transitionOf("stop-filling")!.id);
     expect(refusal).not.toMatch(/selector stopped matching/i);
+  }, 60_000);
+
+  /**
+   * The migration. `seed` writes the document a scraper had before 2026-09-23:
+   * no `canary` key at all. A cache hit never recompiles, so without this the
+   * gap would never close and every scraper already on disk would be
+   * permanently unable to separate a redesign from a refusal — which is the
+   * whole question the field was added to answer.
+   *
+   * The warrant is the clean page: every field resolved and every value passed
+   * its fingerprint check, so the site served this run a real page, which is
+   * the same evidence the compile-time recording rests on.
+   */
+  it("a scraper written before the canary field acquires one off the first page it replays clean", async () => {
+    const actor = new Actor({ storageClient: new MemoryStorage({ localDataDirectory: mkdtempSync(join(dir, "storage-")), persistStorage: false }) });
+    const urls = productUrls();
+    const { store, key } = await seed(actor, urls);
+    expect(canaryOrigin((await store.get(key))!)).toBe("unrecorded");
+
+    server.switchDemo("v1");
+    const asked: string[][] = [];
+    const log: string[] = [];
+    const summary = await runCrawl(input({ startUrls: urls }), {
+      actor,
+      chooser: new RecordedChooser({ fixture: "crawler/empty" }),
+      env: {},
+      storageDir: mkdtempSync(join(dir, "st-")),
+      attended: false,
+      maxConcurrency: 1,
+      healer: async ({ failure }) => {
+        asked.push(failure.kind === "fields" ? [...failure.fields] : [`step ${failure.stepIndex}`]);
+        return { healed: false, reason: "the spy healer repairs nothing" };
+      },
+      log: (message) => log.push(message),
+    });
+
+    // Nothing drifted, so nothing was repaired and nothing was asked.
+    expect(asked).toEqual([]);
+    expect(summary.unhealed).toBe(0);
+
+    const stored = await store.get(key);
+    expect(canaryOrigin(stored!)).toBe("recorded");
+    // Thin fingerprints are refused, so a recorded one carries enough words to fail.
+    expect(stored!.canary!.words.length).toBeGreaterThanOrEqual(8);
+    expect(log.some((line) => line.startsWith("canary recorded for"))).toBe(true);
+    // And it is on the document, not beside it: nothing else was written under
+    // a key of its own.
+    const raw = await actor.openKeyValueStore("scraper-cache");
+    const keys: string[] = [];
+    await raw.forEachKey((key) => { keys.push(key); });
+    expect(keys.filter((k) => k.startsWith("canary-"))).toEqual([]);
   }, 60_000);
 
   it("the same run with a canary that still resolves reaches the healer with every collapsed field, so the gate is the canary and not the fill counts", async () => {

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Ficha</title></head>
+<body>
+<h1>Catalogo</h1>
+<div id="progress"></div>
+<script>
+/*
+ * A synthetic stand-in for the page the harness cannot finish measuring: it
+ * paints, and keeps painting, and never stops.
+ *
+ * It is the machine being busy rather than the site being slow — the shape of
+ * the 2026-09-23 run that captured 3,219 characters of an 11,190 character
+ * page while `npm test` ran beside it — reproduced the only way a unit test
+ * may reproduce it: by making the page outlast the budget rather than by
+ * making the budget take 25 real seconds. The driver under test is opened with
+ * a `settleCapMs` of a couple of seconds, and STEP_MS is shorter than one
+ * settle poll, so no two consecutive polls can read the same page and the
+ * settle can only end one way.
+ *
+ * It paints from a timer and fetches nothing, which is deliberate twice over:
+ * `goto(waitUntil: "networkidle")` has to be able to resolve — a page that
+ * keeps the network busy would be a test of the navigation timeout instead —
+ * and the payload trend has to stay flat so the capped settle's evidence says
+ * text moved and payloads did not.
+ *
+ * Nothing here is copied from a real site. The product is invented.
+ */
+var STEP_MS = 120;
+var painted = 0;
+
+function paint() {
+  painted += 1;
+  var line = document.createElement("p");
+  line.textContent = "Cargando la ficha del producto, paso " + painted + ".";
+  document.getElementById("progress").appendChild(line);
+  setTimeout(paint, STEP_MS);
+}
+
+setTimeout(paint, 50);
+</script>
+</body>
+</html>

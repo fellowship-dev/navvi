@@ -495,8 +495,18 @@ describe("crawler runs", () => {
     const afterTwo = await datasetItems(actor);
     expect(afterTwo.at(-1)).toMatchObject({ who: "customer", _source: accountUrls[0] });
 
-    const three = await runCrawl(fixtureInput({ startUrls: accountUrls, mode: "record", fields: F("who"), profile: "local", freshProfile: true }), makeDeps(dir, actor, chooser));
+    // A discarded profile means a logged-out page, which means `#who` reads
+    // nothing, which means the run asks to heal it. That was always true and
+    // was never visible: the `crawler/empty` fixture refuses every question,
+    // and until 2026-09-23 the refusal was swallowed inside `heal`. A healer
+    // that declines keeps this test about the profile — the subject — and
+    // leaves the run drifting for the reason the test names.
+    const three = await runCrawl(
+      fixtureInput({ startUrls: accountUrls, mode: "record", fields: F("who"), profile: "local", freshProfile: true }),
+      makeDeps(dir, actor, chooser, { healer: async () => ({ healed: false, reason: "a logged-out page has nothing to bind" }) }),
+    );
     expect(three.status).toBe("drift");
+    expect(three.unhealed).toBe(1);
     expect((await datasetItems(actor)).at(-1)).toMatchObject({ who: null });
 
     // the capture saw the crawler's own log lines, so a leak would have shown up here

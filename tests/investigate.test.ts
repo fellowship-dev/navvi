@@ -325,4 +325,61 @@ describe("tier 2 — an endpoint one render never asked for", () => {
     expect(tier2(manuscript).because).not.toContain("never asked it");
     for (const source of payloads) expect(source.because).not.toContain("got no answer");
   });
+
+  /**
+   * A1, deferred by months and one line wide.
+   *
+   * The canary is fingerprinted off the render, and the only question asked of
+   * that render was whether it produced any bytes at all. A page caught
+   * half-drawn produces plenty. Its fingerprint then sits in `scraper.json` for
+   * the life of the scraper, every later replay compares a finished page
+   * against it, and every one of them reports drift — a false "the site
+   * changed" bought with one busy machine at compile time. Under Phase F's
+   * gate that false mismatch is also what licenses healing, so the cheapest
+   * mistake available here ends in a healer recompiling a field that worked.
+   *
+   * The plain fetches in this fixture are shells, so the render is the only
+   * page that could be fingerprinted: what these two tests separate is
+   * "nothing here was a page a reader was served" from "navvi did not stay
+   * long enough to find out".
+   */
+  describe("the canary, and a render that did not finish", () => {
+    const rendered = (index: number): string => `<html><body><h1>${NAMES[index]}</h1><p>${TEXT[index]}</p></body></html>`;
+
+    async function withSettle(settle: Capture["settle"]): Promise<Manuscript> {
+      const base = capturesOf(undefined);
+      const captures = Object.fromEntries(
+        urls.map((url, index) => [url, { ...base[url]!, html: rendered(index), ...(settle === undefined ? {} : { settle }) } satisfies Capture]),
+      );
+      const sources: Sources = {
+        fetch: (url: string) => Promise.resolve({ url, status: 200, body: pages[url] ?? "" }),
+        capture: (url: string) => Promise.resolve(captures[url] ?? { responses: [] }),
+      };
+      return investigate({ site: "store-b.example", fields: FIELDS, sample, sources, now: new Date("2026-09-23T18:00:00.000Z") });
+    }
+
+    it("fingerprints a render that settled", async () => {
+      const manuscript = await withSettle({ outcome: "quiesced" });
+      expect(manuscript.canary).toBeDefined();
+      expect(manuscript.canaryBecause).toContain("fingerprinted");
+    });
+
+    it("records no canary off a capped render, and says the render was starved rather than that the page was empty", async () => {
+      const manuscript = await withSettle({ outcome: "capped", because: "the text was still growing (3,219 to 11,190 characters) when the budget ran out" });
+
+      expect(manuscript.canary, "a fingerprint of a frame is worse than no fingerprint: it is wrong on every replay from here on").toBeUndefined();
+      expect(manuscript.canaryBecause).toContain("the render did not finish");
+      expect(manuscript.canaryBecause).toContain("the text was still growing");
+      // And it is not the shell sentence: nothing here was empty.
+      expect(manuscript.canaryBecause).not.toContain("was a page a reader was served");
+    });
+
+    it("keeps the shell sentence when the render finished and there was simply nothing to fingerprint", async () => {
+      // No `settle` at all — a capture imported from a HAR, where nobody
+      // watched the page and nobody may claim it settled either way.
+      const manuscript = await withSettle(undefined);
+      expect(manuscript.canary).toBeDefined();
+      expect(manuscript.canaryBecause).not.toContain("the render did not finish");
+    });
+  });
 });

@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { bank } from "../src/heuristics/index.js";
-import { visibleText } from "../src/heuristics/rules/investigate.js";
+import { bank, visibleText } from "../src/heuristics/index.js";
 import type { Capture, Sources } from "../src/investigate/investigate.js";
 import { INVENTORY_MAX_LEAVES, investigate } from "../src/investigate/investigate.js";
 import { render, type Manuscript, type RequestedField } from "../src/investigate/manuscript.js";
@@ -163,7 +162,11 @@ describe("StoreA — the run stops at tier 1", () => {
     expect(field(manuscript, "productName").path).toBe("name");
     expect(field(manuscript, "productName").source).toBe("json-ld");
     expect(field(manuscript, "productName").entity).toBe("Product");
-    expect(field(manuscript, "productName").aliases).toContain("og:title");
+    expect(field(manuscript, "productName").aliases.map((alias) => alias.path)).toContain("og:title");
+    // A6: an alias carries how it is read, not just what it is called. Before,
+    // `aliases` was a bare `string[]` and a tier-1 alias could not compile at
+    // all, because nothing said which selector to read it from.
+    expect(field(manuscript, "productName").aliases.find((alias) => alias.path === "og:title")).toMatchObject({ source: "dom", selector: 'meta[property="og:title"]' });
     expect(field(manuscript, "sku").path).toBe("sku");
     // The two prices are the ones the committed scraper was reading a seasonal
     // CSS class for, and only the `product:` namespace spells them apart.
@@ -365,7 +368,10 @@ describe("Store B — tier 1 is skipped as a shell and the payload answers", () 
     expect(field(manuscript, "listPrice").source).toBe("network");
     expect(field(manuscript, "listPrice").match).toBe("catalog-svc/products/detail");
     expect(field(manuscript, "promoPrice").path).toBe("productData.prices[price-sale-std]");
-    expect(field(manuscript, "promoPrice").aliases).toContain("productData.appliedPromotions[price-sale-std].promotionalPrice");
+    expect(field(manuscript, "promoPrice").aliases.map((alias) => alias.path)).toContain("productData.appliedPromotions[price-sale-std].promotionalPrice");
+    // A tier-2 alias carries the endpoint it was read from, which is the one
+    // thing a compiled alternative cannot be built without.
+    expect(field(manuscript, "promoPrice").aliases.every((alias) => alias.source === "network" && alias.match !== undefined)).toBe(true);
     expect(field(manuscript, "productName").path).toBe("productData.name");
     expect(tier(manuscript, 2).outcome).toBe("ran");
     expect(tier(manuscript, 2).covered.sort()).toEqual(["listPrice", "productName", "promoPrice"]);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { captureJson, extractCaptured, pickResponse, readPath, type CapturedResponse } from "../src/browser/network-capture.js";
+import { captureJson, describeSkips, extractCaptured, pickResponse, readPath, type CapturedResponse } from "../src/browser/network-capture.js";
 
 /**
  * Tier 2 of the extraction cascade, and the thing that settles Store B.
@@ -146,5 +146,102 @@ describe("waiting for body reads", () => {
     });
     await capture.settled();
     expect(capture.responses).toHaveLength(0);
+    // The read failed, and the capture says so rather than leaving a reader to
+    // wonder whether the page ever called the endpoint.
+    expect(capture.skipped.unreadable).toBe(1);
   });
 })
+
+/**
+ * An empty capture has two readings, and until these counters existed they
+ * were the same observation: the page never called anything that matched, or
+ * it called thirty things and the content-type filter threw all of them away.
+ *
+ * It is not a hypothetical. `make/pages.ts` captures with `match: /./`, so
+ * every document, stylesheet and image a page fetches arrives here and is
+ * discarded; the 304 of commit 89e9633 -- a revalidated response carries no
+ * `content-type` and so no payload -- left through this door in silence.
+ */
+describe("what the capture threw away", () => {
+  const fakePage = () => {
+    const handlers: ((r: unknown) => void)[] = [];
+    return {
+      page: { on: (_event: string, fn: (r: unknown) => void) => handlers.push(fn) },
+      emit: (r: unknown) => handlers.forEach((h) => h(r)),
+    };
+  };
+  /** A response reduced to what the capture touches. `headers` with no `content-type` is a 304. */
+  const response = (url: string, headers: Record<string, string>, body: unknown = {}, status = 200) => ({
+    url: () => url,
+    status: () => status,
+    headers: () => headers,
+    json: () => Promise.resolve(body),
+  });
+
+  it("counts a refused response by the content-type it carried, and a 304 as none", async () => {
+    const { page, emit } = fakePage();
+    const capture = captureJson(page as never, { match: "api.example.com" });
+
+    emit(response("https://api.example.com/page", { "content-type": "text/html; charset=utf-8" }));
+    emit(response("https://api.example.com/page", { "content-type": "text/html" }));
+    emit(response("https://api.example.com/logo.svg", { "content-type": "image/svg+xml" }));
+    // 304 Not Modified: no content-type, no body. The defect that cost a day.
+    emit(response("https://api.example.com/detail/1", {}, undefined, 304));
+    // Not a match at all: never the capture's business, never counted.
+    emit(response("https://cdn.elsewhere.com/x.css", { "content-type": "text/css" }));
+    await capture.settled();
+
+    expect(capture.responses).toHaveLength(0);
+    // The charset parameter is stripped, so one type is not two.
+    expect({ ...capture.skipped.contentType }).toEqual({ "text/html": 2, "image/svg+xml": 1, "": 1 });
+    expect(capture.skipped.overLimit).toBe(0);
+  });
+
+  it("counts a match that arrived after the limit was full, and does not count a non-match", async () => {
+    const { page, emit } = fakePage();
+    const capture = captureJson(page as never, { match: "api.example.com", limit: 1 });
+
+    emit(response("https://api.example.com/detail/1", { "content-type": "application/json" }, { a: 1 }));
+    await capture.settled();
+    emit(response("https://api.example.com/detail/2", { "content-type": "application/json" }, { a: 2 }));
+    emit(response("https://cdn.elsewhere.com/detail/3", { "content-type": "application/json" }, { a: 3 }));
+    await capture.settled();
+
+    expect(capture.responses).toHaveLength(1);
+    expect(capture.skipped.overLimit).toBe(1);
+  });
+
+  it("describes the drops in one sentence, and says nothing when there was nothing to say", async () => {
+    const { page, emit } = fakePage();
+    const capture = captureJson(page as never, { match: "api.example.com" });
+    expect(describeSkips(capture.skipped)).toBeNull();
+
+    for (let i = 0; i < 12; i += 1) emit(response(`https://api.example.com/${i}`, { "content-type": "text/html" }));
+    emit(response("https://api.example.com/304", {}, undefined, 304));
+    await capture.settled();
+
+    expect(describeSkips(capture.skipped)).toBe("dropped 13 for want of a JSON content-type (text/html 12, none 1)");
+  });
+
+  it("does not let a server with many content-types grow the map without limit", async () => {
+    const { page, emit } = fakePage();
+    const capture = captureJson(page as never, { match: "api.example.com" });
+    for (let i = 0; i < 40; i += 1) emit(response(`https://api.example.com/${i}`, { "content-type": `application/x-${i}` }));
+    await capture.settled();
+
+    const counts = { ...capture.skipped.contentType };
+    expect(Object.keys(counts).length).toBeLessThanOrEqual(13);
+    expect(Object.values(counts).reduce((sum, n) => sum + n, 0)).toBe(40);
+    expect(counts.other).toBe(28);
+  });
+
+  it("keeps a header named __proto__ out of the prototype", async () => {
+    const { page, emit } = fakePage();
+    const capture = captureJson(page as never, { match: "api.example.com" });
+    emit(response("https://api.example.com/1", { "content-type": "__proto__" }));
+    await capture.settled();
+
+    expect(capture.skipped.contentType.__proto__).toBe(1);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+});

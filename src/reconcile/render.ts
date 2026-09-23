@@ -181,9 +181,13 @@ export function render(reconciliation: Reconciliation): string {
     const aliased = reconciliation.obtainable.filter((field) => field.aliases.length > 0);
     if (aliased.length > 0) {
       out.push("");
-      out.push("Free alternatives - other paths carrying the same value on every sample, which the compile may use without asking anybody:");
+      // Each alias names the source it is read through, because that is what
+      // decides whether it can be compiled at all - a JSON-LD path and an
+      // OpenGraph property say the same thing and are resolved in completely
+      // different ways.
+      out.push("Free alternatives - other readings carrying the same value on every sample, which the compile may use without asking anybody:");
       out.push("");
-      for (const field of aliased) out.push(`- \`${field.field}\`: ${field.aliases.map((alias) => `\`${alias}\``).join(", ")}`);
+      for (const field of aliased) out.push(`- \`${field.field}\`: ${field.aliases.map((alias) => `${alias.source} \`${alias.path}\``).join(", ")}`);
     }
   }
 
@@ -214,12 +218,26 @@ export function render(reconciliation: Reconciliation): string {
   if (reconciliation.available.length === 0) {
     out.push("Nothing.");
   } else {
-    out.push("| leaf | sample values | shown to a reader | varies |");
-    out.push("| --- | --- | --- | --- |");
+    out.push("| leaf | sample values | shown to a reader | varies | machinery |");
+    out.push("| --- | --- | --- | --- | --- |");
     for (const leaf of reconciliation.available) {
       const where = leaf.match === "" ? `\`${leaf.path}\`` : `${leaf.match} \`${leaf.path}\``;
       const anchored = leaf.anchored === undefined ? "not asked" : leaf.anchored ? "yes" : "no";
-      out.push(`| ${cell(where)} | ${cell(leaf.values.map(show).join(", "))} | ${anchored} | ${leaf.varies ? "yes" : "no"} |`);
+      const machinery = leaf.machinery === undefined ? "-" : `\`${leaf.machinery.heuristic}\``;
+      out.push(`| ${cell(where)} | ${cell(leaf.values.map(show).join(", "))} | ${anchored} | ${leaf.varies ? "yes" : "no"} | ${machinery} |`);
+    }
+    const machinery = reconciliation.available.filter((leaf) => leaf.machinery !== undefined);
+    if (machinery.length > 0) {
+      out.push("");
+      // The rows at the bottom of that table used to get there by arithmetic
+      // and carry no sentence a client could disagree with. These are the ones
+      // a rule put there, with what it saw - and navvi still lists them, because
+      // the catalogue's point is that the client sees what the site offered.
+      out.push("The last rows are there because a rule said so, not because the count came out low:");
+      out.push("");
+      for (const leaf of machinery) {
+        out.push(`- \`${leaf.path}\` - ${leaf.machinery!.because}. ${leaf.machinery!.action}`);
+      }
     }
   }
 

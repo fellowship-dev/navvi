@@ -485,7 +485,7 @@ export function judgeAlternatives(sample: readonly UrlAlternatives[], options: D
 
       const forms = answered.map((values) => values.map((entry) => formOf(entry.value)));
       if (forms.some((reading) => new Set(reading).size < 2)) continue;
-      if (new Set(forms.map((reading) => reading.join(" "))).size > 1) continue;
+      if (new Set(forms.map((reading) => reading.join("\x00"))).size > 1) continue;
       disagreedOn++;
       if (first === undefined) {
         first = answered[0]!;

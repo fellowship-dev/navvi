@@ -40,12 +40,15 @@ import { startFixtureServer, type FixtureServer } from "./server.js";
  * payload-bound, replayed through the verify stage against pages that state
  * their prices nowhere else, reports the fill it achieved.
  *
- * The contradiction was not one. `determinism` cannot report a fill: its
- * `readOn` counts the presence of a field's *key*, `extractPage` null-fills
- * every compiled field, and a replay that reads nothing therefore lands as
- * `held` on every field with verdict `stable`. Both stages had measured the
- * same nothing and only `verify` could say so. `tests/make.test.ts` covers
- * that half, where the whole driver runs and the transcript is the assertion.
+ * The contradiction was not one. `determinism` was judging a null-filled
+ * reading: its `readOn` counts `field in item`, `extractPage` null-fills every
+ * compiled field so a row has every requested column, and a replay that read
+ * nothing therefore landed as `held` on every field with verdict `stable`.
+ * Both stages had measured the same nothing and only `verify` could say so.
+ * `readValues` is what the determinism stage is handed now, so a field nothing
+ * resolved is absent from the reading rather than null in it, and `readOn` is
+ * a count of answers. `tests/make.test.ts` covers that half, where the whole
+ * driver runs and the transcript is the assertion.
  */
 
 const NOW = new Date("2026-09-23T12:00:00.000Z");

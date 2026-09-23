@@ -82,6 +82,7 @@ export interface CliArgs {
   sample: number | undefined;
   /** U11: how many times each sampled URL is read by the determinism stage. */
   replays: number | undefined;
+  settleCapMs: number | undefined;
   /**
    * U11: run only the stages that open nothing. A stage that would need a page
    * is `skipped` with that reason rather than run against no evidence, which
@@ -125,7 +126,7 @@ const VALUE_FLAGS = [
   "--mode", "--fields", "--goal", "--from-url", "--out", "--max-pages", "--max-items", "--detail-fields", "--browser", "--profile",
   "--allow-domain", "--allow-private-host", "--secret", "--secrets-file", "--allow-mutation", "--script-id", "--chooser", "--answers",
   "--resume", "--agent-mode", "--notify", "--storage", "--decider", "--writer", "--decider-transport", "--rubric", "--rubrics-file",
-  "--work", "--answer", "--sample", "--replays",
+  "--work", "--answer", "--sample", "--replays", "--settle-cap",
 ] as const;
 
 function isUrl(value: string): boolean {
@@ -189,6 +190,7 @@ export function defaultArgs(): CliArgs {
     answer: [],
     sample: undefined,
     replays: undefined,
+    settleCapMs: undefined,
     offline: false,
     force: false,
     agentMode: undefined,
@@ -349,6 +351,9 @@ function apply(args: CliArgs, flag: (typeof VALUE_FLAGS)[number], value: string)
     case "--replays":
       args.replays = positiveInt(flag, value);
       break;
+    case "--settle-cap":
+      args.settleCapMs = positiveInt(flag, value);
+      break;
     case "--agent-mode":
       args.agentMode = oneOf(flag, value, AGENT_MODES);
       break;
@@ -407,11 +412,15 @@ make (the driver)
   --work <dir>              Where the artifacts and the ledger live. Required.
   --answer <key=value>      Answer an open question, by its id or by what it is about
                             (fields, inputs, target, entity, constraints.<name>). Repeatable.
-                            --answer fields=a,b:money,c:boolean declares column types the spec
-                            has no room for. A key naming no part of a spec is an error, never
-                            a silently ignored answer.
+                            --answer fields=a,b:money,c:boolean declares each column's type on
+                            the spec's own field list, so stock:boolean and stock:integer are
+                            two different asks. A key naming no part of a spec is an error,
+                            never a silently ignored answer.
   --sample <n>              How many URLs the compile sample spans.
   --replays <n>             How many times the determinism stage reads each sampled URL.
+  --settle-cap <ms>         How long one visit may wait for a page to stop changing
+                            (default 25000). A visit that runs out says so rather
+                            than reporting the half-drawn page as the site.
   --offline                 Run only the stages that open nothing; the rest report why they were
                             skipped rather than running against no evidence.
   --force                   Re-run every stage, and overwrite an artifact edited by hand since

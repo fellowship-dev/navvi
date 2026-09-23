@@ -1,5 +1,5 @@
 import { bank, type Bank } from "../heuristics/index.js";
-import { declaresProduct } from "../heuristics/rules/investigate.js";
+import { declaresProduct } from "../heuristics/index.js";
 import type { PageResponse } from "./blocked.js";
 import type { UrlProbe } from "./sample.js";
 

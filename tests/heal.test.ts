@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { Actor } from "apify";
 import { MemoryStorage } from "crawlee";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { ModelUnavailableError } from "../src/billing/budget.js";
-import type { Answer, Chooser, ChooserUsage, Question } from "../src/chooser/chooser.js";
+import { BudgetExhaustedError, ModelUnavailableError, NeedsHumanError } from "../src/billing/budget.js";
+import { InvalidAnswerError, StateTooLargeError, type Answer, type Chooser, type ChooserUsage, type Question } from "../src/chooser/chooser.js";
 import { RecordedChooser } from "../src/chooser/recorded.js";
 import { LIMITS, parseInput, type RunInput } from "../src/input/schema.js";
 import { runCrawl, type CrawlDeps, type HealerHook, type NavigatorHook } from "../src/replay/crawler.js";
@@ -245,47 +245,108 @@ describe("field healing (AE8, R17, R31, R32, R33)", () => {
     expect(await datasetItems(actor)).toHaveLength(LIMITS.healingEvents);
   });
 
-  it("R19: a chooser error during healing logs a warning, counts the page unhealed and the crawl goes on", async () => {
-    const actor = makeActor();
-    const urls = productUrls().slice(0, 3);
-    const key = keyFor(urls, { fields: ["name", "price"], profile: "store" });
-    const store = await ScraperStore.open({ actor });
-    await store.put(
-      seeded({
-        ...key,
-        entry: { mode: "direct", url: urls[0]! },
-        fields: {
-          name: { alternatives: [{ selector: "h1.producto-nombre", fingerprint: { samples: ["x"], shape: "text" } }] },
-          price: { alternatives: [{ selector: "span.no-such-price", fingerprint: { samples: ["$ 1"], shape: "money" } }] },
-        },
-      }),
-    );
-    const down: Chooser = {
+  /**
+   * R19 is about a page, and the four errors below are about the run.
+   *
+   * The rule as written — "a chooser failure skips healing; the page counts as
+   * unhealed and the crawl goes on" — was enforced by catching everything, and
+   * the cost was the run reporting the wrong thing about itself. Measured on
+   * this fixture: a `BudgetExhaustedError` thrown at the healer came back
+   * `drift`, which says the site changed. It had not; navvi had run out of
+   * money to ask about it. Where only some pages drift, `summaryOf` reads
+   * `succeeded` instead — it calls a run succeeded unless every row it pushed
+   * had a null in it — so the same swallow reads as two different lies
+   * depending on how much of the run it hit. This suite asserted that
+   * behaviour until 2026-09-23; it now asserts the opposite, because a status
+   * union exists to say which of those things happened.
+   *
+   * What still skips healing is a chooser failure that is not a statement
+   * about the run: a timeout, a Playwright error, anything with no run status
+   * attached. That is the last case below and it is the one R19 was written
+   * for.
+   */
+  describe("R19: which chooser failures skip healing, and which end the run", () => {
+    /** A chooser that answers everything except a heal batch, which it fails in a named way. */
+    const failing = (thrown: unknown): Chooser => ({
       name: "recorded",
       async ask(batch) {
-        if (isHealBatch(batch)) throw new ModelUnavailableError("chooser down during healing");
+        if (isHealBatch(batch)) throw thrown;
         return batch.map((q) => ({ id: q.id, index: null }));
       },
       usage: () => ({ chooser: "recorded", questions: 0, textQuestions: 0, batches: 0, inputTokens: 0, outputTokens: 0, waitMs: 0, costUsd: 0, zeroDataRetention: "not_applicable" }),
-    };
-    const logs: string[] = [];
-    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
-      logs.push(String(chunk));
-      return true;
     });
-    try {
-      const summary = await runCrawl(input({ startUrls: urls, mode: "record", fields: F("name", "price") }), makeDeps(actor, down));
+
+    /** Three product pages whose `price` selector matches nothing, so every page asks to be healed. */
+    async function driftingRun(chooser: Chooser) {
+      const actor = makeActor();
+      const urls = productUrls().slice(0, 3);
+      const key = keyFor(urls, { fields: ["name", "price"], profile: "store" });
+      const store = await ScraperStore.open({ actor });
+      await store.put(
+        seeded({
+          ...key,
+          entry: { mode: "direct", url: urls[0]! },
+          fields: {
+            name: { alternatives: [{ selector: "h1.producto-nombre", fingerprint: { samples: ["x"], shape: "text" } }] },
+            price: { alternatives: [{ selector: "span.no-such-price", fingerprint: { samples: ["$ 1"], shape: "money" } }] },
+          },
+        }),
+      );
+      const logs: string[] = [];
+      const summary = await runCrawl(
+        input({ startUrls: urls, mode: "record", fields: F("name", "price") }),
+        makeDeps(actor, chooser, { log: (message) => logs.push(message) }),
+      );
+      return { summary, logs, actor };
+    }
+
+    /**
+     * Every error that names a run status ends the run under that status.
+     * `InvalidAnswerError` appears in the shape it actually arrives in:
+     * `BaseChooser.fail` wraps it as the `cause` of a `ModelUnavailableError`,
+     * so no chooser in this repository ever throws it bare.
+     */
+    it.each([
+      ["a budget that ran out", () => new BudgetExhaustedError("chooserInputTokens", 1_000), "budget_exhausted"],
+      ["a model that is unavailable", () => new ModelUnavailableError("chooser down during healing"), "model_unavailable"],
+      ["an answer outside the offered indices", () => new ModelUnavailableError("chooser answered outside the offered indices twice", { cause: new InvalidAnswerError([{ id: "heal.price", reason: "no answer" }]) }), "model_unavailable"],
+      ["a person who has to be asked", () => new NeedsHumanError("a human has to pick"), "needs_human"],
+    ])("%s ends the run, rather than counting three pages unhealed and calling it succeeded", async (_name, make, status) => {
+      const { summary, actor } = await driftingRun(failing(make()));
+      expect(summary.status).toBe(status);
+      // Whatever rows were already claimed still go out — the run stops, it
+      // does not retract — but the status no longer says they are the answer.
+      expect((await datasetItems(actor)).length).toBeLessThanOrEqual(3);
+    });
+
+    /**
+     * The fifth of the family, and the one that is not a `NavviError`:
+     * `StateTooLargeError` extends `Error`, so "rethrow NavviError" misses it.
+     * It is navvi building a question the backend will not take, which is a
+     * fault in navvi and not a fact about the site, so the run stops and the
+     * error is rethrown the way a `ConfigurationError` is.
+     */
+    it("a question too large for the backend ends the run instead of reading as drift", async () => {
+      await expect(driftingRun(failing(new StateTooLargeError("heal.price", 400_000, 200_000)))).rejects.toThrow(/400000 characters/);
+    });
+
+    it("a chooser failure with no run status attached still skips healing and the crawl goes on", async () => {
+      // R19's own case: a timeout says nothing about the budget, the model or
+      // the site. The page is unhealed, the other columns still go out.
+      const { summary, logs, actor } = await driftingRun(failing(new Error("chooser timed out")));
       expect(summary.requests.record).toBe(3);
       expect(summary.items).toBe(3);
       expect(summary.unhealed).toBe(3);
       expect(summary.healingEvents).toEqual([]);
-      expect(summary.status).not.toBe("model_unavailable");
-      expect(logs.some((l) => /healing skipped/i.test(l) && /chooser down/.test(l))).toBe(true);
+      // `drift` and not `succeeded`: every row this fixture pushes has a null
+      // price, which is what `summaryOf` reads as a run that drifted. The
+      // point of the case is that the crawl finished and the rows went out,
+      // not the word.
+      expect(summary.status).toBe("drift");
+      expect(logs.some((l) => /healing skipped/i.test(l) && /chooser timed out/.test(l))).toBe(true);
       for (const row of await datasetItems(actor)) expect(row).toMatchObject({ price: null });
       expect((await datasetItems(actor))[0]!.name).not.toBeNull();
-    } finally {
-      stderr.mockRestore();
-    }
+    });
   });
 });
 

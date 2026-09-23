@@ -4,11 +4,13 @@ import { fileURLToPath } from "node:url";
 import type { Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { launch, type LaunchedBrowser } from "../src/browser/launch.js";
-import { RecordedChooser } from "../src/chooser/recorded.js";
+import type { Chooser } from "../src/chooser/chooser.js";
+import { RecordedChooser, RecordedOptionsMismatchError } from "../src/chooser/recorded.js";
 import { compile, type CompileOptions } from "../src/compile/index.js";
-import { isFieldHealingEvent } from "../src/replay/heal.js";
+import type { HealOutcome } from "../src/replay/crawler.js";
+import { createHealer, isFieldHealingEvent } from "../src/replay/heal.js";
 import type { CompiledScraper } from "../src/scraper/schema.js";
-import { runDemo } from "../scripts/demo.js";
+import { DEMO_DESCRIPTION, DEMO_PRODUCTS, HEAL_FIXTURE_BY_PAGE, healFirstPages, recordedChooser, runDemo } from "../scripts/demo.js";
 import { startFixtureServer, type FixtureServer } from "./server.js";
 
 /**
@@ -17,7 +19,8 @@ import { startFixtureServer, type FixtureServer } from "./server.js";
  * field map stored next to its answers (`expected.json`).
  */
 
-const RECORDED_COMPILE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "recorded", "compile");
+const RECORDED_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "recorded");
+const RECORDED_COMPILE_DIR = join(RECORDED_DIR, "compile");
 const FIELDS = ["name", "laboratory", "price", "stock"];
 const OUT_OF_STOCK = ["ibuprofeno-400-mg", "losartan-50-mg"];
 
@@ -70,6 +73,129 @@ describe("the demo proof (U19, AE8)", () => {
     expect(Object.keys(result.stored!.fields)).toEqual(FIELDS);
     expect(result.stored!.healedAt).toBeDefined();
     expect(lines.length).toBeGreaterThan(3);
+  }, 120_000);
+});
+
+/**
+ * A8: a heal batch is answered by the recording made on the page it is healing.
+ *
+ * `rankHealCandidates` puts a candidate whose value equals an earlier sample
+ * first, so the *order* of the options a heal question offers is a function of
+ * what is on that page. `tests/recorded/heal/pharmacy` was recorded on
+ * amoxicilina; the same question on atorvastatina — the one product carrying
+ * two price spans — offers a different list, and a recorded index against it
+ * answers a different question. Which of the two the crawler reaches first is
+ * a race, so the demo failed about one full-suite run in three and passed
+ * alone, which is exactly the shape a repeat count cannot measure.
+ *
+ * So these two tests are what the repeat count could not be. The first drives
+ * the heal onto atorvastatina deterministically and shows the single-fixture
+ * chooser refusing it and the routed one healing; the second runs the whole
+ * demo with atorvastatina taking the heal.
+ */
+describe("the heal is answered by the page it is healing (A8)", () => {
+  let server: FixtureServer;
+  let browser: LaunchedBrowser;
+
+  beforeAll(async () => {
+    server = await startFixtureServer();
+    browser = await launch({ browser: "chromium", headed: false });
+  });
+
+  afterAll(async () => {
+    await browser?.close();
+    await server?.close();
+  });
+
+  const productUrl = (slug: string) => `${server.baseUrl}/demo/pharmacy/producto/${slug}.html`;
+
+  /**
+   * The scraper the demo's first run compiles, rebuilt here.
+   *
+   * `runCrawl` compiles a record-mode template from `pickSampleUrls(urls, 3)`,
+   * so the samples are the first three products in crawl order and the answers
+   * are the `field.*` recordings in `heal/pharmacy`. Replaying those verifies
+   * their options, which is what makes this a reconstruction of the demo's own
+   * scraper rather than a lookalike: a drift in either would fail here first.
+   */
+  async function demoScraper(): Promise<CompiledScraper> {
+    server.switchDemo("v1");
+    const pages: Page[] = [];
+    try {
+      for (const slug of DEMO_PRODUCTS.slice(0, 3)) {
+        const page = await browser.context.newPage();
+        await page.goto(productUrl(slug));
+        pages.push(page);
+      }
+      const result = await compile({
+        mode: "record",
+        pages,
+        fields: FIELDS.map((name) => ({ name })),
+        description: DEMO_DESCRIPTION,
+        templateKey: "127.0.0.1/demo/pharmacy/producto/*",
+        cacheKey: "a8",
+        profile: "store",
+        chooser: new RecordedChooser({ fixture: "heal/pharmacy" }),
+        startUrls: [pages[0]!.url()],
+        allowedDomains: [],
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error(`the demo's v1 compile no longer reproduces: ${result.status}`);
+      return result.scraper;
+    } finally {
+      for (const page of pages) await page.close();
+    }
+  }
+
+  async function healWith(slug: string, chooser: Chooser, scraper: CompiledScraper): Promise<HealOutcome> {
+    const page = await browser.context.newPage();
+    try {
+      await page.goto(productUrl(slug));
+      return await createHealer()({ page, scraper, chooser, failure: { kind: "fields", fields: [...FIELDS] } });
+    } finally {
+      await page.close();
+    }
+  }
+
+  it("refuses the amoxicilina recording on atorvastatina, and heals once the batch is routed by page", async () => {
+    const scraper = await demoScraper();
+    server.switchDemo("v2");
+
+    // The control: the recording still answers the page it was recorded on.
+    const onItsOwnPage = await healWith("amoxicilina-500-mg", new RecordedChooser({ fixture: "heal/pharmacy" }), scraper);
+    expect(onItsOwnPage.healed, onItsOwnPage.healed ? "" : onItsOwnPage.reason).toBe(true);
+
+    // Before: every heal batch went to the one fixture, whatever page it came
+    // from. The index no longer points where it pointed, and `RecordedChooser`
+    // says so — which is the failure `acceptance.test.ts` saw one run in three.
+    await expect(healWith("atorvastatina-20-mg", new RecordedChooser({ fixture: "heal/pharmacy" }), scraper)).rejects.toThrow(RecordedOptionsMismatchError);
+
+    // After: the batch is answered by the recording made on this page.
+    const routed = await healWith("atorvastatina-20-mg", recordedChooser(), scraper);
+    expect(routed.healed, routed.healed ? "" : routed.reason).toBe(true);
+    if (!routed.healed || !isFieldHealingEvent(routed.event)) throw new Error("expected a field healing event");
+    expect([...routed.event.fields].sort()).toEqual([...FIELDS].sort());
+  }, 60_000);
+
+  it("has a recording for every page that can take the heal first", () => {
+    for (const slug of healFirstPages()) {
+      const fixture = HEAL_FIXTURE_BY_PAGE[slug];
+      expect(fixture, `${slug} can take the first heal and has no fixture in HEAL_FIXTURE_BY_PAGE`).toBeDefined();
+      for (const field of FIELDS) {
+        expect(existsSync(join(RECORDED_DIR, fixture!, `heal.${field}.json`)), `${slug} -> ${fixture}/heal.${field}.json`).toBe(true);
+      }
+    }
+  });
+
+  it("runs the whole demo with atorvastatina taking the heal", async () => {
+    const products = ["atorvastatina-20-mg", ...DEMO_PRODUCTS.filter((slug) => slug !== "atorvastatina-20-mg")];
+    // One page at a time, so the page that takes the heal is the first one and
+    // not whichever of two won a race: the point here is the answer, not the race.
+    const result = await runDemo({ products, maxConcurrency: 1, server, log: () => undefined });
+    expect(result.failures).toEqual([]);
+    expect(result.ok).toBe(true);
+    const healed = result.runs[1]!.summary.healingEvents.filter(isFieldHealingEvent);
+    expect(healed.some((event) => (event.url ?? "").includes("atorvastatina-20-mg") && event.fields.length === FIELDS.length)).toBe(true);
   }, 120_000);
 });
 

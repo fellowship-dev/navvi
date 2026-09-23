@@ -14,7 +14,7 @@ import {
   type RunVerdict,
 } from "../investigate/blocked.js";
 import { stateOf, transitionOf, transitionsForVerdict, transitionsFrom, type State, type StateId, type TransitionId } from "../scraper/machine.js";
-import { appendFieldAlternative, appendStepAlternative, markHealed, type CompiledScraper, type Field, type LocatorAlternative, type Shape, type TraceStep } from "../scraper/schema.js";
+import { appendFieldAlternative, appendStepAlternative, markHealed, type CompiledScraper, type LocatorAlternative, type Shape, type TraceStep } from "../scraper/schema.js";
 import { clip, isRecord } from "../util/text.js";
 import type { HealContext, HealFailure, HealOutcome, HealerHook } from "./crawler.js";
 import { isUnstable, type Determinism } from "./determinism.js";
@@ -706,31 +706,4 @@ export function judgePromotions(scraper: CompiledScraper, tally: ResolutionTally
 function label(alternative: CompiledScraper["fields"][string]["alternatives"][number]): string {
   const source = alternative.source ?? "dom";
   return alternative.path ? `${source} ${alternative.path}` : `${source} ${alternative.selector}${alternative.attr ? `@${alternative.attr}` : ""}`;
-}
-
-/**
- * Move one alternative to the front of its field, keeping the others in order.
- *
- * **This belongs in `src/scraper/schema.ts` beside `appendFieldAlternative`,
- * as a fourth entry in `MERGE_API`, and it is here because that file was not
- * this session's to edit.** It obeys the same contract the other three do and
- * is written to be moved: pure, returning a new document, refusing an unknown
- * field, and unable to add, rename, retype or remove anything. A reorder is
- * not an append, so the argument that it is safe has to be made rather than
- * inherited: every alternative is retained, so a promotion loses no reading
- * and a later run can overturn it; the fingerprint check still guards the
- * value whichever alternative produced it; and the cascade's semantics —
- * first one that answers wins — mean the only thing that changes is which
- * alternative is asked first, which is the entire point.
- */
-export function promoteFieldAlternative(scraper: CompiledScraper, field: string, from: number): CompiledScraper {
-  const existing = scraper.fields[field];
-  if (!existing) throw new Error(`unknown field "${field}"; promotion cannot add or rename fields`);
-  const alternative = existing.alternatives[from];
-  if (!Number.isInteger(from) || !alternative) {
-    throw new Error(`unknown alternative ${from} for "${field}"; it has ${existing.alternatives.length}`);
-  }
-  if (from === 0) return scraper;
-  const updated: Field = { ...existing, alternatives: [alternative, ...existing.alternatives.filter((_, index) => index !== from)] };
-  return { ...scraper, fields: { ...scraper.fields, [field]: updated } };
 }

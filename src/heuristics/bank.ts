@@ -10,10 +10,15 @@ import type { AnyHeuristic, Overrides, Stage, Verdict } from "./types.js";
  * The measurable output of dogfooding is this list growing: not "navvi handled
  * client", but *this engagement added twelve heuristics and twelve evals, and the
  * next site starts from them.* The twelfth, `machine-value-is-not-a-fact`, is
- * U6c's and is the only rule in the bank with no caller in `src/` yet: the
- * observation it needs is `InventoryRecord` (path, values, anchored), which is
- * built in `src/investigate/investigate.ts`. A rule nothing executes is navvi's
- * signature defect, and saying so here is cheaper than discovering it live.
+ * U6c's and was for a while the only rule in the bank with no caller in `src/`
+ * — a rule nothing executes is navvi's signature defect, and saying so here was
+ * cheaper than discovering it live. It runs now, in `src/reconcile/`, over the
+ * leaf catalogue's `InventoryRecord`s (path, values, anchored): a leaf it fires
+ * on sorts to the bottom of "available but not requested" **with the rule's own
+ * sentence on the row**, where the bare arithmetic rank used to put it there
+ * and say nothing. Its other half — refusing a leaf as a binding candidate,
+ * which is what its `decides` line describes — is still unwired; the observation
+ * for that is built in `catalogueOf` in `src/investigate/investigate.ts`.
  */
 
 export const HEURISTICS: readonly AnyHeuristic[] = [...INVESTIGATE_HEURISTICS, ...BIND_HEURISTICS, ...REPLAY_HEURISTICS];

@@ -1,4 +1,4 @@
-import type { FieldRecord, Manuscript, VerdictLog } from "../investigate/manuscript.js";
+import type { FieldAlias, FieldRecord, Manuscript, VerdictLog } from "../investigate/manuscript.js";
 import type { Chooser as ChooserId, FieldType, Mode, Profile } from "../input/schema.js";
 import { rubricsFor, show, type Ambiguity, type ObtainableField, type QuotedRubric, type Reconciliation } from "../reconcile/index.js";
 import { commonShape, type TypedValue } from "../scraper/extract.js";
@@ -73,12 +73,11 @@ import { gateAlternative, type RiskFamily } from "./gate.js";
  * it is an inference about styling, which is the hardest way to read a value
  * and the one all three failures of 2026-09-22 used.
  *
- * Within one field this sort is a no-op today: a `FieldRecord` carries one
- * `source` for the binding and its aliases alike, so every alternative a field
- * gets out of here is the same tier. It is written anyway, as a stable sort
- * that leaves the bound reading first among its equals, so that the day a
- * field carries readings from two tiers the array is still the cascade's order
- * rather than the order they happened to be appended in.
+ * This sort was a no-op for as long as `FieldRecord` carried one `source` for
+ * a binding and its aliases alike. Since `FieldAlias`, a field really can carry
+ * a `json-ld` binding and a `dom` alias off the same page, and the sort decides
+ * which one replay tries first. It is stable, so the bound reading still leads
+ * among its equals.
  */
 const TIER_RANK: Record<FieldSource, number> = { "json-ld": 0, network: 1, dom: 2 };
 
@@ -152,25 +151,45 @@ function labelFor(field: ObtainableField): string | undefined {
 }
 
 /**
+ * The label an alias carries in `selector`.
+ *
+ * The same rule as `labelFor`, applied to a reading that now states its own
+ * source: a `network` alias is labelled by the endpoint it matches, everything
+ * else by the selector the declaration was read through. An alias with neither
+ * cannot be compiled, and says so rather than borrowing the binding's — the
+ * borrowing is the whole defect this closed.
+ */
+function labelForAlias(alias: FieldAlias, field: ObtainableField): string | undefined {
+  if (alias.source === "network") return alias.match ?? field.match;
+  return alias.selector;
+}
+
+/**
  * The readings of one obtainable field: the binding first, then its aliases.
  *
- * **Aliases only compile for a `network` binding, and that is a limitation of
- * the manuscript rather than a policy.** `FieldRecord.aliases` is a list of
- * bare paths with no source of their own. For tier 2 that is enough and
- * provably so: `narrow` builds a candidate's aliases out of other leaves of
- * *the same flattened payload*, so the binding's `match` plus the alias path
- * is a complete, resolvable alternative. For tier 1 it is not: `bindRole`
- * collects the paths of every declaration of one role, and those declarations
- * may be different kinds — a JSON-LD path and an OpenGraph property name ride
- * in as `json-ld` and as `dom` respectively, with different selectors, and the
- * alias keeps neither. Compiling `product:price:amount` as a `json-ld` path
- * would emit an alternative that can never resolve: not dangerous, because the
- * cascade simply moves on, but junk in a committed artifact, and junk in a
- * committed artifact is how the next reader stops trusting the file.
+ * **Aliases used to compile only for a `network` binding, and it was a
+ * limitation of the manuscript rather than a policy.** `FieldRecord.aliases`
+ * was a list of bare paths with no source of their own. For tier 2 that is
+ * enough and provably so: `narrow` builds a candidate's aliases out of other
+ * leaves of *the same flattened payload*, so the binding's `match` plus the
+ * alias path is a complete, resolvable alternative. For tier 1 it was not —
+ * `bindRole` collects every declaration of one role, and those are different
+ * kinds: a JSON-LD path rides in as `json-ld` with an `entity`, an OpenGraph
+ * property as `dom` through `meta[property=...]` with `attr: "content"`.
+ * Compiling `product:price:amount` as a `json-ld` path would have emitted an
+ * alternative that can never resolve, so the compile refused all of them and
+ * `rationale.md` said "stated elsewhere, not compiled" — a fact about the
+ * record's shape reported as a fact about the site.
  *
- * So tier-1 aliases are reported in the rationale as stated-but-not-compiled,
- * with the reason. What would close it is `FieldRecord.aliases` carrying the
- * source, selector, attr and entity of each alias rather than its path alone.
+ * `FieldAlias` closed it: an alias states how to read itself, in the same
+ * words the binding uses, and this function no longer has to guess. Two
+ * consequences worth naming, because both were dead code until now:
+ *
+ *  - the `TIER_RANK` sort above is no longer a no-op — a field really can
+ *    carry a `json-ld` binding and a `dom` alias, and the array is the cascade;
+ *  - the selector gate's `REFUSE_FALLBACK` bar is reachable from a real
+ *    compile, because a `dom` alias sitting behind a declared binding is
+ *    exactly the alternative that bar was written for.
  */
 function readingsOf(field: ObtainableField, max: number): { readings: Reading[]; uncompiled: Array<{ path: string; because: string }> } {
   const label = labelFor(field);
@@ -178,7 +197,7 @@ function readingsOf(field: ObtainableField, max: number): { readings: Reading[];
   if (label === undefined || label === "") {
     return {
       readings: [],
-      uncompiled: field.aliases.map((path) => ({ path, because: "the binding itself carries no label, so nothing about this field could be compiled" })),
+      uncompiled: field.aliases.map((alias) => ({ path: alias.path, because: "the binding itself carries no label, so nothing about this field could be compiled" })),
     };
   }
 
@@ -195,16 +214,6 @@ function readingsOf(field: ObtainableField, max: number): { readings: Reading[];
   binding.where = whereOf(binding);
   const readings: Reading[] = [binding];
 
-  if (field.source !== "network") {
-    for (const path of field.aliases) {
-      uncompiled.push({
-        path,
-        because: `the manuscript records an alias as a bare path; a tier-1 alias may be a different kind of declaration than the binding (a meta property rides in as \`dom\`, a JSON-LD path as \`json-ld\`) and the record does not say which, so compiling it under the binding's source would emit an alternative that can never resolve`,
-      });
-    }
-    return { readings, uncompiled };
-  }
-
   /**
    * Shallowest path first, then alphabetically.
    *
@@ -215,19 +224,36 @@ function readingsOf(field: ObtainableField, max: number): { readings: Reading[];
    * discount, which is exactly the page a fallback is for. Alphabetical is the
    * tiebreak so the same investigation compiles the same scraper twice.
    */
-  const sorted = [...field.aliases].sort((a, b) => segments(a) - segments(b) || a.localeCompare(b));
+  const sorted = [...field.aliases].sort((a, b) => segments(a.path) - segments(b.path) || a.path.localeCompare(b.path));
   const room = Math.max(0, max - readings.length);
-  for (const [index, path] of sorted.entries()) {
+  for (const [index, alias] of sorted.entries()) {
     if (index >= room) {
       uncompiled.push({
-        path,
+        path: alias.path,
         because: `the field already carries ${max} alternative(s), which is the cap: an alias is agreement on the binding samples and nothing more, and one this far down the array is only ever reached on a page where every alternative above it has already stopped answering`,
       });
       continue;
     }
-    const alias: Reading = { ...binding, path, role: "alias", where: "" };
-    alias.where = whereOf(alias);
-    readings.push(alias);
+    const aliasLabel = labelForAlias(alias, field);
+    if (aliasLabel === undefined || aliasLabel === "") {
+      uncompiled.push({
+        path: alias.path,
+        because: `this alias carries no ${alias.source === "network" ? "endpoint to match" : "selector"} of its own, so there is nothing to resolve it through; the binding's label belongs to the binding and reading it as this alias's is what made every tier-1 alias uncompilable`,
+      });
+      continue;
+    }
+    const reading: Reading = {
+      source: alias.source,
+      selector: aliasLabel,
+      attr: alias.attr,
+      path: alias.path,
+      match: alias.source === "network" ? (alias.match ?? field.match) : alias.match,
+      entity: alias.entity,
+      role: "alias",
+      where: "",
+    };
+    reading.where = whereOf(reading);
+    readings.push(reading);
   }
   return { readings, uncompiled };
 }
@@ -437,14 +463,13 @@ export function compileFromReconciliation(
        * gate refused still holds its second to the permissive bar rather than
        * to the fallback bar. See the thresholds in `./gate.ts`.
        *
-       * Today every alternative this compile emits is judged at the sole bar,
-       * because a `FieldRecord` carries one source for a field and a `dom`
-       * field therefore has exactly one reading. The fallback bar is the gate's
-       * contract rather than dead code — `tests/selector-gate.test.ts` holds
-       * both — and it goes live the moment either of two things lands: aliases
-       * carrying their own source (see `readingsOf`), or `heal` appending a DOM
-       * fallback behind a declared binding, which is exactly the case the lower
-       * bar was written for.
+       * That bar used to be unreachable from here: a `FieldRecord` carried one
+       * source for a field, so a `dom` field had exactly one reading and every
+       * alternative was judged at the sole bar. `FieldAlias` is what made it
+       * live — a `dom` alias behind a declared binding is the alternative the
+       * lower bar was written for, reached only on the page whose markup has
+       * already moved, which is precisely where a presentation-only or
+       * root-anchored selector matches the wrong element rather than nothing.
        */
       const decision = gateAlternative(reading.selector, reading.source, { sole: alternatives.length === 0 });
       if (!decision.ok) {
@@ -516,6 +541,33 @@ export function compileFromReconciliation(
     pagination: options.pagination ?? { mode: "none" },
     detail: null,
     createdAt: now.toISOString(),
+    /**
+     * A4: the canary travels on the scraper, not beside it, and it is written
+     * here rather than by the driver because this is the function that has the
+     * manuscript and produces the document. A compile that made both from one
+     * manuscript can put them in one file, and then there is no window in which
+     * the two disagree -- which was the whole objection to the cache-store
+     * side-car this replaced.
+     *
+     * Until 2026-09-23 `make` wrote a fingerprint into `Manuscript.canary` and
+     * a `scraper.json` with no `canary` key at all, so every scraper it
+     * produced arrived `unrecorded` -- *nobody looked* -- about a run that had
+     * looked, and had to wait for a clean replay to backfill what was already
+     * on disk one file away.
+     *
+     * `null` and not "leave the key off" when there is no fingerprint, because
+     * the three states are not interchangeable: `unrecorded` is a scraper
+     * compiled before the field existed and is filled in by the first clean
+     * replay, while `refused` is a decision taken against a real page and is
+     * left alone. This run looked, and `Manuscript.canaryBecause` says what it
+     * saw -- including the case the investigation refuses for a render that
+     * never finished, where a fingerprint would be of whatever frame navvi
+     * happened to catch. That one is a false "the site changed" filed against
+     * every replay from here on, and under Phase F's gate a false canary
+     * mismatch is what licenses healing, so `refused` is both honest and the
+     * safe direction.
+     */
+    canary: manuscript.canary ?? null,
   };
   if (options.item) doc.item = options.item;
 

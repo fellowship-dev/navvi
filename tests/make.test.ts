@@ -5,10 +5,10 @@ import { Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { main, type CliIo } from "../bin/cli.js";
 import { parseArgs } from "../src/cli/args.js";
-import { applyAnswers, make, matchAnswer, parseAnswer, Work, type MakeDeps, type MakeResult, type Pages, type StageName } from "../src/make/index.js";
+import { applyAnswers, digestOfParams, LEDGER_FILE, make, matchAnswer, parseAnswer, Work, type Ledger, type MakeDeps, type MakeResult, type Pages, type StageName } from "../src/make/index.js";
 import { readingOf } from "../src/replay/determinism.js";
 import { fieldTypesOf, type PageExtraction } from "../src/scraper/extract.js";
-import type { CompiledScraper } from "../src/scraper/schema.js";
+import { canaryOrigin, type CompiledScraper } from "../src/scraper/schema.js";
 import type { Answer, Chooser, ChooserUsage, Question } from "../src/chooser/chooser.js";
 import type { Spec } from "../src/spec/schema.js";
 import type { Manuscript } from "../src/investigate/index.js";
@@ -96,7 +96,11 @@ function fixturePages(): FixturePages {
     const resolvedBy: Record<string, number | null> = {};
     for (const name of Object.keys(scraper.fields)) {
       values[name] = all[name] ?? null;
-      resolvedBy[name] = all[name] === undefined ? null : 0;
+      // `extractPage` records an alternative only when one produced a value, so
+      // `resolvedBy` is null for a field the page did not answer — including one
+      // the fixture answers with an explicit null. A stub that claimed
+      // alternative 0 resolved a null would be claiming the page said something.
+      resolvedBy[name] = all[name] === undefined || all[name] === null ? null : 0;
     }
     const item = { values, resolvedBy, sourceUrl: url };
     return { ...item, items: [item] };
@@ -348,17 +352,22 @@ describe("the second run: the questions answered and the list supplied", () => {
     // four lines above `verify fill 0 of 3`, read as the two stages
     // contradicting each other about the same pages through the same driver.
     // They agreed. `judgeDeterminism` was asked whether the extraction moved
-    // and answered correctly — it did not — but `readOn` counts a field's key,
-    // `extractPage` null-fills every compiled field, and `held` on a blank
-    // reading is indistinguishable from `held` on a real one. So the verdict
-    // stands and the run says which of the two it measured.
+    // and answered correctly — it did not — but it was asked about a
+    // null-filled reading, where `field in item` is a fact about the scraper
+    // and never about the page. The verdict stands, and the artifact now says
+    // what it is a verdict about.
     const { result } = await full({}, blankOn(fixturePages(), URLS));
     expect(result.status).toBe("delivered");
 
     const determinism = JSON.parse(readFileSync(join(work(), "determinism.json"), "utf8")) as Determinism;
     expect(determinism.verdict, "the verdict is not downgraded: nothing moved, and that is a true answer to the question asked").toBe("stable");
-    expect(determinism.fields.every((field) => field.outcome === "held")).toBe(true);
-    expect(determinism.fields.every((field) => field.readOn === 4), "`readOn` says 4 of 4 URLs about a replay that read nothing").toBe(true);
+    // And the record is now falsifiable from itself: `stable` over five fields
+    // none of which was read on any of the four URLs is a sentence a reader can
+    // catch. Under the null-filled reading every one of these was `held` with
+    // `readOn: 4`, and `Stability.absent` was unreachable through this driver.
+    expect(determinism.fields.every((field) => field.outcome === "absent"), JSON.stringify(determinism.fields.map((f) => [f.field, f.outcome, f.readOn]))).toBe(true);
+    expect(determinism.fields.every((field) => field.readOn === 0), "`readOn` counts the URLs a value came back on, and none did").toBe(true);
+    expect(determinism.urls.map((url) => url.readings), "the pages were read, three times each — the fields are absent, the URLs are not").toEqual([3, 3, 3, 3]);
 
     const text = transcript();
     expect(text).toContain("0 fields moved");
@@ -369,10 +378,43 @@ describe("the second run: the questions answered and the list supplied", () => {
     expect(text).toContain("fill 0 of 5 fields, 0 of 20 reads");
 
     // And in the artifact, which outlives the transcript and is where the
-    // sentence sits directly above the table of zeroes.
+    // sentence sits directly above the table of zeroes. The headline number is
+    // recounted from `determinism.json`'s own `readOn` — 5 fields x 4 URLs —
+    // so a reader with the file can check it; the per-reading count underneath
+    // is this session's and is gone on the next run.
     const card = readFileSync(join(work(), "scorecard.md"), "utf8");
-    expect(card).toContain("Every one of the 60 field readings the replays took came back null");
+    expect(card).toContain("**No field was read on any of the 20 (field, URL) pairs `determinism.json` covers.**");
     expect(card).toContain("What held still was a blank extraction");
+    expect(card).toContain("This run took 60 field readings across every replay of every URL, and 0 of them carried a value.");
+  });
+
+  /**
+   * The guard used to be a closure round this session's readings, so the
+   * *second* `navvi make` over the same work directory reused `determinism.json`
+   * and printed nothing at all — the whole defect back again one run later, and
+   * the run that a person is most likely to be reading. A held field stores no
+   * forms, so the recount has to come from `readOn`.
+   */
+  it("a reused determinism.json still says the replay read nothing", async () => {
+    await full({}, blankOn(fixturePages(), URLS));
+    out = [];
+    const again = await make(
+      options({ answers: ["fields=productName,sku,listPrice:money,promoPrice:money,stock", "inputs=url_list"], urls: URLS }),
+      deps({ openPages: () => Promise.resolve(blankOn(fixturePages(), URLS)) }),
+    );
+
+    expect(outcome(again, "determinism"), "the point of the test is that it was NOT measured again").toBe("reused");
+    const text = transcript();
+    expect(text).toContain("determinism   reused");
+    expect(text).toContain("! read nothing  none of the 20 (field, URL) pairs this record covers carried a value");
+    expect(text).toContain("recounted from the record's own `readOn`");
+    expect(text).toContain("`stable` is the stability of a blank extraction");
+
+    const card = readFileSync(join(work(), "scorecard.md"), "utf8");
+    expect(card).toContain("**No field was read on any of the 20 (field, URL) pairs `determinism.json` covers.**");
+    // This session took no readings, so it claims no per-reading count. Absent
+    // is not zero: that distinction is the whole of `determinismValues`.
+    expect(card).not.toContain("This run took");
   });
 
   it("a replay that read everything says nothing of the kind, and the fill says how much", async () => {
@@ -397,6 +439,93 @@ describe("the second run: the questions answered and the list supplied", () => {
     expect(text).toContain("! productName  read on 3 of 4 replayed URLs");
     // Something was read, so the determinism verdict is about an extraction.
     expect(text).not.toContain("read nothing");
+  });
+
+  /**
+   * The half the blank case never covered: a replay that read *some* of what it
+   * replayed still prints `0 fields moved` and `stable`, and until the reading
+   * stopped being null-filled nothing in the stage said how much. One field
+   * read on one of four URLs is as good a witness to stability as four of four
+   * would have been, which is the same believed sentence with a smaller number
+   * behind it.
+   */
+  it("a replay that read part of what it replayed says which part, in the block and in the artifact", async () => {
+    const pages = fixturePages();
+    // Three of four URLs answer nothing at all; the fourth answers everything.
+    blankOn(pages, [`${SITE}/p/antiacido.html`, `${SITE}/p/antialergico.html`, `${SITE}/p/vitamina-c.html`]);
+    const { result } = await full({}, pages);
+    expect(result.status).toBe("delivered");
+
+    const determinism = JSON.parse(readFileSync(join(work(), "determinism.json"), "utf8")) as Determinism;
+    expect(determinism.verdict).toBe("stable");
+    // Every field held — on the one URL that answered. `readOn` is what says so.
+    expect(determinism.fields.every((field) => field.outcome === "held")).toBe(true);
+    expect(determinism.fields.every((field) => field.readOn === 1), JSON.stringify(determinism.fields.map((f) => [f.field, f.readOn]))).toBe(true);
+    expect(determinism.urls).toHaveLength(4);
+    const held = determinism.fields[0]!;
+    expect(held.because, "the field's own sentence carries the fraction, not just the transcript").toContain("1 URLs");
+
+    const text = transcript();
+    expect(text).toContain("0 fields moved");
+    // 1 of 4 URLs x 3 replays x 5 fields.
+    expect(text).toContain("! read partly  15 of the 60 field readings carried a value");
+    expect(text).toContain("says nothing about the other 45");
+
+    const card = readFileSync(join(work(), "scorecard.md"), "utf8");
+    expect(card).toContain("**5 of the 20 (field, URL) pairs `determinism.json` covers carried a value.**");
+    expect(card).toContain("This run took 60 field readings across every replay of every URL, and 15 of them carried a value.");
+    expect(card).not.toContain("blank extraction");
+  });
+
+  /**
+   * A4. `make` recorded a canary into `Manuscript.canary` and wrote a
+   * `scraper.json` with no `canary` key at all, so every scraper this command
+   * produced arrived `unrecorded` — "nobody looked" — about a run that had
+   * looked, and waited for a clean replay to backfill what was already on disk
+   * one file away. A scraper with no canary is one `licenseToHeal` refuses to
+   * repair a total collapse for, so it is a bound on every later run.
+   */
+  it("writes the investigation's canary onto the compiled scraper", async () => {
+    await full();
+    const manuscript = JSON.parse(readFileSync(join(work(), "investigation.json"), "utf8")) as Manuscript;
+    const scraper = JSON.parse(readFileSync(join(work(), "scraper.json"), "utf8")) as CompiledScraper;
+
+    expect(manuscript.canary, "the fixture pages are real documents; the investigation fingerprints one").toBeDefined();
+    expect(canaryOrigin(scraper)).toBe("recorded");
+    expect(scraper.canary).toEqual(manuscript.canary);
+    expect(transcript()).toContain("- canary");
+  });
+
+  /**
+   * And the other two states are not interchangeable: a run that looked and
+   * could not fingerprint anything writes `null` — `refused`, a decision taken
+   * against a real page — rather than leaving the key off, which would say
+   * nobody looked and invite the next clean replay to mint one. That is the
+   * shape a starved render takes: the investigation refuses a canary off a
+   * half-drawn page, and a fingerprint of a frame is a false "the site
+   * changed" filed against every replay from here on.
+   */
+  it("writes `refused` rather than nothing when the investigation recorded no canary", async () => {
+    await full();
+    const file = join(work(), "investigation.json");
+    const manuscript = JSON.parse(readFileSync(file, "utf8")) as Manuscript;
+    delete manuscript.canary;
+    manuscript.canaryBecause = "no canary was recorded: the render did not finish";
+    writeFileSync(file, JSON.stringify(manuscript, null, 2) + "\n");
+
+    out = [];
+    const result = await make(
+      options({ answers: ["fields=productName,sku,listPrice:money,promoPrice:money,stock", "inputs=url_list"], urls: URLS }),
+      deps({ openPages: () => Promise.resolve(fixturePages()) }),
+    );
+    expect(result.status, transcript()).toBe("delivered");
+    expect(outcome(result, "compile")).toBe("ran");
+
+    const scraper = JSON.parse(readFileSync(join(work(), "scraper.json"), "utf8")) as CompiledScraper;
+    expect(canaryOrigin(scraper)).toBe("refused");
+    expect(scraper.canary).toBeNull();
+    expect(transcript()).toContain("! canary");
+    expect(transcript()).toContain("a later replay may not backfill one");
   });
 
   it("says out loud that cross-alternative disagreement was not measured", async () => {
@@ -469,6 +598,45 @@ describe("re-running", () => {
     expect(Object.keys(scraper.fields)).not.toContain("sku");
   });
 
+  /**
+   * `determinism.json` keeps its shape and its `version: 1` across the reading
+   * change, so an artifact written before it is indistinguishable to a reader
+   * from one written after — and it says something different, because `readOn`
+   * counted the columns the scraper compiled rather than the ones the page
+   * answered. Nothing in navvi's code is affected (downstream reads `verdict`
+   * and `rejected`), so the break is the human reader's, and the handling is
+   * that no work directory mixes the two: the reading is an argument of the
+   * stage, so an old record is stale.
+   */
+  it("a determinism.json recorded under the old reading is re-measured rather than reused", async () => {
+    await seeded();
+    const determinism = JSON.parse(readFileSync(join(work(), "determinism.json"), "utf8")) as Determinism;
+    const scraper = JSON.parse(readFileSync(join(work(), "scraper.json"), "utf8")) as CompiledScraper;
+    const urls = determinism.urls.map((url) => url.url);
+    // The arguments the driver recorded before the reading was one of them.
+    const old = { replays: 3, urls, compile: { templateKey: scraper.templateKey, entry: { mode: "direct", url: urls[0] } } };
+
+    const file = join(work(), LEDGER_FILE);
+    const ledger = JSON.parse(readFileSync(file, "utf8")) as Ledger;
+    const params = ledger.stages.determinism?.inputs.find((input) => input.name === "params");
+    expect(params, "the determinism stage records its arguments").toBeDefined();
+    expect(params!.digest, "this run recorded which reading it took; the old one could not have").not.toBe(digestOfParams(old));
+
+    params!.digest = digestOfParams(old);
+    writeFileSync(file, JSON.stringify(ledger, null, 2) + "\n");
+
+    const result = await make(
+      options({ answers: ["fields=productName,sku,listPrice:money,promoPrice:money,stock", "inputs=url_list"], urls: URLS }),
+      deps({ openPages: () => Promise.resolve(fixturePages()) }),
+    );
+    expect(result.status, transcript()).toBe("delivered");
+    expect(outcome(result, "determinism"), "the old record is not reused under the new sentence").toBe("ran");
+    // A stage that re-ran prints its own head, never `reused —`; the reason it
+    // was stale is the ledger's, and the ledger is what this test moved.
+    expect(transcript()).toContain("3 replays x");
+    expect(transcript()).not.toContain("determinism   reused");
+  });
+
   it("refuses to overwrite an edited artifact, and --force is the yes", async () => {
     await seeded();
     // Edit the *investigation*, then move the spec so investigate is stale:
@@ -487,6 +655,52 @@ describe("re-running", () => {
       deps({ openPages: () => Promise.resolve(fixturePages()) }),
     );
     expect(forced.status, transcript()).toBe("delivered");
+  });
+});
+
+// ------------------------------------------------------------ F7: a throw
+
+/**
+ * F7. `StageOutcome` had five values and none of them was "it raised".
+ *
+ * Only `spec` and `compile` caught anything, so a throw out of any other stage
+ * left `make()` entirely: no `MakeResult`, no line in the report, and a bare
+ * stack at `bin/cli.ts`. The driver whose whole purpose is that *every stage
+ * says whether it ran at all* was silent about the failure most likely to
+ * happen, because the stages that throw are the ones that open a browser.
+ */
+describe("a stage that raised", () => {
+  it("names the stage, keeps the stages that already ran, and exits short rather than as a stack", async () => {
+    const chooser = new ScriptedChooser([DRAFT]);
+    await make(options({ brief: BRIEF }), deps({ openChooser: () => Promise.resolve(chooser) }));
+    out = [];
+
+    const pages = fixturePages();
+    // The shape a real one takes: the browser dies mid-replay.
+    pages.extract = () => Promise.reject(new Error("Target page, context or browser has been closed"));
+
+    const result = await make(
+      options({ answers: ["fields=productName,sku,listPrice:money,promoPrice:money,stock", "inputs=url_list"], urls: URLS }),
+      deps({ openPages: () => Promise.resolve(pages) }),
+    );
+
+    expect(result.status, transcript()).toBe("short");
+    expect(result.stoppedAt).toBe("determinism");
+    expect(outcome(result, "determinism")).toBe("threw");
+    expect(result.because).toContain("Target page, context or browser has been closed");
+    // The stack is kept: a defect in navvi is read by whoever fixes navvi.
+    expect(result.because).toContain("make.test.ts");
+
+    // The stages that got there first keep their own outcomes, and the ones
+    // after it are `not reached` rather than missing.
+    expect(outcome(result, "investigate")).toBe("ran");
+    expect(outcome(result, "reconcile")).toBe("ran");
+    expect(outcome(result, "compile")).toBe("not reached");
+    expect(outcome(result, "verify")).toBe("not reached");
+
+    const text = transcript();
+    expect(text).toContain("determinism   threw");
+    expect(text).toContain("! threw");
   });
 });
 

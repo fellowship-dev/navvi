@@ -80,14 +80,27 @@ export interface Scorecard {
   modelCallsBecause: string;
   determinism: { verdict: Determinism["verdict"]; rejected: string[] } | null;
   /**
-   * How much of what the determinism replays read was a value rather than null,
-   * counted at the driver seam that took them. `null` when the stage did not
-   * run this session, because a reused `determinism.json` carries no values:
-   * a held field stores no forms, so the artifact names nothing that could be
-   * counted. See `blankReplay` in `make.ts` for why the verdict alone is not
-   * an answer to "did it read anything".
+   * How much of what the determinism replays read was a value rather than
+   * nothing, counted at the driver seam that took them. `null` when the stage
+   * did not run this session, because a reused `determinism.json` carries no
+   * values: a held field stores no forms, so the artifact names nothing that
+   * could be counted. `FieldStability.readOn` now answers the per-field half of
+   * this; the total here is what says `1 of 27` and `27 of 27` apart under a
+   * verdict that reads the same either way. See `thinReplay` in `make.ts`.
    */
   determinismValues: { read: number; of: number } | null;
+  /**
+   * The same question, recounted from `determinism.json` itself: how many
+   * (field, URL) pairs of the ones the record covers carried a value, summed
+   * off each field's `readOn`.
+   *
+   * Present whenever there is a determinism record at all, including one this
+   * session reused — which is the point of it. `determinismValues` is a closure
+   * round the readings this run took and is gone on the next invocation; this
+   * is arithmetic a person can redo with the file in front of them, so the
+   * sentence under "Does it hold still" survives a re-run.
+   */
+  determinismCoverage: { read: number; of: number } | null;
   determinismBecause: string;
   /** Absent when no page was read. Absent is not zero. */
   fill: { urls: number; fields: FieldFill[] } | null;
@@ -169,6 +182,12 @@ export function scorecard(scraper: CompiledScraper, reconciliation: Reconciliati
     modelCallsBecause: MODEL_CALLS_BECAUSE,
     determinism: options.determinism ? { verdict: options.determinism.verdict, rejected: options.determinism.fields.filter((f) => f.rejected).map((f) => f.field) } : null,
     determinismValues: options.determinism ? (options.determinismValues ?? null) : null,
+    determinismCoverage: options.determinism
+      ? {
+          read: options.determinism.fields.reduce((total, field) => total + field.readOn, 0),
+          of: options.determinism.fields.length * options.determinism.urls.length,
+        }
+      : null,
     determinismBecause: options.determinism
       ? options.determinism.because
       : (options.determinismBecause ?? "the determinism stage did not run, so nothing here says the extraction holds still"),
@@ -258,20 +277,39 @@ export function renderScorecard(card: Scorecard): string {
   lines.push("## Does it hold still", "");
   lines.push(card.determinism === null ? `Not measured. ${card.determinismBecause}` : `\`${card.determinism.verdict}\` — ${card.determinismBecause}`);
   if (card.determinism && card.determinism.rejected.length > 0) lines.push("", `Rejected as unstable: ${card.determinism.rejected.join(", ")}.`);
-  // The sentence above is about movement and says nothing about values, and
-  // `determinism.json` cannot be asked: a field that held stores no forms.
-  // Printed here because this artifact outlives the transcript, and because
-  // "says the same thing twice about a page nobody changed" sitting three
-  // lines above a table of zeroes is what sent 2026-09-23 looking for a
-  // contradiction between two stages that were agreeing.
-  if (card.determinismValues && card.determinismValues.read === 0) {
+  // The sentence above is about movement and says nothing about how much there
+  // was to move: a field that held stores no forms, so `determinism.json` names
+  // the value of nothing it committed. Printed here because this artifact
+  // outlives the transcript, and because "says the same thing twice about a
+  // page nobody changed" sitting three lines above a table of zeroes is what
+  // sent 2026-09-23 looking for a contradiction between two stages that were
+  // agreeing. A partial read gets the same treatment as a blank one: `stable`
+  // over 1 of 27 readings is the same believed sentence with a smaller number
+  // behind it.
+  const coverage = card.determinismCoverage;
+  if (coverage !== null && coverage.of > 0 && coverage.read < coverage.of) {
     lines.push(
       "",
-      card.determinismValues.of === 0
-        ? "**No replay produced an item**, so the verdict above is about pages that offered no row to compare."
-        : `**Every one of the ${card.determinismValues.of} field readings the replays took came back null.** What held still was a blank extraction; ` +
-          "the verdict above is not evidence that this scraper read anything.",
+      coverage.read === 0
+        ? `**No field was read on any of the ${coverage.of} (field, URL) pairs \`determinism.json\` covers.** What held still was a blank extraction; ` +
+          "the verdict above is not evidence that this scraper read anything."
+        : `**${coverage.read} of the ${coverage.of} (field, URL) pairs \`determinism.json\` covers carried a value.** ` +
+          `The verdict above is about those and says nothing about the other ${coverage.of - coverage.read}.`,
+      "",
+      "Recounted from each field's own `readOn`, so a reader with the file can check it without having been here when it ran.",
     );
+    // The finer count, when this session is the one that took the readings. A
+    // reused record cannot produce it: a held field stores no forms.
+    if (card.determinismValues !== null) {
+      lines.push(
+        "",
+        card.determinismValues.of === 0
+          ? "No replay produced an item at all."
+          : `This run took ${card.determinismValues.of} field readings across every replay of every URL, and ${card.determinismValues.read} of them carried a value.`,
+      );
+    }
+  } else if (card.determinismValues !== null && card.determinismValues.of === 0) {
+    lines.push("", "**No replay produced an item**, so the verdict above is about pages that offered no row to compare.");
   }
   lines.push("");
 

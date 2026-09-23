@@ -128,7 +128,7 @@ function manuscript(over: Partial<Manuscript> = {}): Manuscript {
         match: MATCH,
         path: "productData.prices[price-list-std]",
         values: valuesAt("productData.prices[price-list-std]"),
-        aliases: ["productData.price"],
+        aliases: [{ path: "productData.price", source: "network", match: MATCH }],
         because: "key-names-carry-the-signal fired on price-list-std",
       }),
       record({
@@ -141,7 +141,7 @@ function manuscript(over: Partial<Manuscript> = {}): Manuscript {
         values: valuesAt(SALE_PATH),
         // The payload states the sale price twice and the two agree on every
         // sample, so this is a free alternative and not a second reading.
-        aliases: ["productData.appliedPromotions[price-sale-std].promotionalPrice"],
+        aliases: [{ path: "productData.appliedPromotions[price-sale-std].promotionalPrice", source: "network", match: MATCH }],
         because: "key-names-carry-the-signal fired on price-sale-std",
       }),
     ],

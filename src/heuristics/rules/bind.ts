@@ -394,13 +394,36 @@ const keyNamesCarryTheSignal = define({
       .sort((a, b) => b.score - a.score);
     const best = scored[0]!;
     const runnerUp = scored[1];
-    if (best.score <= 0) return { fires: false, because: `no captured key names ${field}; the leaves say ${leaves.map((leaf) => leaf.path).join(", ")}` };
+    /**
+     * The margin, said out loud.
+     *
+     * The arithmetic above decides a real binding — `listPrice` against
+     * `promoPrice` on a page that names both — and the numbers it decided on
+     * reached nothing. `because` is carried verbatim into the manuscript and
+     * the compile rationale, so a reader could see *that* one key won and
+     * never *by how much*: `price-list-std` beating `price-sale-std` 3 to 0 and
+     * beating it 3 to 2 printed the same sentence, and only one of those is a
+     * binding anybody should be comfortable with.
+     *
+     * A close call being visible as a close call is the whole of it. What to
+     * *do* about a close call — the review's suggestion is Jev as a tie-break
+     * over this margin — is a decision that needs the margin recorded first,
+     * and it is not made here: nothing in this file asks a model, and a bind
+     * rule that did would be a model call inside the thing that exists to
+     * decide what a model is even asked.
+     */
+    const table = scored.map((leaf) => `${leaf.path} ${leaf.score}`).join(", ");
+    if (best.score <= 0) return { fires: false, because: `no captured key names ${field}; the leaves score ${table}` };
     if (runnerUp && runnerUp.score === best.score) {
-      return { fires: false, because: `${best.path} and ${runnerUp.path} name ${field} equally well; this is the small table Jev should be shown` };
+      return { fires: false, because: `${best.path} and ${runnerUp.path} name ${field} equally well, both scoring ${best.score} — a margin of 0; this is the small table Jev should be shown: ${table}` };
     }
     return {
       fires: true,
-      because: `${best.path} names ${field}${runnerUp ? `, ahead of ${runnerUp.path}` : ""}`,
+      because:
+        `${best.path} names ${field}, scoring ${best.score}` +
+        (runnerUp === undefined
+          ? " and the only candidate offered"
+          : ` against ${runnerUp.path}'s ${runnerUp.score} — a margin of ${best.score - runnerUp.score} over ${scored.length} candidate(s): ${table}`),
       action: `bind ${field} to ${best.path} (${JSON.stringify(best.value)}) without asking a model to search a DOM for it`,
       pick: best.path,
     };

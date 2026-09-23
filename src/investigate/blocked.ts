@@ -1,7 +1,8 @@
 import { challengeHeader, decisiveSourceMarker, readChallenge, titleOf, widgetSourceMarker } from "../blocked/challenge.js";
 import { bank, type Bank, type Verdict } from "../heuristics/index.js";
-import { declaresProduct, visibleText } from "../heuristics/rules/investigate.js";
+import { declaresProduct, visibleText } from "../heuristics/index.js";
 import { normalize } from "../util/text.js";
+import type { Canary } from "../scraper/schema.js";
 
 /**
  * U3a and U3b: is the run broken, or is the site refusing you?
@@ -273,30 +274,17 @@ export function detectBlocking(pages: readonly PageResponse[], options: ApologyO
 /**
  * U3b. What was recorded at investigation about a page that definitely worked.
  *
- * Small and JSON-serialisable on purpose: this is committed next to the scraper,
- * read by a run months later, and diffed by a person. A few dozen words and two
- * numbers, not a stored page.
+ * Small and JSON-serialisable on purpose: this is committed next to the
+ * scraper, read by a run months later, and diffed by a person. A few dozen
+ * words and two numbers, not a stored page.
+ *
+ * The shape itself is `scraper/schema.ts`'s `Canary`, because that is where the
+ * compiled scraper carries it and a scraper is vocabulary rather than a stage.
+ * This name stays because it is the one this stage speaks in -- recording and
+ * checking a fingerprint is what `blocked.ts` is for -- but there is one
+ * definition, not two that a test has to keep equal.
  */
-export interface CanaryFingerprint {
-  /** A URL that resolved at investigation time. */
-  url: string;
-  /** When it was recorded. Drift is expected over this interval; refusal is not. */
-  recordedAt: string;
-  /** The status it answered with then. */
-  status: number;
-  /** Did it declare a product to a machine then? */
-  declaredProduct: boolean;
-  /** Characters of visible text then. A block collapses this; a redesign does not. */
-  textChars: number;
-  /**
-   * Its most frequent words, sorted. Frequency is the right selector here
-   * because the *frequent* words of a product page are its furniture — the nav,
-   * the footer, the store's name — and not the product. That is exactly what
-   * the canary needs: something that survives a redesign of the product tile
-   * and disappears when the site stops serving you a page at all.
-   */
-  words: string[];
-}
+export type CanaryFingerprint = Canary;
 
 const CANARY_WORDS = 24;
 

@@ -366,6 +366,40 @@ export function coerceValues(values: Record<string, string | null>, types: Recor
   return out;
 }
 
+/**
+ * One page as the fields it **actually read**, coerced to their declared types.
+ *
+ * `values` is null-filled by contract: every requested column is a key on every
+ * item, so a row has the same shape whatever the page answered (R4, R8). That
+ * makes `field in item.values` a statement about the *scraper* and never about
+ * the page, and anything counting coverage off it counts keys. The page's own
+ * answer is already recorded next door — `resolvedBy[field] === null` means no
+ * alternative of that field produced a value — so a field nothing resolved is
+ * **absent** here rather than null.
+ *
+ * This is the reading the determinism stage judges. `FieldStability.readOn` is
+ * "on how many sampled URLs it was read at all" and `Stability.absent` is "no
+ * sampled URL offered this field"; both are computed from `field in item`, so
+ * against a null-filled row `readOn` was always the full URL count, `absent`
+ * was unreachable, and a replay that read nothing came out `held` on every
+ * field with verdict `stable`. `DeterminismForm` already says absent and null
+ * "are never one form" — this is what makes that true rather than dead.
+ *
+ * A field that resolved and then failed its declared type stays, as null: the
+ * page answered and the coercion refused the answer, which is a type question
+ * and not a coverage one.
+ */
+export function readValues(extraction: PageExtraction, types: Record<string, FieldType | undefined>): Array<Record<string, TypedValue>> {
+  return extraction.items.map((item) => {
+    const out: Record<string, TypedValue> = {};
+    for (const [name, value] of Object.entries(item.values)) {
+      if (item.resolvedBy[name] === null || item.resolvedBy[name] === undefined) continue;
+      out[name] = coerceValue(value, types[name], item.sourceUrl);
+    }
+    return out;
+  });
+}
+
 /** The declared type of every field, top-level and detail. */
 export function fieldTypesOf(scraper: CompiledScraper): Record<string, FieldType | undefined> {
   const types: Record<string, FieldType | undefined> = {};

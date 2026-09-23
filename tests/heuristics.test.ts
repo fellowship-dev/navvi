@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { bank, HEURISTICS, HEURISTIC_IDS, UnknownHeuristicError } from "../src/heuristics/index.js";
-import { visibleText } from "../src/heuristics/rules/investigate.js";
+import { visibleText } from "../src/heuristics/index.js";
 
 /**
  * U8b's eval. Each heuristic ships with the encounter that produced it, as a

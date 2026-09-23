@@ -46,6 +46,66 @@ function matches(url: string, match: string | RegExp): boolean {
 }
 
 /**
+ * What a matching response was refused for.
+ *
+ * An empty capture has two readings -- the page never called anything that
+ * matched, or it called thirty things and every one of them was thrown away --
+ * and until these counters existed the two were the same observation. The
+ * discard is not an edge case: `make/pages.ts` captures with `match: /./`, so
+ * on every page the content-type filter silently drops every document,
+ * stylesheet, image and font the page fetched, and the 304 that cost a day to
+ * diagnose (a revalidated response carries no `content-type`, so there is no
+ * payload to bind) went out through this same door leaving nothing behind.
+ *
+ * Counters and not a log, because this runs on every response of a live page:
+ * two integers and a map of MIME types bounded at `SKIP_TYPES`, no bodies read
+ * and no URLs kept.
+ */
+export interface CaptureSkips {
+  /**
+   * Matched responses refused for their content-type, counted by the type they
+   * carried with its parameters stripped. A response that carried none counts
+   * under `""` -- which is what a 304 is.
+   */
+  contentType: Record<string, number>;
+  /** Matched responses that arrived once `limit` was already full. */
+  overLimit: number;
+  /** Matched JSON responses whose body could not be read: the page went away mid-parse. */
+  unreadable: number;
+}
+
+/**
+ * How many distinct content-types a capture names before the rest go to
+ * `other`. Bounded because the key comes off a header a server controls.
+ */
+const SKIP_TYPES = 12;
+
+function countType(counts: Record<string, number>, raw: string): void {
+  // Parameters stripped (`application/json; charset=utf-8`), or a server that
+  // varies its charset would fill the map with one type spelled six ways.
+  const type = (raw.split(";")[0] ?? "").trim().toLowerCase();
+  const key = type in counts || Object.keys(counts).length < SKIP_TYPES ? type : "other";
+  counts[key] = (counts[key] ?? 0) + 1;
+}
+
+/**
+ * One sentence about what a capture threw away, or null when it threw nothing
+ * away. Null rather than an empty string so a caller cannot log "dropped " and
+ * think it said something.
+ */
+export function describeSkips(skips: CaptureSkips): string | null {
+  const parts: string[] = [];
+  const types = Object.entries(skips.contentType).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const forType = types.reduce((sum, [, n]) => sum + n, 0);
+  if (forType > 0) {
+    parts.push(`${forType} for want of a JSON content-type (${types.map(([type, n]) => `${type === "" ? "none" : type} ${n}`).join(", ")})`);
+  }
+  if (skips.overLimit > 0) parts.push(`${skips.overLimit} after the capture was full`);
+  if (skips.unreadable > 0) parts.push(`${skips.unreadable} whose body could not be read`);
+  return parts.length === 0 ? null : `dropped ${parts.join("; ")}`;
+}
+
+/**
  * Starts capturing before navigation and returns the reader.
  *
  * A page commonly calls the same endpoint more than once -- Store B calls
@@ -55,6 +115,8 @@ function matches(url: string, match: string | RegExp): boolean {
  */
 export interface Capture {
   responses: CapturedResponse[];
+  /** What matched and was refused anyway. See `CaptureSkips`. */
+  skipped: CaptureSkips;
   /**
    * Resolves once every body read started so far has finished.
    *
@@ -71,19 +133,24 @@ export function captureJson(page: Page, options: CaptureOptions): Capture {
   const responses: CapturedResponse[] = [];
   const pending = new Set<Promise<void>>();
   const limit = options.limit ?? 20;
+  // Null-prototype: the key is a header value off a server, and `__proto__` is
+  // a legal one.
+  const skipped: CaptureSkips = { contentType: Object.create(null) as Record<string, number>, overLimit: 0, unreadable: 0 };
 
   const onResponse = (response: Response): void => {
-    if (responses.length >= limit) return;
     const url = response.url();
+    // The match runs before the limit check so `overLimit` counts responses
+    // this capture wanted, not every response a full page went on to make.
     if (!matches(url, options.match)) return;
+    if (responses.length >= limit) { skipped.overLimit += 1; return; }
     const type = response.headers()["content-type"] ?? "";
-    if (!/json/i.test(type)) return;
+    if (!/json/i.test(type)) { countType(skipped.contentType, type); return; }
     // The page may navigate away mid-read; a failed read is a response we did
     // not get, never a crash.
     const read = response
       .json()
       .then((body: unknown) => { responses.push({ url, status: response.status(), body }); })
-      .catch(() => undefined)
+      .catch(() => { skipped.unreadable += 1; })
       .finally(() => { pending.delete(read); });
     pending.add(read);
   };
@@ -91,6 +158,7 @@ export function captureJson(page: Page, options: CaptureOptions): Capture {
   page.on("response", onResponse);
   return {
     responses,
+    skipped,
     async settled() {
       // A read can start another read only in theory, but draining in a loop
       // costs nothing and removes the question.

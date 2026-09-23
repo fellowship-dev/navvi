@@ -6,16 +6,17 @@ import type { BrowserContext, Page } from "playwright";
 import { Charger, type ChargingActor } from "../billing/charge.js";
 import { buildCrawleeLaunchContext, restoreProfileCookies, saveProfileCookies } from "../browser/launch.js";
 import { createLaunchCounter, formatLaunchFailure, isLaunchFailure, launchFailureReport, resolveRelaunchKnobs, type RelaunchKnobs } from "../browser/relaunch.js";
-import { captureJson, type CapturedResponse } from "../browser/network-capture.js";
+import { continueWithoutRevalidation } from "../browser/guards.js";
+import { captureJson, describeSkips, type Capture, type CapturedResponse } from "../browser/network-capture.js";
 import { hostOf, isAllowedRequestUrl, registrableDomain } from "../browser/policy.js";
-import { ConfigurationError, createChooser, NavviError, NeedsHumanError, type Chooser } from "../chooser/index.js";
+import { ConfigurationError, createChooser, NavviError, NeedsHumanError, StateTooLargeError, type Chooser } from "../chooser/index.js";
 import { compile, type CompileResult } from "../compile/index.js";
 import { LIMITS, isAllowedUrl, resolveSources, type FieldType, type Profile, type ProxyInput, type RunInput } from "../input/schema.js";
 import type { RunSummary } from "../main.js";
 import { dismissConsent, runPreSteps, type Notifier } from "../prestep/index.js";
 import { coerceValues, extractPage, fieldTypesOf, fingerprintMatches, type ItemExtraction } from "../scraper/extract.js";
-import { cacheKey, validateScraper, type CompiledScraper, type Status, type TraceStep } from "../scraper/schema.js";
-import { CACHE_STORE_NAME, ScraperStore, ScraperStoreError } from "../scraper/store.js";
+import { cacheKey, canaryOrigin, promoteFieldAlternative, validateScraper, type CompiledScraper, type Status, type TraceStep } from "../scraper/schema.js";
+import { ScraperStore, ScraperStoreError } from "../scraper/store.js";
 import { findPlaceholders, MASK, maskUrlCredentials, MissingSecretError, redactRunInput, resolveSecrets, type CommandRunner, type Secret } from "../secrets/resolve.js";
 import { groupByTemplate, pickSampleUrls } from "../template/index.js";
 import { recordCanary, type CanaryFingerprint, type FieldFill, type PageResponse } from "../investigate/blocked.js";
@@ -28,7 +29,6 @@ import {
   judgePromotions,
   licenseToHeal,
   observeResolutions,
-  promoteFieldAlternative,
   type HealingEvent,
   type PromotionEvent,
   type ResolutionTally,
@@ -357,7 +357,14 @@ interface TemplatePlan {
   cacheHit: boolean;
   /** R20: `scraper-compiled` is charged once per template, after its first page passes the fingerprint check. */
   compileCharged: boolean;
-  /** U9c: the fingerprint of a page this template's scraper was compiled from, when one was recorded. */
+  /**
+   * U9c: the fingerprint this run checks against, which is the scraper's own
+   * (`CompiledScraper.canary`) unless the caller overrode it. `null` covers
+   * both absences — a scraper that predates the field and one whose compile
+   * page carried no fingerprint worth keeping — because the gate treats them
+   * the same way: unchecked, and a total collapse is not licensed.
+   * `canaryOrigin` is what separates them, and only `backfillCanary` cares.
+   */
   canary: CanaryFingerprint | null;
   /**
    * U9c: the evidence the repair gate weighs, per template.
@@ -661,7 +668,6 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
 
   // Cache lookup per template (R5, R38) before any browser work.
   const store = deps.store ?? (await ScraperStore.open({ actor }));
-  const canaries = await CanaryRecords.open(actor, ctxLog);
   const grouped = groupByTemplate(urls);
   try {
     for (const [templateKey, templateUrls] of grouped) {
@@ -679,7 +685,10 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
         scraper: loaded.scraper,
         cacheHit: loaded.cacheHit,
         compileCharged: loaded.cacheHit,
-        canary: deps.canary ?? (await canaries.get(key)),
+        // U9c: the canary travels on the scraper, so a cache hit brings its
+        // own. `deps.canary` overrides it — a fixture arranging the gate, or a
+        // caller that recorded a stronger one at investigation time.
+        canary: deps.canary ?? loaded.scraper?.canary ?? null,
         evidence: { pages: [], fills: {}, values: {} },
         tally: {},
         healedFields: new Set(),
@@ -769,8 +778,15 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   const profileDir = launch.userDataDir;
   const installGuard = async (context: BrowserContext): Promise<void> => {
     await installSnapshot(context);
+    // One handler, two jobs, because Playwright gives a request to one handler
+    // and a second `context.route("**/*")` would never see it. The URL policy
+    // decides whether the request goes out at all; `continueWithoutRevalidation`
+    // decides what it may be answered with -- without it the crawler had the
+    // cache-bypass half of 89e9633 and not the validator-stripping half, and a
+    // second visit to a URL in one context read every `network` field null on
+    // the default browser. See that function's header.
     await context.route("**/*", (route) => {
-      if (guard(route.request().url())) return route.continue();
+      if (guard(route.request().url())) return continueWithoutRevalidation(route);
       state.blockedRequests += 1;
       return route.abort("blockedbyclient");
     });
@@ -926,15 +942,19 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     }
     const compiled = input.followDetailPages && result.detailLink ? withDetailLink(result.scraper, result.detailLink) : result.scraper;
     const entry = trace.length > 0 && compiled.entry.mode === "trace" ? { mode: "trace" as const, url: request.url } : compiled.entry;
-    const scraper = validateScraper({ ...compiled, trace, entry });
-    await store.put(scraper);
-    plan.scraper = scraper;
     // U9c: this page compiled, so the site served it — which is the whole
     // definition of a page worth fingerprinting. Recorded now because a run
     // that heals is a run that has nothing working left to take a fingerprint
     // from: a cache hit never opens a good page, and asking the *drifted* run
     // for a known-good page is the circularity the canary exists to break.
-    plan.canary = (await canaries.record(plan.cacheKey, request.url, response?.status(), page)) ?? plan.canary;
+    //
+    // It goes into the document rather than beside it, so a recompile that
+    // fails cannot leave yesterday's canary next to today's scraper.
+    const canary = await recordPageCanary(request.url, response?.status(), page, ctxLog);
+    const scraper = validateScraper({ ...compiled, trace, entry, canary });
+    await store.put(scraper);
+    plan.scraper = scraper;
+    plan.canary = deps.canary ?? canary ?? plan.canary;
     if (entryModeFor(scraper) === "trace") {
       // The session already stands on the listing: this start URL's replay is done (R14).
       state.replayed.add(replayKey(ctx));
@@ -1023,6 +1043,51 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     return observed;
   };
 
+  /**
+   * U9c's migration: give a scraper compiled before the `canary` field existed
+   * one, off the first page it replays cleanly.
+   *
+   * `canaryOrigin` separates the two absences and this is the reason it has
+   * to. A cache hit never recompiles, so a scraper whose canary was never
+   * looked for would never acquire one, and every scraper written before
+   * 2026-09-23 would be permanently unable to tell a redesign from a refusal —
+   * the exact question the field was added to answer. A `canary: null` is left
+   * alone: that page was looked at and judged, and looking again at a
+   * different page is a different decision.
+   *
+   * The warrant is the clean page. A page whose every field resolved and whose
+   * values passed their fingerprint check is a page the site served you, which
+   * is the same evidence the compile-time recording rests on — and, unlike the
+   * compile-time one, it is evidence this run actually has.
+   */
+  async function backfillCanary(ctx: PlaywrightCrawlingContext, plan: TemplatePlan, extracted: Extracted): Promise<void> {
+    if (state.stop || extracted.failed.size > 0 || extracted.items.length === 0) return;
+    if (plan.scraper === null || canaryOrigin(plan.scraper) !== "unrecorded") return;
+    // Under the heal lock: this writes `plan.scraper`, and so does a repair.
+    await withHealLock(async () => {
+      const scraper = plan.scraper;
+      if (!scraper || canaryOrigin(scraper) !== "unrecorded") return;
+      const canary = await recordPageCanary(ctx.page.url(), ctx.response?.status(), ctx.page, ctxLog);
+      let filled: CompiledScraper;
+      try {
+        filled = validateScraper({ ...scraper, canary });
+        await store.put(filled);
+      } catch (error) {
+        // A canary that will not store is not a reason to stop scraping: the
+        // run goes on with no canary, exactly as it did before the field.
+        ctxLog(`canary not stored for ${plan.templateKey}: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
+      plan.scraper = filled;
+      plan.canary = deps.canary ?? canary ?? plan.canary;
+      ctxLog(
+        canary
+          ? `canary recorded for ${plan.templateKey} off ${ctx.page.url()}: this scraper predates the field and replayed clean, so the page it read is the known-good one`
+          : `canary refused for ${plan.templateKey}: the page it replayed clean on carries no fingerprint that could fail`,
+      );
+    });
+  }
+
   async function heal(ctx: PlaywrightCrawlingContext, plan: TemplatePlan, failure: HealFailure): Promise<CompiledScraper | null> {
     if (!plan.scraper || state.stop) return null;
 
@@ -1066,32 +1131,37 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     try {
       outcome = await healer({ page: ctx.page, scraper: plan.scraper, chooser, failure: licensed, allowMutations: input.allowMutations });
     } catch (error) {
-      // R19: a chooser failure skips healing; the page counts as unhealed and the crawl goes on.
-      if (error instanceof NeedsHumanError) throw error;
       /**
-       * A `ConfigurationError` is not a chooser failure and R19 was never about
-       * it. `RecordedOptionsMismatchError` says so in its own header — the
-       * fixture is stale, retrying cannot help, and the message has to reach
-       * whoever re-records it — and `BaseChooser` deliberately lets a
-       * `NavviError` through its retry loop unwrapped so that it does.
+       * R19: a chooser failure skips healing; the page counts as unhealed and
+       * the crawl goes on.
        *
-       * Swallowing it here undid all of that one layer further out, and the
-       * cost was measured on 2026-09-23. `tests/acceptance.test.ts` failed
-       * about one full-suite run in three with four null fields on one page
-       * and no cause anywhere in what the test could see. The recording was
-       * answering a question about a different page: `rankHealCandidates`
-       * scores a candidate whose value matches an earlier sample, so the order
-       * of the options is value-dependent and therefore page-dependent, and
-       * the demo rested on an unwritten invariant about which page takes the
-       * heal first. `RecordedChooser` refused the stale index exactly as
-       * designed, this line muted it, and `summaryOf` still reported
-       * `succeeded` because twelve items came back — one of them empty.
+       * **R19 is about a page, and every error that carries a run status is
+       * about the run.** That distinction was made one class at a time —
+       * `NeedsHumanError`, then `ConfigurationError` (a544e96) — and each time
+       * it was made for the same reason, which is the reason to stop making it
+       * one class at a time. A `BudgetExhaustedError` or a
+       * `ModelUnavailableError` swallowed here becomes `unhealed += 1`, and
+       * `summaryOf` calls a run `succeeded` whenever any field on the page
+       * filled: a run that ran out of chooser budget on page 3 of 4,000 came
+       * back green with nulls down one column. The status union exists so that
+       * a run can say which of those happened, and this line was throwing the
+       * answer away.
        *
-       * Two nights went into a different flake this week for the same reason:
-       * a failure whose cause was computed and then discarded before anyone
-       * could read it.
+       * So the test is `NavviError`, which is exactly "this error names a run
+       * status". `stopFromError` already knows what to do with every one of
+       * them; nothing new is decided here.
        */
-      if (error instanceof ConfigurationError) throw error;
+      if (error instanceof NavviError) throw error;
+      /**
+       * `StateTooLargeError` needed its own line here until 2026-09-23,
+       * because it extended plain `Error`. It extends `NavviError` now, so the
+       * test above catches it and this is one rule rather than two.
+       *
+       * `InvalidAnswerError` is the fourth of that family and needs no line:
+       * no chooser throws it out, `BaseChooser.fail` wraps it as the `cause`
+       * of a `NeedsHumanError` or a `ModelUnavailableError`, and it arrives
+       * here as one of those.
+       */
       ctxLog(`healing skipped on ${ctx.page.url()}: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
@@ -1126,7 +1196,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
    * Only a scraper that actually declares a `network` alternative pays for
    * this, so nothing changes for a scraper that does not.
    */
-  const captures = new WeakMap<Page, { responses: CapturedResponse[]; settled: () => Promise<void> }>();
+  const captures = new WeakMap<Page, Capture>();
   const wantsNetwork = plans.some((p) => p.scraper && Object.values(p.scraper.fields).some((f) => f.alternatives.some((a) => a.source === "network")));
 
   const startCapture = (page: Page): void => {
@@ -1134,8 +1204,80 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     captures.set(page, captureJson(page, { match: /./, limit: 40 }));
   };
   const capturedFor = (page: Page): CapturedResponse[] => captures.get(page)?.responses ?? [];
+  /**
+   * Once per run, when the capture came back with nothing: an empty capture
+   * and a capture that discarded forty responses look identical from here, and
+   * the difference is the whole diagnosis. Once, because the second page's
+   * answer is the first page's answer.
+   */
+  let skipsReported = false;
+  /**
+   * The payloads a scraper's `network` alternatives are compiled against, by
+   * the substring they are matched on. A scraper that reads no payload has
+   * none and waits for nothing.
+   */
+  const payloadMatchesOf = (scraper: CompiledScraper): string[] => {
+    const matches = new Set<string>();
+    for (const field of Object.values(scraper.fields)) {
+      for (const alternative of field.alternatives) {
+        if (alternative.source === "network") matches.add(alternative.match ?? "");
+      }
+    }
+    return [...matches];
+  };
+
+  /**
+   * Wait for the payloads this scraper reads to actually arrive.
+   *
+   * `Capture.settled()` drains body reads that have *started*; it is not a wait
+   * for a response to turn up. So a page whose `fetch` had not yet returned
+   * when the crawler reached it was extracted against an empty capture, and
+   * every `network`-source field came back null -- on a page that was served
+   * perfectly, with the payload arriving milliseconds later.
+   *
+   * It is the same defect as the driver's 25 s settle cap, one driver over, and
+   * it read the same way: a field that was there and was not waited for is
+   * indistinguishable from a field the site stopped serving. `make/pages.ts`
+   * requires the payload *count* to hold still before it believes a render;
+   * this is the crawler's smaller version of that, and it can be smaller
+   * because a compiled scraper already says which payloads it reads, so the
+   * wait is for those rather than for quiet in general.
+   *
+   * Bounded, and it says when the bound was reached: a payload that never
+   * arrived is a fact worth logging, and it is not the same fact as a payload
+   * that arrived and disagreed.
+   */
+  const PAYLOAD_WAIT_MS = 10_000;
+  const PAYLOAD_POLL_MS = 100;
+  const awaitPayloads = async (page: Page, capture: Capture, wanted: readonly string[]): Promise<void> => {
+    if (wanted.length === 0) return;
+    const has = (match: string): boolean => capture.responses.some((response) => response.url.includes(match));
+    const deadline = Date.now() + PAYLOAD_WAIT_MS;
+    while (Date.now() < deadline) {
+      if (wanted.every(has)) return;
+      await page.waitForTimeout(PAYLOAD_POLL_MS).catch(() => undefined);
+    }
+    const missing = wanted.filter((match) => !has(match));
+    if (missing.length > 0) {
+      ctxLog(
+        `waited ${PAYLOAD_WAIT_MS} ms on ${page.url()} and ${missing.length} of ${wanted.length} compiled payload(s) never arrived ` +
+          `(${missing.map((match) => `"${match}"`).join(", ")}): the fields read from them are unread, not absent`,
+      );
+    }
+  };
+
   /** Body reads are async: a response that arrived is not yet one that can be read. */
-  const settleCaptures = async (page: Page): Promise<void> => { await captures.get(page)?.settled(); };
+  const settleCaptures = async (page: Page, scraper?: CompiledScraper): Promise<void> => {
+    const capture = captures.get(page);
+    if (!capture) return;
+    if (scraper) await awaitPayloads(page, capture, payloadMatchesOf(scraper));
+    await capture.settled();
+    if (skipsReported || capture.responses.length > 0) return;
+    const dropped = describeSkips(capture.skipped);
+    if (!dropped) return;
+    skipsReported = true;
+    ctxLog(`captured no JSON on ${page.url()}: ${dropped}`);
+  };
 
   interface Extracted {
     scraper: CompiledScraper;
@@ -1145,7 +1287,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   }
 
   async function extractChecked(page: Page, scraper: CompiledScraper, sourceUrl: string): Promise<Extracted> {
-    await settleCaptures(page);
+    await settleCaptures(page, scraper);
     const extraction = await extractPage(page, scraper, {
       sourceUrl,
       fields: [...fields, ...detailFieldNames],
@@ -1289,6 +1431,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
         else if (!state.stop) state.unhealed += 1;
       });
     }
+    else await backfillCanary(ctx, plan, current);
     // U9b: the resolution votes are the *settled* reading — after a repair,
     // not before — because the alternative that answered is the one that put
     // the value in the row.
@@ -1505,96 +1648,41 @@ const HEAL_CORPUS_PAGES = 24;
 /** How many readings of one field the gate keeps for the variation check. Enough to be a sample, bounded so a long run is not a leak. */
 const FIELD_VALUE_SAMPLES = 200;
 
-/** How many words a canary has to carry before it is worth recording. See `CanaryRecords.record`. */
+/**
+ * How many words a canary has to carry before it is worth recording.
+ *
+ * `checkCanary` reads an empty word list as full overlap, so a fingerprint
+ * taken off a page with nothing on it resolves against every page there will
+ * ever be — including the refusal it exists to catch. A canary that always
+ * resolves is worse than none: none reads `unchecked` and refuses to license a
+ * total collapse, and that one reads `resolved` and licenses a repair against
+ * an error page.
+ */
 const MIN_CANARY_WORDS = 8;
 
 /**
- * Where a canary lives, and the honest statement of why it lives there.
+ * Fingerprint the page in front of us, or say why not.
  *
- * **It belongs on `CompiledScraper`.** A canary is a property of one compiled
- * scraper — recorded from the page that compiled it, read by the run that
- * replays it, and meaningless apart from it — and the store already keeps the
- * two together by key. `CompiledScraperSchema` is the right home and
- * `src/scraper/schema.ts` was not this session's file to change, so this
- * writes a record beside the scraper in the scraper's own store instead. The
- * two can fall out of step, which is the whole objection to a side-car: a
- * `forceRecompile` that failed leaves the old canary in place. The migration
- * is a `canary` field on the scraper and the deletion of this class.
+ * `null` is a decision and is stored as one (`CompiledScraper.canary: null`):
+ * this page was looked at and judged unable to disprove anything. It is not
+ * the same as a scraper that carries no `canary` key, which is one compiled
+ * before the field existed — see `canaryOrigin`.
  *
- * Everything here fails quietly toward `unchecked`. A canary that cannot be
- * read is not evidence that the site is refusing you, and a run that could not
- * open its own key-value store has a bigger problem than healing.
+ * Everything here fails quietly toward `null`. A page that could not be read
+ * is not evidence that the site is refusing you.
  */
-class CanaryRecords {
-  private constructor(
-    private readonly store: KeyValueStore | null,
-    private readonly log: (message: string) => void,
-  ) {}
-
-  static async open(actor: CrawlActor, log: (message: string) => void): Promise<CanaryRecords> {
-    try {
-      return new CanaryRecords(await actor.openKeyValueStore(CACHE_STORE_NAME), log);
-    } catch (error) {
-      log(`canaries unavailable: ${error instanceof Error ? error.message : String(error)}`);
-      return new CanaryRecords(null, log);
-    }
-  }
-
-  /** The key a canary is filed under. Prefixed so it cannot collide with a cache key. */
-  static keyFor(cacheKey: string): string {
-    return `canary-${cacheKey}`.slice(0, 256);
-  }
-
-  async get(cacheKey: string): Promise<CanaryFingerprint | null> {
-    if (!this.store) return null;
-    try {
-      const raw = await this.store.getValue<unknown>(CanaryRecords.keyFor(cacheKey));
-      return isCanaryFingerprint(raw) ? raw : null;
-    } catch {
+async function recordPageCanary(url: string, status: number | undefined, page: Page, log: (message: string) => void): Promise<CanaryFingerprint | null> {
+  try {
+    const canary = recordCanary({ url, status: status ?? 200, body: await page.content() });
+    if (canary.words.length < MIN_CANARY_WORDS) {
+      log(`no canary recorded for ${url}: ${canary.words.length} words is not a fingerprint that could fail`);
       return null;
     }
+    return canary;
+  } catch (error) {
+    log(`no canary recorded for ${url}: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
   }
-
-  /**
-   * Fingerprint a page that just compiled, and refuse to record a fingerprint
-   * too thin to disprove anything.
-   *
-   * `checkCanary` reads an empty word list as full overlap, so a canary taken
-   * off a page with nothing on it resolves against every page there will ever
-   * be — including the refusal it is supposed to catch. A canary that always
-   * resolves is worse than none: none reads `unchecked` and refuses a total
-   * collapse, and that one reads `resolved` and licenses a repair against an
-   * error page.
-   */
-  async record(cacheKey: string, url: string, status: number | undefined, page: Page): Promise<CanaryFingerprint | null> {
-    if (!this.store) return null;
-    try {
-      const canary = recordCanary({ url, status: status ?? 200, body: await page.content() });
-      if (canary.words.length < MIN_CANARY_WORDS) {
-        this.log(`no canary recorded for ${url}: ${canary.words.length} words is not a fingerprint that could fail`);
-        return null;
-      }
-      await this.store.setValue(CanaryRecords.keyFor(cacheKey), canary);
-      return canary;
-    } catch (error) {
-      this.log(`no canary recorded for ${url}: ${error instanceof Error ? error.message : String(error)}`);
-      return null;
-    }
-  }
-}
-
-/** A stored canary, checked before it is trusted: it comes back off a key-value store months later. */
-function isCanaryFingerprint(value: unknown): value is CanaryFingerprint {
-  if (value === null || typeof value !== "object") return false;
-  const record = value as Partial<CanaryFingerprint>;
-  return (
-    typeof record.url === "string" &&
-    typeof record.recordedAt === "string" &&
-    typeof record.textChars === "number" &&
-    typeof record.declaredProduct === "boolean" &&
-    Array.isArray(record.words) &&
-    record.words.every((word) => typeof word === "string")
-  );
 }
 
 /** On the platform a secret may also be a `SECRET_<NAME>` record in the run's default store. */

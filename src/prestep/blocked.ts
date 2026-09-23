@@ -10,7 +10,7 @@ import {
 } from "../blocked/challenge.js";
 import { getCandidates } from "../browser/snapshot.js";
 import { bank, type Bank } from "../heuristics/index.js";
-import { declaresProduct } from "../heuristics/rules/investigate.js";
+import { declaresProduct } from "../heuristics/index.js";
 
 /**
  * Blocked-page classification (R9, R13). Code-only: title, body text, known

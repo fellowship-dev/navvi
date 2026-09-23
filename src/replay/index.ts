@@ -87,7 +87,6 @@ export {
   licenseToHeal,
   looksLikeBadge,
   observeResolutions,
-  promoteFieldAlternative,
   rankHealCandidates,
   stepHealQuestionId,
   unmappedFrom,

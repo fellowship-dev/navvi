@@ -81,10 +81,15 @@ function manuscript(over: Partial<Manuscript> = {}): Manuscript {
    * and keeps the shallow one as the free alternative.
    */
   const fact = (path: string) => money.find((candidate) => candidate.path === path || candidate.aliases.includes(path))!;
+  // A tier-2 alias is another leaf of the same payload, so it is read through
+  // the same endpoint as the binding - which is the one case where the old bare
+  // path was a complete alternative, and is now said rather than assumed.
   const lead = (path: string, candidate: { path: string; values: TypedValue[]; aliases: string[] }) => ({
     path,
     values: candidate.values,
-    aliases: [candidate.path, ...candidate.aliases].filter((alias) => alias !== path),
+    aliases: [candidate.path, ...candidate.aliases]
+      .filter((alias) => alias !== path)
+      .map((alias) => ({ path: alias, source: "network" as const, match: MATCH })),
   });
   const listPrice = lead("productData.prices[price-list-std]", fact("productData.prices[price-list-std]"));
   const salePrice = lead("productData.prices[price-sale-std]", fact("productData.prices[price-sale-std]"));
@@ -202,7 +207,9 @@ describe("reconcile: obtainable and not obtainable", () => {
     expect(listPrice.typeInferred).toBe(false);
     expect(listPrice.values).toEqual([4990, 12990, 7490]);
     // `productData.price` states the same fact; the compile gets it for free.
-    expect(listPrice.aliases).toContain("productData.price");
+    // Each alias says how it is read, not only where: for a tier-2 binding
+    // that is the endpoint the leaf came out of.
+    expect(listPrice.aliases).toContainEqual({ path: "productData.price", source: "network", match: MATCH });
 
     const sku = result.notObtainable.find((field) => field.field === "sku")!;
     expect(sku.kind).toBe("no-candidate");
@@ -250,6 +257,56 @@ describe("reconcile: available but not requested", () => {
   it("names productData.id, which is the sku the spec could not bind", () => {
     const result = reconcile(manuscript(), SPEC, { now: AT });
     expect(result.available.map((leaf) => leaf.path)).toContain("productData.id");
+  });
+
+  /**
+   * U6c. `machine-value-is-not-a-fact` was the twelfth heuristic in the bank
+   * and, until this, the only one nothing in `src/` executed.
+   * `telemetry.renderedAt` reached the bottom of this list by a bare
+   * arithmetic rank — not anchored, so one point — which is the same rank an
+   * ordinary declared leaf gets on a tier that never anchored anything, and
+   * the row carried no sentence a client could disagree with. The rank *was*
+   * the judgement "this is the machine talking to itself", and it was made
+   * silently.
+   */
+  it("says why a leaf is the machine's bookkeeping instead of only sorting it last", () => {
+    const result = reconcile(manuscript(), SPEC, { now: AT });
+    const at = (path: string): number => result.available.findIndex((leaf) => leaf.path === path);
+    const renderedAt = result.available.find((leaf) => leaf.path === "productData.telemetry.renderedAt");
+
+    expect(renderedAt, "the leaf is still offered to the client; the rule ranks it, it does not delete it").toBeDefined();
+    expect(renderedAt!.machinery?.heuristic).toBe("machine-value-is-not-a-fact");
+    expect(renderedAt!.machinery?.because).toContain("epoch milliseconds");
+    // The path agreeing is said after the evidence, never instead of it.
+    expect(renderedAt!.machinery?.because).toContain('the path names "telemetry" too');
+    expect(renderedAt!.machinery?.action).toContain("not a fact about the record");
+    expect(renderedAt!.because).toContain("the machine's own bookkeeping");
+
+    // It sorts below every leaf the rule did not fire on — including the
+    // session id, which the rule deliberately declines on because its value is
+    // six characters and a key name decides nothing here.
+    const sessionId = result.available.find((leaf) => leaf.path === "productData.telemetry.sessionId")!;
+    expect(sessionId.machinery, "declining is not firing, and the row must not claim a reason it was not given").toBeUndefined();
+    expect(at("productData.telemetry.sessionId")).toBeLessThan(at("productData.telemetry.renderedAt"));
+    expect(at("productData.laboratory")).toBeLessThan(at("productData.telemetry.renderedAt"));
+  });
+
+  it("puts the rule's sentence in reconcile.md, which is where a client dismisses the row", () => {
+    const md = render(reconcile(manuscript(), SPEC, { now: AT }));
+    expect(md).toContain("| `machine-value-is-not-a-fact` |");
+    expect(md).toContain("The last rows are there because a rule said so, not because the count came out low:");
+    expect(md).toContain("epoch milliseconds");
+  });
+
+  it("a case that switches the rule off ranks the leaf like any other, and claims no reason it was not given", () => {
+    const off = reconcile(manuscript(), SPEC, {
+      now: AT,
+      heuristics: { "machine-value-is-not-a-fact": { enabled: false, note: "this case ranks every payload leaf alike" } },
+    });
+    const renderedAt = off.available.find((leaf) => leaf.path === "productData.telemetry.renderedAt")!;
+    expect(renderedAt.machinery).toBeUndefined();
+    expect(renderedAt.because).not.toContain("bookkeeping");
+    expect(render(off)).not.toContain("The last rows are there because a rule said so");
   });
 
   it("drops a leaf that neither moves nor was ever shown", () => {

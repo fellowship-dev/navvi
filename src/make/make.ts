@@ -3,7 +3,7 @@ import { chooseSample, investigate, probeFrom, render as renderManuscript, type 
 import { outputSchema, reconcile, render as renderReconcile, summarize as summarizeReconcile, type Reconciliation } from "../reconcile/index.js";
 import { NothingCompilableError, compileFromReconciliation, renderRationale, type ProvenCompile } from "../compile/index.js";
 import { DEFAULT_REPLAYS, DEFAULT_SAMPLE_URLS, loadListSources, measureDeterminism, summarizeDeterminism, unstableFields, type Determinism, type PageReading } from "../replay/index.js";
-import { renderMachine, type CompiledScraper } from "../scraper/index.js";
+import { canaryOrigin, fieldTypesOf, readValues, renderMachine, type CompiledScraper } from "../scraper/index.js";
 import { groupByTemplate } from "../template/index.js";
 import { SpecSchema, blockingQuestions, requestedFields, type Rubric, type Spec } from "../spec/schema.js";
 import { briefToSpec } from "../spec/spec.js";
@@ -39,7 +39,7 @@ import type { Pages } from "./pages.js";
  * carries `skipped` for exactly this reason — *"tier 2 covered nothing" and
  * "tier 2 was never spent" are the same empty `covered` list and very different
  * facts* — and `Manuscript.canaryBecause` exists because refusing to record a
- * canary is right and refusing silently is not. So `StageOutcome` has five
+ * canary is right and refusing silently is not. So `StageOutcome` has six
  * values and each one prints differently:
  *
  *  - `ran` — it did its work this run, and the block is the stage's own.
@@ -48,6 +48,9 @@ import type { Pages } from "./pages.js";
  *    if it were new has been lied to by a green run.
  *  - `skipped` — it could have run and deliberately did not, with the reason.
  *  - `stopped` — it ran and refuses to hand anything downstream.
+ *  - `threw` — it raised, which is a defect in navvi rather than a statement
+ *    about this run. Named for the same reason as the other four: the stack it
+ *    used to arrive as said which line, and never which stage.
  *  - `not reached` — an earlier stage stopped.
  *
  * ## The order, and why determinism sits where it does
@@ -64,9 +67,48 @@ import type { Pages } from "./pages.js";
  * never reaches `scraper.json` at all.
  */
 
+/**
+ * Which reading the determinism stage was handed, as a ledger argument.
+ *
+ * `determinism.json` keeps its shape and its `version: 1` across this change —
+ * every key is still there and still typed the same — so an artifact written
+ * before it is **indistinguishable to a reader** from one written after, and
+ * it says something different. `keys` counted the columns the scraper compiled;
+ * `resolved` counts the columns the page answered. Under `keys` every field's
+ * `readOn` was the sampled URL count and no field was ever `absent`; a reader
+ * comparing a new run against an old one would see coverage collapse and read
+ * it as the site changing.
+ *
+ * Nothing in navvi's code is affected — downstream reads `verdict` and
+ * `rejected`, and both mean exactly what they did. So this is a **documented
+ * break for the human reader**, and the handling is that no work directory
+ * mixes the two: the reading is an argument of the stage, so a
+ * `determinism.json` recorded under `keys` is stale and is re-measured rather
+ * than reused under the new sentence.
+ *
+ * The right fix is `Determinism.version: 2`, which belongs to
+ * `src/replay/determinism.ts` and to whoever owns that artifact's type.
+ */
+const DETERMINISM_READING = "resolved";
+
 // ----------------------------------------------------------------- the report
 
-export type StageOutcome = "ran" | "reused" | "skipped" | "stopped" | "not reached";
+/**
+ * `threw` is the sixth and it is the one that was missing.
+ *
+ * `stopped` is a statement about this run's inputs that a person can act on.
+ * An exception is not: it is a defect in navvi, and every stage but `spec` and
+ * `compile` let one out of `make()` entirely — no `MakeResult`, no stage
+ * report, and a bare stack at `bin/cli.ts`. A driver whose whole purpose is
+ * *"every stage says what it read, what it wrote, and whether it ran at all"*
+ * was silent about the one failure most likely to happen, because the stages
+ * that throw are the stages that open a browser.
+ *
+ * So a throw is an outcome like the other five. There is no sixth `MakeStatus`
+ * to go with it: the run did not deliver, which is `short`, and `threw` on the
+ * stage is what says why.
+ */
+export type StageOutcome = "ran" | "reused" | "skipped" | "stopped" | "threw" | "not reached";
 
 export interface StageReport {
   stage: StageName;
@@ -180,6 +222,21 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
     return { status, stoppedAt: stage, because, stages, work: work.dir };
   };
 
+  /**
+   * F7: which stage the driver is inside, so an exception can be attributed to
+   * one instead of arriving as a stack with no address.
+   *
+   * A marker and not an `at(stage, fn)` wrapper because the stages are inline
+   * blocks of this function and not callables: wrapping each in a closure would
+   * restructure the whole driver to carry one string. `at` is called on the
+   * line the section comment already marks, so the two cannot drift apart
+   * without somebody deleting the comment.
+   */
+  let running: StageName = "spec";
+  const at = (stage: StageName): void => {
+    running = stage;
+  };
+
   try {
     // ------------------------------------------------------------------ spec
 
@@ -227,7 +284,7 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
     const declared = Object.entries(types);
     if (declared.length > 0) {
       say(makeBullet("types", `${declared.map(([name, type]) => `${name}:${type}`).join(", ")}`, "-", answerWidth));
-      say(makeNote("declared on the command line: a spec field has no column type, so these ride in make.json", answerWidth + 4));
+      say(makeNote("declared on the spec's field list, so a resume keeps them without repeating --answer", answerWidth + 4));
     }
 
     const blocking = blockingQuestions(spec);
@@ -250,6 +307,8 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
     }
 
     // ---------------------------------------------------------------- sample
+
+    at("sample");
 
     const sampleParams = { urls: [...options.urls], fromUrls: [...options.fromUrls], size: options.sampleSize ?? null };
     const sampleState = work.currency("sample", ["spec.json"], sampleParams);
@@ -283,7 +342,9 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
 
     // ----------------------------------------------------------- investigate
 
-    const fields: RequestedField[] = spec.fields.map((field) => (types[field.name] ? { name: field.name, type: types[field.name] as FieldType } : { name: field.name }));
+    at("investigate");
+
+    const fields: RequestedField[] = spec.fields.map((field) => (field.type === undefined ? { name: field.name } : { name: field.name, type: field.type }));
     const investigateParams = { site: spec.target.site, fields };
     const investigateState = work.currency("investigate", ["spec.json", "sample.json"], investigateParams);
     let manuscript: Manuscript;
@@ -317,6 +378,8 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
 
     // ------------------------------------------------------------- reconcile
 
+    at("reconcile");
+
     const reconcileState = work.currency("reconcile", ["spec.json", "investigation.json"], {});
     let reconciliation: Reconciliation;
     if (reconcileState.current && !options.force) {
@@ -336,6 +399,8 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
     }
 
     // ---------------------------------------------------------------- schema
+
+    at("schema");
 
     const schemaState = work.currency("schema", ["spec.json", "reconcile.json"], {});
     if (schemaState.current && !options.force) {
@@ -359,6 +424,8 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
 
     // ----------------------------------------------------------- determinism
 
+    at("determinism");
+
     const entryUrl = bindingUrls(manuscript)[0] ?? sample.picks[0]?.url;
     if (entryUrl === undefined) return stop("compile", "the sample has no URL a replay could start from", "short");
     const templateKey = templateKeyOf(bindingUrls(manuscript).length > 0 ? bindingUrls(manuscript) : sample.picks.map((pick) => pick.url));
@@ -366,24 +433,19 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
 
     const replayUrls = bindingUrls(manuscript).slice(0, DEFAULT_SAMPLE_URLS);
     const replays = options.replays ?? DEFAULT_REPLAYS;
-    const determinismParams = { replays, urls: replayUrls, compile: compileOptions };
+    const determinismParams = { replays, urls: replayUrls, compile: compileOptions, reading: DETERMINISM_READING };
     const determinismState = work.currency("determinism", ["spec.json", "investigation.json", "reconcile.json"], determinismParams);
 
     let determinism: Determinism | null = null;
     let determinismBecause = "";
     /**
      * What the determinism replays actually read, counted at the seam that
-     * takes them, because `determinism.json` cannot answer it.
+     * takes them.
      *
-     * `FieldStability.readOn` is documented as "on how many sampled URLs it was
-     * read at all" and is computed from `field in item` — the presence of the
-     * *key*. `extractPage` null-fills every compiled field on every page, so
-     * that key is always there, `readOn` is always the full URL count, and the
-     * `absent` outcome is unreachable through this driver. A replay that read
-     * nothing therefore lands as `held` on every field, `0 fields moved`,
-     * verdict `stable`, and a determinism record that names no value at all —
-     * a held field stores no forms, so nothing in the artifact can be checked
-     * against a page.
+     * `determinism.json` can now be asked — see `readFor` — but only per field
+     * and per URL. This is the denominator underneath it: every field of every
+     * item of every reading, so `read 3 of 60` and `read 45 of 60` are two
+     * different sentences and neither can be mistaken for `stable`.
      *
      * Measured on store-b.example, 2026-09-23: three payload-bound fields printed
      * `determinism 3 replays x 3 URLs, 0 fields moved` and then, four lines
@@ -394,20 +456,42 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
      * a person was going to believe.
      */
     let replayRead: { read: number; of: number } | null = null;
-    const count = async (reading: Promise<PageReading>): Promise<PageReading> => {
+    /**
+     * One reading for the determinism stage, taken through `extract` rather
+     * than `read`.
+     *
+     * The two are one page visit — `Pages.read` is `readingOf(extract(...))` —
+     * and the difference is the whole of the 2026-09-23 defect. `readingOf`
+     * coerces `ItemExtraction.values`, which is null-filled so that a row has
+     * every requested column whatever the page answered (R4, R8); `readValues`
+     * drops the fields nothing resolved, which is what the page actually said.
+     * `judgeDeterminism` counts `field in item`, so with the null-filled
+     * reading `readOn` was the full URL count on every field, `Stability.absent`
+     * was unreachable and a replay that read nothing was `held` everywhere.
+     *
+     * Nothing about the judgement changed. It was asked the wrong reading.
+     */
+    const readFor = async (scraper: CompiledScraper, url: string, driver: Pages): Promise<PageReading> => {
+      const extraction = await driver.extract(scraper, url);
       const into = (replayRead ??= { read: 0, of: 0 });
-      const taken = await reading;
-      for (const item of taken) {
-        for (const value of Object.values(item)) {
+      for (const item of extraction.items) {
+        for (const name of Object.keys(scraper.fields)) {
           into.of += 1;
-          if (value !== null && value !== undefined) into.read += 1;
+          if (item.resolvedBy[name] !== null && item.resolvedBy[name] !== undefined) into.read += 1;
         }
       }
-      return taken;
+      return readValues(extraction, fieldTypesOf(scraper));
     };
     if (determinismState.current && !options.force) {
       determinism = requireJson<Determinism>(work, PRIMARY.determinism);
       say(makeStage("determinism", `reused — ${determinismState.because}`, work.path(PRIMARY.determinism)));
+      // The guard is not a closure round this session's readings any more. A
+      // reused record is read back and recounted, so the second run of `navvi
+      // make` says exactly what the first one did about a blank replay.
+      const reusedCoverage = coverageOf(determinism);
+      if (reusedCoverage.read < reusedCoverage.of) {
+        say(makeBullet(reusedCoverage.read === 0 ? "read nothing" : "read partly", thinReplay(reusedCoverage, null, determinism.verdict), "!"));
+      }
       record("determinism", "reused", determinismState.because, [PRIMARY.determinism]);
     } else if (options.offline || !deps.openPages) {
       determinismBecause = options.offline
@@ -437,7 +521,7 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
         throw error;
       }
       const driver = await needPages();
-      determinism = await measureDeterminism(replayUrls, { read: (url) => count(driver.read(provisional.scraper, url)) }, {
+      determinism = await measureDeterminism(replayUrls, { read: (url) => readFor(provisional.scraper, url, driver) }, {
         site: spec.target.site,
         fields: Object.keys(provisional.scraper.fields),
         replays,
@@ -449,9 +533,17 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
       say(makeNote("read through a scraper compiled from this reconciliation, not from scraper.json, which does not exist yet"));
       // `measureDeterminism` always takes at least one reading, so this is a
       // real count and not an unset one; a driver that read nothing at all
-      // leaves `{ read: 0, of: 0 }`, which `blankReplay` says differently.
+      // leaves `{ read: 0, of: 0 }`, which `thinReplay` says differently.
+      //
+      // The bullet fires on every reading short of complete, not only on the
+      // blank one. A replay that read 1 of 27 still prints `0 fields moved`
+      // and `stable`, and the one field it read is as good a witness to
+      // stability as all 27 would have been — which is the same believed
+      // sentence with a smaller number behind it.
       replayRead ??= { read: 0, of: 0 };
-      if (replayRead.read === 0) say(makeBullet("read nothing", blankReplay(replayRead, determinism.verdict), "!"));
+      if (replayRead.read < replayRead.of || replayRead.of === 0) {
+        say(makeBullet(replayRead.read === 0 ? "read nothing" : "read partly", thinReplay(coverageOf(determinism), replayRead, determinism.verdict), "!"));
+      }
       record("determinism", "ran", determinism.because, [PRIMARY.determinism]);
     }
 
@@ -464,6 +556,8 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
     }
 
     // --------------------------------------------------------------- compile
+
+    at("compile");
 
     const rejected = determinism === null ? [] : unstableFields(determinism);
     const compiling: Reconciliation = rejected.length === 0 ? reconciliation : { ...reconciliation, obtainable: reconciliation.obtainable.filter((field) => !rejected.includes(field.field)) };
@@ -493,14 +587,28 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
         throw error;
       }
       scraper = compiled.scraper;
-      work.writeJson(PRIMARY.compile, compiled.scraper);
+      work.writeJson(PRIMARY.compile, scraper);
       work.write("rationale.md", renderRationale(compiled.rationale));
       work.write("machine.mmd", renderMachine());
       work.record("compile", ["spec.json", "investigation.json", "reconcile.json"], compileParams);
 
       say(makeStage("compile", "", work.path(PRIMARY.compile)));
       say(makeRow(`${Object.keys(compiled.scraper.fields).length} fields`, alternativesLine(compiled)));
-      const compileWidth = bulletWidth([...rejected, ...compiled.unbound.map((field) => field.field), "unproved"]);
+      const compileWidth = bulletWidth([...rejected, ...compiled.unbound.map((field) => field.field), "unproved", "canary"]);
+      // Which of the three states this scraper ships with, and the
+      // investigation's own sentence for it. A scraper that cannot tell a
+      // redesign from a refusal is one a healer may not repair, so it is not a
+      // detail of the artifact — it is a bound on what every later run may do.
+      say(
+        makeBullet(
+          "canary",
+          canaryOrigin(scraper) === "recorded"
+            ? `recorded onto the scraper — ${manuscript.canaryBecause}`
+            : `refused, so a later replay may not backfill one — ${manuscript.canaryBecause}`,
+          canaryOrigin(scraper) === "recorded" ? "-" : "!",
+          compileWidth,
+        ),
+      );
       for (const field of rejected) say(makeBullet(field, "dropped: it did not hold still across the determinism replays, and a rejection is not a repair", "!", compileWidth));
       for (const field of compiled.unbound) say(makeBullet(field.field, `not bound: ${field.because}`, "!", compileWidth));
       if (determinism === null) say(makeBullet("unproved", `nothing was measured for stability — ${determinismBecause}`, "!", compileWidth));
@@ -510,6 +618,8 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
     }
 
     // ---------------------------------------------------------------- verify
+
+    at("verify");
 
     const unbound = compiled?.unbound.map((field) => field.field) ?? reconciliation.obtainable.filter((field) => !(field.field in scraper.fields)).map((field) => field.field);
     let extractions = null as Awaited<ReturnType<Pages["extract"]>>[] | null;
@@ -552,6 +662,33 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
     record("verify", "ran", card.gradeBecause, [PRIMARY.verify]);
 
     return { status: "delivered", stages, work: work.dir };
+  } catch (error) {
+    /**
+     * F7: an exception is a stage outcome, not an escape from the transcript.
+     *
+     * Before this, a throw out of `sample`, `investigate`, `reconcile`,
+     * `schema`, `determinism` or `verify` left `make()` entirely: the caller
+     * got no `MakeResult`, the report had no line for it, and `bin/cli.ts`
+     * printed a stack. That is exactly the failure this driver exists to
+     * prevent one layer up — the transcript could not say which stage, or why
+     * — and it is the likeliest failure there is, because the stages that
+     * throw are the ones that open a browser.
+     *
+     * The error is not swallowed into a tidy sentence: the stack goes in the
+     * `because`, because a defect in navvi is read by whoever is going to fix
+     * navvi. What this adds is the address.
+     */
+    const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+    const because = `${running} threw, which is a defect in navvi and not a statement about this run's inputs: ${detail}`;
+    // A stage that recorded and then threw on its way out keeps its own line;
+    // overwriting `ran` with `threw` would lose what it did manage to write.
+    if (!stages.some((entry) => entry.stage === running)) record(running, "threw", because);
+    for (const later of STAGES.slice(STAGES.indexOf(running) + 1)) {
+      if (!stages.some((entry) => entry.stage === later)) record(later, "not reached", `${running} threw`);
+    }
+    say(makeStage(running, "threw"));
+    say(makeBullet("threw", detail.split("\n")[0] ?? "no message", "!"));
+    return { status: "short", stoppedAt: running, because, stages, work: work.dir };
   } finally {
     await open.pages?.close().catch(() => undefined);
   }
@@ -722,20 +859,68 @@ function templateKeyOf(urls: readonly string[]): string {
 }
 
 /**
+ * How much a determinism record read, **recounted from the record itself**.
+ *
+ * This is the half that makes the guard survive. Counting at the driver seam
+ * (`replayRead`) works for exactly one run: the closure is gone on the next
+ * invocation, `determinism.json` stores no value for a field that held — a held
+ * field records no forms — and the second `navvi make` over the same work
+ * directory reused the artifact and printed nothing at all, which is the whole
+ * defect back again one run later.
+ *
+ * So the number a reader gets is derived from what the artifact says about
+ * itself: `readOn` per field against the URLs the record covers. A person with
+ * `determinism.json` and nothing else can do this arithmetic and catch a
+ * `stable` verdict over a blank replay — which is what "falsifiable from its
+ * own artifact" has to mean.
+ *
+ * **It costs nothing in artifact size.** `readOn` was always written; it was
+ * counting the wrong thing. The fix is a field that means something, not a
+ * field that was added.
+ *
+ * The pair is (field, URL), never (field, reading): `readOn` is a count of
+ * URLs by construction, and inventing a per-reading denominator here would be
+ * arithmetic the artifact cannot back.
+ */
+function coverageOf(determinism: Determinism): { read: number; of: number } {
+  return {
+    read: determinism.fields.reduce((total, field) => total + field.readOn, 0),
+    of: determinism.fields.length * determinism.urls.length,
+  };
+}
+
+/**
  * What to say about a determinism verdict measured over readings that carried
- * no value. See `replayRead` for why the verdict on its own cannot say it.
+ * fewer values than fields.
  *
  * Deliberately not a downgrade of the verdict. `judgeDeterminism` was asked
  * whether the extraction moved and it answered correctly: it did not. The
  * defect is that the answer is printed in words — `stable`, `held`, "says the
  * same thing twice about a page nobody changed" — that a reader hears as "and
- * it read something", so the run says which of the two it measured.
+ * it read something", so the run says how much of it there was.
+ *
+ * `live` is this session's per-reading count, or `null` on a reuse. The two
+ * denominators are different on purpose and are never averaged: the live one
+ * counts every reading of every item, the recount counts (field, URL) pairs,
+ * and only the recount can be checked against a file.
  */
-function blankReplay(replayRead: { read: number; of: number }, verdict: Determinism["verdict"]): string {
+function thinReplay(coverage: { read: number; of: number }, live: { read: number; of: number } | null, verdict: Determinism["verdict"]): string {
   const measured = verdict === "insufficient" ? "the verdict" : `\`${verdict}\``;
-  return replayRead.of === 0
-    ? `no replay of any URL produced a single item, so ${measured} is about pages that yielded no row to compare`
-    : `every one of the ${replayRead.of} field readings came back null, so ${measured} is the stability of a blank extraction and not evidence that anything was read`;
+  if (live === null) {
+    if (coverage.of === 0) return `this record names no field on any URL, so ${measured} is about nothing — recounted from the artifact, which this run reused rather than measured`;
+    const recounted = "recounted from the record's own `readOn`, because this run reused it rather than taking the readings";
+    return coverage.read === 0
+      ? `none of the ${coverage.of} (field, URL) pairs this record covers carried a value — ${recounted} — so ${measured} is the stability of a blank extraction`
+      : `${coverage.read} of the ${coverage.of} (field, URL) pairs this record covers carried a value — ${recounted} — so ${measured} says nothing about the other ${coverage.of - coverage.read}`;
+  }
+  if (live.of === 0) return `no replay of any URL produced a single item, so ${measured} is about pages that yielded no row to compare`;
+  if (live.read === 0) {
+    return `every one of the ${live.of} field readings came back null, so ${measured} is the stability of a blank extraction and not evidence that anything was read`;
+  }
+  return (
+    `${live.read} of the ${live.of} field readings carried a value, so ${measured} is about the ${live.read} that answered ` +
+    `and says nothing about the other ${live.of - live.read}; \`determinism.json\` recounts it as ${coverage.read} of ${coverage.of} (field, URL) pairs, in \`readOn\``
+  );
 }
 
 /** `5 network alternatives, 3 dom kept, 2 refused by the selector gate`. */

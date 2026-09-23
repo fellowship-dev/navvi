@@ -5,7 +5,7 @@ import type { Page } from "playwright";
 import type { CapturedResponse } from "../src/browser/network-capture.js";
 import { launch, type LaunchedBrowser } from "../src/browser/launch.js";
 import { NothingCompilableError, compileFromReconciliation, renderRationale } from "../src/compile/index.js";
-import type { FieldRecord, InventoryRecord, Manuscript } from "../src/investigate/manuscript.js";
+import { REFUSE_FALLBACK, REFUSE_SOLE, auditSelector } from "../src/compile/gate.js";import type { FieldAlias, FieldRecord, InventoryRecord, Manuscript } from "../src/investigate/manuscript.js";
 import { reconcile } from "../src/reconcile/index.js";
 import { coerceValues, extractPage, fieldTypesOf } from "../src/scraper/extract.js";
 import type { Spec } from "../src/spec/schema.js";
@@ -58,6 +58,9 @@ const SKUS = ["100001", "100002", "100003"];
 const LIST = [4990, 12990, 7490];
 const SALE = [4491, 11691, 6741];
 const STOCK = [412, 57, 33];
+
+/** Tier-2 aliases: other leaves of the endpoint the binding came out of. */
+const netAliases = (...paths: string[]): FieldAlias[] => paths.map((path) => ({ path, source: "network", match: MATCH }));
 
 function record(over: Partial<FieldRecord> & { field: string }): FieldRecord {
   return { aliases: [], because: "", askModel: false, rejected: [], verdicts: [], ...over };
@@ -143,7 +146,7 @@ function manuscript(over: Partial<Manuscript> = {}): Manuscript {
         match: MATCH,
         path: "productData.prices[price-list-std]",
         values: LIST,
-        aliases: ["productData.price", "productData.listing.price", "productData.appliedPromotions[price-list-std].previousPrice"],
+        aliases: netAliases("productData.price", "productData.listing.price", "productData.appliedPromotions[price-list-std].previousPrice"),
         because: "key-names-carry-the-signal fired on price-list-std",
         verdicts: [
           {
@@ -165,7 +168,7 @@ function manuscript(over: Partial<Manuscript> = {}): Manuscript {
         match: MATCH,
         path: "productData.prices[price-sale-std]",
         values: SALE,
-        aliases: ["productData.appliedPromotions[price-sale-std].promotionalPrice"],
+        aliases: netAliases("productData.appliedPromotions[price-sale-std].promotionalPrice"),
         because: "key-names-carry-the-signal fired on price-sale-std",
         rejected: [{ tier: 2, path: `${MATCH}:productData.prices[price-list-std]`, values: LIST, because: "productData.prices[price-sale-std] was bound instead" }],
       }),
@@ -318,14 +321,54 @@ describe("the aliases, which are free alternatives and weak evidence", () => {
   });
 
   /**
-   * A tier-1 alias is a bare path whose source the manuscript did not record —
-   * a JSON-LD path and an OpenGraph property name are both just strings in
-   * `FieldRecord.aliases`, and they compile to completely different
-   * alternatives. Guessing produces an alternative that can never resolve.
+   * A6. A tier-1 alias used to be a bare path whose source the manuscript never
+   * recorded — a JSON-LD path and an OpenGraph property are both just strings
+   * in `FieldRecord.aliases` and they resolve in completely different ways, so
+   * the compile refused every one of them and the rationale reported it as
+   * "stated elsewhere, not compiled". That is a fact about the record's shape
+   * printed as a fact about the site.
+   *
+   * `FieldAlias` closed it, and this is the case it closed: `productName` is
+   * bound to a JSON-LD path and the same page states it again in a `<meta>`
+   * tag, which rides in as `dom` with its own selector and `content`
+   * attribute. Both compile, in the cascade's order.
    */
-  it("does not compile a tier-1 alias, and says in the rationale why not", () => {
+  it("compiles a tier-1 alias of a different source than its binding, in the cascade's order", () => {
     const book = manuscript();
-    book.fields.find((entry) => entry.field === "productName")!.aliases = ["og:title"];
+    book.fields.find((entry) => entry.field === "productName")!.aliases = [
+      { path: "og:title", source: "dom", selector: 'meta[property="og:title"]', attr: "content" },
+    ];
+    const reconciliation = reconcile(book, SPEC, { now: AT });
+    const { scraper, rationale } = compileFromReconciliation(reconciliation, book, SPEC, {
+      templateKey: "t",
+      entry: { mode: "direct", url: "https://tienda.ejemplo.test/p/100001" },
+      now: AT,
+    });
+
+    const alternatives = scraper.fields.productName!.alternatives;
+    expect(alternatives).toHaveLength(2);
+    // The declared reading leads: `TIER_RANK` is no longer a no-op, because a
+    // field can now carry readings from two tiers.
+    expect(alternatives[0]!.source).toBe("json-ld");
+    // And the alias is emitted as what it actually is, not as a json-ld path
+    // under the binding's script tag — which is the alternative that could
+    // never have resolved.
+    expect(alternatives[1]).toMatchObject({ selector: 'meta[property="og:title"]', attr: "content", path: "og:title" });
+    expect(alternatives[1]!.source).toBeUndefined();
+
+    const field = rationale.fields.find((entry) => entry.field === "productName")!;
+    expect(field.uncompiled).toEqual([]);
+    expect(field.alternatives.map((entry) => entry.source)).toEqual(["json-ld", "dom"]);
+  });
+
+  /**
+   * The reading is still refused when it carries nothing to resolve itself
+   * through — and the sentence says so about the alias rather than about the
+   * manuscript's shape, because the shape is no longer the problem.
+   */
+  it("refuses an alias that names no selector of its own rather than borrowing the binding's", () => {
+    const book = manuscript();
+    book.fields.find((entry) => entry.field === "productName")!.aliases = [{ path: "og:title", source: "dom" }];
     const reconciliation = reconcile(book, SPEC, { now: AT });
     const { scraper, rationale } = compileFromReconciliation(reconciliation, book, SPEC, {
       templateKey: "t",
@@ -335,11 +378,101 @@ describe("the aliases, which are free alternatives and weak evidence", () => {
     expect(scraper.fields.productName!.alternatives).toHaveLength(1);
     const field = rationale.fields.find((entry) => entry.field === "productName")!;
     expect(field.uncompiled.map((entry) => entry.path)).toEqual(["og:title"]);
-    expect(field.uncompiled[0]!.because).toContain("can never resolve");
+    expect(field.uncompiled[0]!.because).toContain("carries no selector of its own");
+  });
+
+  /**
+   * Compatibility: an `investigation.json` written before `FieldAlias` spells
+   * its aliases as bare strings. Nothing validates a manuscript with a schema,
+   * so the file still parses, and `aliasesOf` reads a bare string as the
+   * assumption the old code made silently — the binding's own source. For the
+   * tier-2 case that was the only one the old compile emitted, so an old
+   * artifact compiles to exactly what it always did.
+   */
+  it("reads an older manuscript's bare-string aliases as readings of the binding's own source", () => {
+    const book = manuscript();
+    const legacy = book.fields.find((entry) => entry.field === "promoPrice")!;
+    (legacy as unknown as { aliases: string[] }).aliases = ["productData.appliedPromotions[price-sale-std].promotionalPrice"];
+    const reconciliation = reconcile(book, SPEC, { now: AT });
+    expect(reconciliation.obtainable.find((entry) => entry.field === "promoPrice")!.aliases).toEqual([
+      { path: "productData.appliedPromotions[price-sale-std].promotionalPrice", source: "network", match: MATCH },
+    ]);
+
+    const { scraper } = compileFromReconciliation(reconciliation, book, SPEC, {
+      templateKey: "t",
+      entry: { mode: "direct", url: "https://tienda.ejemplo.test/p/100001" },
+      now: AT,
+    });
+    expect(scraper.fields.promoPrice!.alternatives).toHaveLength(2);
+    expect(scraper.fields.promoPrice!.alternatives[1]).toMatchObject({
+      source: "network",
+      match: MATCH,
+      path: "productData.appliedPromotions[price-sale-std].promotionalPrice",
+    });
   });
 });
 
 describe("the selector gate, reached through the compile", () => {
+  /**
+   * A6's third half. `REFUSE_FALLBACK` is the bar for an alternative sitting
+   * **behind** one that already answers, and until an alias carried its own
+   * source no compile could produce such a thing: a `FieldRecord` held one
+   * source for a field and its aliases alike, so every alternative this compile
+   * emitted was the field's first and was judged at the permissive bar. The bar
+   * was asserted only by handing `gateAlternative` a selector directly, which
+   * tests the gate and says nothing about whether the compile can reach it.
+   *
+   * A `dom` alias behind a declared binding is exactly the alternative the bar
+   * was written for: reached only on the page whose markup has already moved,
+   * which is where a hookless six-deep path matches the wrong element rather
+   * than nothing at all.
+   */
+  it("holds a dom alias behind a declared binding to the fallback bar, which no compile could reach before", () => {
+    // Scores 4: six combinators and nothing naming what it selects. Fragile,
+    // not certain to be wrong — so the two bars disagree about it, which is the
+    // only way to tell which one was applied.
+    const fragile = "article > div > div > div > div > div > span";
+    expect(auditSelector(fragile).score).toBe(REFUSE_FALLBACK);
+    expect(auditSelector(fragile).score).toBeLessThan(REFUSE_SOLE);
+
+    const book = manuscript();
+    book.fields.find((entry) => entry.field === "productName")!.aliases = [{ path: "name", source: "dom", selector: fragile }];
+    const reconciliation = reconcile(book, SPEC, { now: AT });
+    const { scraper, rationale } = compileFromReconciliation(reconciliation, book, SPEC, {
+      templateKey: "t",
+      entry: { mode: "direct", url: "https://tienda.ejemplo.test/p/100001" },
+      now: AT,
+    });
+
+    // The json-ld binding answers, so the alias is a fallback and is dropped.
+    expect(scraper.fields.productName!.alternatives).toHaveLength(1);
+    const field = rationale.fields.find((entry) => entry.field === "productName")!;
+    expect(field.refused).toHaveLength(1);
+    expect(field.refused[0]!.threshold, "the fallback bar, not the sole bar").toBe(REFUSE_FALLBACK);
+    expect(field.refused[0]!.because).toContain("a fallback behind an alternative that already answers");
+    // Not dropped silently: the field is still compiled and the rationale names
+    // what was refused and why.
+    expect(field.refused[0]!.families.sort()).toEqual(["deep-path", "no-semantic-hook"]);
+  });
+
+  it("and the same selector compiles when it is the only reading anybody has", () => {
+    // The other side of the policy, through the same compile: refusing here
+    // costs the column, so only a certainty may do it.
+    const fragile = "article > div > div > div > div > div > span";
+    const book = manuscript();
+    const sku = book.fields.find((entry) => entry.field === "sku")!;
+    sku.selector = fragile;
+    delete sku.attr;
+    const reconciliation = reconcile(book, SPEC, { now: AT });
+    const { scraper } = compileFromReconciliation(reconciliation, book, SPEC, {
+      templateKey: "t",
+      entry: { mode: "direct", url: "https://tienda.ejemplo.test/p/100001" },
+      now: AT,
+    });
+    expect(scraper.fields.sku!.alternatives).toHaveLength(1);
+    expect(scraper.fields.sku!.alternatives[0]!.selector).toBe(fragile);
+  });
+
   /** The same investigation with tier 1 having bound the sku off a state-class path. */
   function withRottenSku(): Manuscript {
     const book = manuscript();

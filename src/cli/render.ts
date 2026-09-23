@@ -1,5 +1,5 @@
 import type { BankEntry } from "../heuristics/index.js";
-import { blockingQuestions, underspecifiedFields, type Spec } from "../spec/schema.js";
+import { blockingQuestions, requestedFields, underspecifiedFields, type Spec } from "../spec/schema.js";
 
 /**
  * The human halves of `navvi spec` and `navvi heuristics`. Data goes to stdout
@@ -8,12 +8,12 @@ import { blockingQuestions, underspecifiedFields, type Spec } from "../spec/sche
  */
 
 export function specBlock(spec: Spec, dataLine: string): string {
-  const requested = spec.fields.filter((field) => field.provenance === "brief");
+  const requested = requestedFields(spec);
   const inferred = underspecifiedFields(spec);
   const blocking = blockingQuestions(spec);
   const lines = [`navvi: spec for ${spec.target.site} (${spec.target.pageKind} pages), one row per ${spec.entity.name}`];
   lines.push(`  inputs: ${spec.inputs.shape}${spec.inputs.shape === "unknown" ? ` — "${spec.inputs.description}"` : ""}`);
-  lines.push(`  fields requested: ${requested.length > 0 ? requested.map((field) => field.name).join(", ") : "none — the brief names no field"}`);
+  lines.push(`  fields requested: ${requested.length > 0 ? requested.map((field) => field.name).join(", ") : "none — neither the brief nor an answer names a field"}`);
   if (inferred.length > 0) lines.push(`  fields inferred (the brief did not ask for these): ${inferred.map((field) => field.name).join(", ")}`);
   const stated = (["freshness", "volume", "cadence", "budget"] as const).filter((name) => spec.constraints[name].stated);
   lines.push(`  constraints stated: ${stated.length > 0 ? stated.map((name) => `${name} ${JSON.stringify(spec.constraints[name].value)}`).join(", ") : "none"}`);

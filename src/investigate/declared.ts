@@ -1,6 +1,6 @@
 import { typedNodes } from "../declared/json.js";
 import { bank, type Bank, type Verdict } from "../heuristics/index.js";
-import { visibleText } from "../heuristics/rules/investigate.js";
+import { visibleText } from "../heuristics/index.js";
 import type { TypedValue } from "../scraper/extract.js";
 import type { FieldSource } from "../scraper/schema.js";
 import { flatten } from "./leaves.js";

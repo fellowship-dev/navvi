@@ -138,12 +138,21 @@ export class ConfigurationError extends NavviError {
   }
 }
 
-/** A state larger than the backend accepts; refused before any network call. */
-export class StateTooLargeError extends Error {
+/**
+ * A state larger than the backend accepts; refused before any network call.
+ *
+ * A `configuration_error` like its siblings, and for the same reason: navvi
+ * built a question the backend will not take. No retry of any kind changes it,
+ * and nothing about it is a fact about the site. It extended plain `Error`
+ * until 2026-09-23, which meant every `instanceof NavviError` test in the
+ * codebase silently missed it -- including the one in the crawler's healer,
+ * where it was swallowed to a null field and reported as a successful run.
+ */
+export class StateTooLargeError extends NavviError {
   readonly chars: number;
   readonly maxChars: number;
   constructor(questionId: string, chars: number, maxChars: number) {
-    super(`question "${questionId}" state is ${chars} characters, over the ${maxChars} character cap`);
+    super("configuration_error", `question "${questionId}" state is ${chars} characters, over the ${maxChars} character cap`);
     this.name = "StateTooLargeError";
     this.chars = chars;
     this.maxChars = maxChars;
