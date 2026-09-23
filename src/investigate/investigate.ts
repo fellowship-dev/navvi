@@ -5,9 +5,10 @@ import type { TypedValue } from "../scraper/extract.js";
 import { bindField } from "./bind.js";
 import { classifyRun, recordCanary, settleDeferred, type ApologyOptions, type CanaryFingerprint, type PageResponse, type RunVerdict } from "./blocked.js";
 import { coversSpec, readDeclared, type DeclaredSource } from "./declared.js";
+import { UNASKED, agree, answered, unservable, type Agreement, type Observation } from "../agree/agree.js";
 import { safeUrl, type CapturedResponse } from "./har.js";
-import { flatten, type Leaf } from "./leaves.js";
-import type { FieldRecord, Manuscript, Obstacle, RejectionRecord, RequestedField, SamplePickRecord, SourceRecord, TierRecord, VerdictLog } from "./manuscript.js";
+import { anchors, flatten, type Leaf } from "./leaves.js";
+import type { FieldRecord, InventoryRecord, Manuscript, Obstacle, RejectionRecord, RequestedField, SamplePickRecord, SourceRecord, TierRecord, VerdictLog } from "./manuscript.js";
 import { KIND_PRECEDENCE, acceptedRoles, resolutionOrder, roleOfDeclared, type DeclaredRole } from "./roles.js";
 import { NO_SHELLS_YET, bindable, type SampleChoice } from "./sample.js";
 
@@ -192,18 +193,110 @@ interface DeclaredBinding {
  * The one path of this role that every binding sample declares, with the rest
  * of the role's paths as aliases.
  *
- * "Every sample" is `narrow`'s rule restated for tier 1 and it earns its keep
- * the same way: a property one page declares and the next does not is not a
+ * "Every sample" is not `narrow`'s rule *restated* any more — since 2026-09-23
+ * it is the same rule, asked through `agree` in `agree/agree.ts`, which is
+ * where the four copies of it now live as one. It earns its keep the way it
+ * always did: a property one page declares and the next does not is not a
  * binding, it is a page that happened to have it.
+ *
+ * A sample declaring nothing of this role is `unasked`. That is the honest
+ * reading and it is deliberately not `unservable`: the page was served and
+ * read, and `bindable` has already kept the pages that could not be read —
+ * dead picks and shells — out of `samples` entirely. So by the time a sample
+ * reaches here, "no declaration of this role" is that page's answer, not its
+ * failure to give one.
  */
 function bindRole(samples: readonly DeclaredSample[], role: DeclaredRole): DeclaredBinding | undefined {
-  const perSample = samples.map((sample) => byRole(sample.sources, role));
-  if (perSample.some((found) => found.length === 0)) return undefined;
+  const declaring = agree(
+    samples.map((sample) => {
+      const found = byRole(sample.sources, role);
+      return found.length === 0 ? UNASKED : answered(found);
+    }),
+    { requireAskedByAll: true, subject: `role ${role}` },
+  );
+  if (declaring === null) return undefined;
+  const perSample = declaring.values;
   const shared = perSample[0]!.filter((candidate) => perSample.every((found) => found.some((source) => source.path === candidate.path && source.kind === candidate.kind)));
   const chosen = shared[0];
   if (chosen === undefined) return undefined;
   const values = perSample.map((found) => found.find((source) => source.path === chosen.path && source.kind === chosen.kind)!.value);
   return { source: chosen, values, aliases: shared.slice(1).map((source) => source.path) };
+}
+
+// ----------------------------------------------------------- the inventory
+
+/**
+ * How many leaves the committed catalogue may hold.
+ *
+ * The catalogue is taken from the **bound** endpoints only — the ones a field
+ * actually came out of — which is what keeps it the size of a product payload
+ * rather than the size of the capture. A live Store B render answers a dozen
+ * endpoints, and `settings-svc/coverage` and `catalog-svc/categories/
+ * category-tree` alone flatten to thousands of leaves; none of them is where a
+ * field came from, so none of them is in here.
+ *
+ * The cap is the second guard, for the day the endpoint a field binds from *is*
+ * the enormous one. It is a cap and not a silent truncation: the list is sorted
+ * by `(match, path)` before it is cut, so the same investigation keeps the same
+ * leaves, and tier 2's `because` says the catalogue was capped and out of how
+ * many. A manuscript is committed and read months later; a file that quietly
+ * dropped half a catalogue is worse than one that says it did.
+ *
+ * The cut is alphabetical rather than by how interesting a leaf looks, and that
+ * is deliberate. "Anchored, or varying across the samples" is the test
+ * `src/reconcile/` applies to decide what is worth showing a client; spending
+ * it here as a ranking would make this file a second spelling of that rule, and
+ * a catalogue that pre-judged itself is the accident the inventory exists to
+ * undo. Arbitrary and stated beats clever and coupled.
+ */
+export const INVENTORY_MAX_LEAVES = 2_000;
+
+/**
+ * Every leaf one endpoint offered, requested or not, with **no type filter**.
+ *
+ * This is deliberately not `narrow`. `narrow` answers "which leaves could be
+ * *this field*" — it takes a declared type, drops anything that will not coerce
+ * to it, and collapses two spellings of one fact into a lead and its aliases.
+ * Each of those is right for binding and wrong for a catalogue: the type filter
+ * is what hides `productData.stock` from the `stock` question in the first
+ * place, and a collapsed alias is a leaf the site offers that the artifact
+ * would not name. What the two share is the one rule that matters here —
+ * present on every sample that answered this endpoint — and they share it
+ * through `agree` rather than by spelling it twice.
+ *
+ * `anchored` is answered here because this is where the rendered text is. The
+ * text itself never enters the manuscript (`manuscript.ts` is explicit about
+ * that: it is a committed file, and a page's text is not provenance), so the
+ * question has to be asked while it is still in hand. No text, no answer —
+ * `undefined`, which is not `false`.
+ */
+function catalogueOf(match: string, samples: readonly Leaf[][], texts: readonly string[] | undefined): InventoryRecord[] {
+  const byPath = new Map<string, Observation<TypedValue>[]>();
+  for (const [index, leaves] of samples.entries()) {
+    for (const leaf of leaves) {
+      let observations = byPath.get(leaf.path);
+      if (!observations) byPath.set(leaf.path, (observations = Array.from({ length: samples.length }, (): Observation<TypedValue> => UNASKED)));
+      observations[index] = answered(leaf.value);
+    }
+  }
+
+  const out: InventoryRecord[] = [];
+  for (const [path, observations] of byPath) {
+    // Same policy `narrow` states, asked of the same function: a path one
+    // sample has and the next does not is that sample's furniture, not a fact
+    // the endpoint offers about the record.
+    const agreement = agree(observations, { requireAskedByAll: true, subject: "this path" });
+    if (agreement === null) continue;
+    out.push({
+      match,
+      path,
+      values: agreement.values,
+      // Indexed through `contributors` for the same reason `narrow` is: the
+      // text of the sample that answered, never of one that did not.
+      ...(texts === undefined ? {} : { anchored: agreement.values.every((value, position) => anchors(value, texts[agreement.contributors[position]!] ?? "")) }),
+    });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- the cascade
@@ -493,6 +586,17 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
   const covered2: string[] = [];
   const tier2Sources: SourceRecord[] = [];
   let tier2: Pick<TierRecord, "outcome" | "because">;
+  /**
+   * The leaf catalogue, and the sentence tier 2 adds about it.
+   *
+   * Left `undefined` unless an endpoint was actually bound from. That is not
+   * the same as an empty catalogue and `src/reconcile/` reads the difference:
+   * absent means "no endpoint was the product endpoint, so there is nothing to
+   * take a catalogue off", and it falls back to the rejection set and says in
+   * the artifact that it did. An empty array would claim a catalogue was taken
+   * and found nothing, which on a run that bound no payload is a lie.
+   */
+  let inventory: InventoryRecord[] | undefined;
 
   if (stop) {
     tier2 = { outcome: "skipped", because: "declared-covers-spec fired: every requested field is stated by the page itself, so no render, no capture, no compile" };
@@ -554,13 +658,32 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
      * Two is the floor because `narrow`'s variation check needs two samples to
      * mean anything. With a single capture, one answer is the whole comparison
      * and the floor is one.
+     *
+     * On 2026-09-23 the rule stopped living here. `agree` in `agree/agree.ts`
+     * owns it for the four places that intersect samples, and this call is
+     * where tier 2 states which policy it wants: asked by every sample,
+     * answered by `floor`, and a sample that asked without being answered left
+     * out rather than allowed to veto. The wording below is the wording that
+     * had to argue this compile, and it moved with the rule.
+     *
+     * `requireAskedByAll: true` is the open question, and it is Max's. A live
+     * render that nondeterministically misses one page's `products/detail`
+     * call deletes the endpoint for every sample and binds nothing; the
+     * `products/recommendations` case above is the reason it is still `true`.
      */
     const floor = Math.min(2, perSample.length);
-    const answering = new Map<string, number[]>();
+    const answering = new Map<string, Agreement<CapturedResponse>>();
     for (const key of perSample[0]?.keys() ?? []) {
-      if (!perSample.every((grouped) => grouped.has(key))) continue;
-      const indexes = perSample.flatMap((grouped, index) => (newestUsable(grouped.get(key)!) === null ? [] : [index]));
-      if (indexes.length >= floor) answering.set(key, indexes);
+      const agreement = agree(
+        perSample.map((grouped) => {
+          const bucket = grouped.get(key);
+          if (bucket === undefined) return UNASKED;
+          const newest = newestUsable(bucket);
+          return newest === null ? unservable<CapturedResponse>(`asked ${bucket.length} time(s), never usably answered`) : answered(newest);
+        }),
+        { floor, requireAskedByAll: true, subject: "this endpoint" },
+      );
+      if (agreement !== null) answering.set(key, agreement);
     }
     const keys = [...answering.keys()].sort();
 
@@ -568,12 +691,11 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
     /** The rendered text of *this endpoint's* samples, in its own order — anchoring compares like with like. */
     const textByKey = new Map<string, string[] | undefined>();
     for (const key of keys) {
-      const indexes = answering.get(key)!;
-      const responses = indexes.map((index) => newestUsable(perSample[index]!.get(key)!)!);
+      const agreement = answering.get(key)!;
+      const responses = agreement.values;
       const leaves = responses.map((response) => flatten(response.body));
       leavesByKey.set(key, leaves);
-      textByKey.set(key, pageText === undefined ? undefined : indexes.map((index) => pageText[index]!));
-      const silent = perSample.length - indexes.length;
+      textByKey.set(key, pageText === undefined ? undefined : agreement.contributors.map((index) => pageText[index]!));
       for (const [position, response] of responses.entries()) {
         tier2Sources.push({
           url: safeUrl(response.url),
@@ -584,7 +706,7 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
           because:
             `the page fetched this for itself; ${leaves[position]!.length} leaves flattened` +
             `${pageText === undefined ? ", unanchored (no rendered text was supplied)" : ", anchored against what the page showed"}` +
-            `${silent === 0 ? "" : `; ${silent} of ${perSample.length} sample(s) asked this endpoint and got no answer, and are left out of the comparison rather than deleting it`}`,
+            `${agreement.silent.length === 0 ? "" : `; ${agreement.because}`}`,
         });
       }
     }
@@ -619,6 +741,9 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
     const namedCount = new Map<string, number>();
     for (const key of keys) namedCount.set(key, uncovered1.filter((field) => named(bindings.get(key)!.get(field.name))).length);
     const ordered = [...keys].sort((a, b) => (namedCount.get(b) ?? 0) - (namedCount.get(a) ?? 0) || a.localeCompare(b));
+
+    /** The endpoints a field actually came out of — the catalogue's whole scope. */
+    const boundKeys = new Set<string>();
 
     for (const field of uncovered1) {
       const record = records.get(field.name)!;
@@ -659,12 +784,37 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
       record.aliases = binding.aliases;
       record.because = binding.because;
       record.askModel = false;
+      boundKeys.add(chosen);
       covered2.push(field.name);
     }
 
+    /**
+     * The catalogue, off the endpoints a field was bound from.
+     *
+     * U4 asks the manuscript two questions the rejection set cannot answer —
+     * *what does this site offer that nobody asked for*, and *what did the
+     * declared type refuse before it was ever a candidate* — and both of them
+     * are questions about the product endpoint, not about the brief. So the
+     * scope is the bound endpoints and the filter is nothing at all: no type,
+     * no anchor, no variation. `src/reconcile/` applies whatever test its
+     * artifact needs; this list is the evidence it applies them to, and a
+     * catalogue that pre-filtered itself would be the same accident of the
+     * brief all over again, one layer down.
+     */
+    const catalogue = [...boundKeys].sort().flatMap((key) => catalogueOf(endpointMatch(key), leavesByKey.get(key)!, textByKey.get(key)));
+    catalogue.sort((a, b) => a.match.localeCompare(b.match) || a.path.localeCompare(b.path));
+    if (boundKeys.size > 0) inventory = catalogue.slice(0, INVENTORY_MAX_LEAVES);
+    const inventoryBecause =
+      inventory === undefined
+        ? "; no leaf catalogue: no field was bound from a payload, so no endpoint is this site's product endpoint and there is nothing to take one off"
+        : `; leaf catalogue: ${inventory.length} leaves` +
+          (catalogue.length > inventory.length ? ` of the ${catalogue.length} offered, capped at ${INVENTORY_MAX_LEAVES} in (endpoint, path) order` : "") +
+          ` from the ${boundKeys.size} bound endpoint(s), requested or not and unfiltered by type` +
+          (pageText === undefined ? ", with the anchor question unasked" : "");
+
     tier2 = {
       outcome: "ran",
-      because: `${keys.length} endpoint(s) the page fetched for itself, over ${captures.length} rendered sample(s)${pageText === undefined ? "; unanchored, because no rendered text was supplied" : ""}`,
+      because: `${keys.length} endpoint(s) the page fetched for itself, over ${captures.length} rendered sample(s)${pageText === undefined ? "; unanchored, because no rendered text was supplied" : ""}${inventoryBecause}`,
     };
   }
 
@@ -720,6 +870,7 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
     tiers,
     records,
     obstacles,
+    ...(inventory === undefined ? {} : { inventory }),
     ...(canary === undefined ? {} : { canary }),
     canaryBecause:
       canary === undefined
@@ -868,6 +1019,8 @@ interface Assembly {
   tiers: TierRecord[];
   records: Map<string, FieldRecord>;
   obstacles: Obstacle[];
+  /** Absent unless tier 2 bound a field from a payload; see the tier-2 block. */
+  inventory?: InventoryRecord[];
   canary?: CanaryFingerprint;
   canaryBecause: string;
   verdict: Manuscript["verdict"];
@@ -895,6 +1048,7 @@ function manuscriptOf(parts: Assembly): Manuscript {
     tiers: parts.tiers,
     fields,
     uncovered: fields.filter((field) => field.path === undefined).map((field) => field.field),
+    ...(parts.inventory === undefined ? {} : { inventory: parts.inventory }),
     obstacles,
     ...(parts.canary === undefined ? {} : { canary: parts.canary }),
     canaryBecause: parts.canaryBecause,

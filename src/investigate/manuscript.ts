@@ -131,6 +131,52 @@ export interface FieldRecord {
   verdicts: VerdictLog;
 }
 
+// ----------------------------------------------------------------- inventory
+
+/**
+ * One leaf a payload offered, kept whether or not any requested field wanted it.
+ *
+ * **Added 2026-09-23 for U4, and it is not a convenience.** `RejectionRecord`
+ * records where a leaf *lost a competition for a field the spec named*, which
+ * is a different set and a type-contingent one: `narrow` filters candidates by
+ * the requested field's declared type before `bindField` ever sees them, so a
+ * boolean leaf is only ever recorded when the spec happens to ask for a boolean
+ * field, and a money leaf only when it asks for money. Two things Phase D owes
+ * the client cannot be read out of that set at all:
+ *
+ *  - **available but not requested** — Store B's `laboratory`,
+ *    `activeIngredient`, `bioequivalence` and `pum`. Whether any of them
+ *    survives into a rejection is an accident of which types the spec asked
+ *    for, so an artifact built on rejections reports a different catalogue for
+ *    the same site depending on the brief. That is the opposite of the point.
+ *  - **the type gap.** `stock` is declared `boolean` and Store B states
+ *    `productData.stock` as an integer, so `typeMatches` drops the leaf *before*
+ *    it is a candidate and no rejection is written. Without this list the only
+ *    honest thing reconcile can say is "no tier offered a candidate", which
+ *    hides the one fact the client has to decide.
+ *
+ * Optional, so a manuscript written before it existed still parses and so
+ * `investigate.ts` populates it on its own schedule. Absent, `src/reconcile/`
+ * falls back to the rejection set and says in the artifact that it did.
+ */
+export interface InventoryRecord {
+  /** The endpoint the leaf came out of, spelled as `FieldRecord.match` spells it. */
+  match: string;
+  /** The leaf path, in the form `declared/json.ts` reads back. */
+  path: string;
+  /** The value on each *answering* sample of that endpoint, in its own order. */
+  values: TypedValue[];
+  /**
+   * Was every value in what the page showed a reader?
+   *
+   * Computed where the rendered text is — at investigation — because the text
+   * is not in the manuscript and never should be. `undefined` means no
+   * rendered text was supplied and the question was not asked, which is not
+   * the same answer as `false`.
+   */
+  anchored?: boolean;
+}
+
 // ----------------------------------------------------------------- obstacles
 
 /**
@@ -199,6 +245,12 @@ export interface Manuscript {
   fields: FieldRecord[];
   /** Fields nothing covered, in requested order. Tier 3's shopping list. */
   uncovered: string[];
+  /**
+   * Every leaf the bound endpoints offered, requested or not. See
+   * `InventoryRecord`: this is what U4's "available but not requested" and the
+   * `stock` type gap are read out of, and neither is readable from `rejected`.
+   */
+  inventory?: InventoryRecord[];
   obstacles: Obstacle[];
   /** Recorded at investigation so a run months later can tell drift from refusal. */
   canary?: CanaryFingerprint;

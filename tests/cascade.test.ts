@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { bank } from "../src/heuristics/index.js";
 import { visibleText } from "../src/heuristics/rules/investigate.js";
 import type { Capture, Sources } from "../src/investigate/investigate.js";
-import { investigate } from "../src/investigate/investigate.js";
+import { INVENTORY_MAX_LEAVES, investigate } from "../src/investigate/investigate.js";
 import { render, type Manuscript, type RequestedField } from "../src/investigate/manuscript.js";
 import { acceptedRoles, roleOfDeclared, roleOfField } from "../src/investigate/roles.js";
 import { importHar } from "../src/investigate/har.js";
@@ -146,6 +146,14 @@ describe("StoreA — the run stops at tier 1", () => {
     expect(tier(manuscript, 3).outcome).toBe("skipped");
     expect(tier(manuscript, 3).asked).toEqual([]);
     expect(manuscript.uncovered).toEqual([]);
+  });
+
+  it("writes no leaf catalogue, because no payload was ever read", async () => {
+    // Absent is not an empty catalogue, and `src/reconcile/` reads the
+    // difference: nothing bound from a payload means no endpoint is this
+    // site's product endpoint, so there is nothing to take a catalogue off.
+    const { manuscript } = await run();
+    expect(manuscript.inventory).toBeUndefined();
   });
 
   it("binds each field to the declaration that was vouched for, with the other spelling as a free alternative", async () => {
@@ -554,6 +562,100 @@ describe("Store B, three samples — one product the store cannot serve must not
       "Otro Jarabe 120 ml",
       "Tercero Capsulas 500 mg 16 Capsulas",
     ]);
+  });
+
+  /**
+   * U4's evidence: the leaf catalogue.
+   *
+   * `RejectionRecord` cannot answer "what does this site offer that nobody
+   * asked for", because `narrow` filters candidates by the *requested* field's
+   * declared type before anything is recorded — so whether `bioequivalence` is
+   * ever written down depends on whether the brief happened to name a boolean
+   * field, and the same site reports a different catalogue for a different
+   * brief. `Manuscript.inventory` is the set that does not move with the brief:
+   * every leaf the **bound** endpoints offered, no type filter, present on
+   * every sample that answered, with the anchor question answered at
+   * investigation because that is the only place the rendered text exists.
+   */
+  it("catalogues every leaf the bound endpoint offered, requested or not, and nothing from the endpoints it did not bind", async () => {
+    const manuscript = await runWith(detail("-3"));
+    expect(manuscript.inventory).toBeDefined();
+    const inventory = manuscript.inventory!;
+    const at = (path: string): (typeof inventory)[number] | undefined => inventory.find((leaf) => leaf.path === path);
+
+    // Scope. Twelve shared endpoints were captured and flattened; none of them
+    // is where a field came from, so none of them is in the catalogue. This is
+    // what keeps it the size of a product payload rather than of the capture.
+    expect([...new Set(inventory.map((leaf) => leaf.match))]).toEqual(["catalog-svc/products/detail"]);
+
+    // The plan's acceptance case, as the cascade has to produce it: four
+    // things Store B states and the brief never mentioned.
+    expect(at("productData.laboratory")!.values).toEqual(["Laboratorio Ejemplo", "Laboratorio Otro", "Laboratorio Tercero"]);
+    expect(at("productData.activeIngredient")!.values).toEqual(["Ejemplo", "Otro", "Tercero"]);
+    expect(at("productData.pum.value")!.values).toEqual([166, 108, 468]);
+    // No type filter, which is the whole difference from the rejection set: a
+    // boolean is here on a run whose brief asks for no boolean field at all.
+    expect(at("productData.bioequivalence")!.values).toEqual([true, true, false]);
+    expect(FIELDS.some((requested) => requested.type === "boolean")).toBe(false);
+
+    // The leaves a requested field *was* bound to are here too. The catalogue
+    // is evidence, not an answer; deciding what is unclaimed is U4's job, and
+    // a list that pre-judged itself would be the same accident one layer down.
+    expect(at("productData.prices[price-list-std]")!.values).toEqual([4990, 12990, 7490]);
+
+    // The anchor question, answered where the text is — and the text itself
+    // never enters the manuscript.
+    expect(at("productData.laboratory")!.anchored).toBe(true);
+    expect(at("productData.stock")!.anchored).toBe(false);
+    expect(at("productData.telemetry.sessionId")!.anchored).toBe(false);
+    expect(JSON.stringify(manuscript)).not.toContain("Menu de Categorias");
+
+    // Present on every answering sample, the same rule `narrow` asks `agree`
+    // for: the first fixture carries a second promotion and the others do not.
+    expect(at("productData.promotions[0].id")).toBeDefined();
+    expect(at("productData.promotions[1].id")).toBeUndefined();
+
+    // Deterministic order, because the manuscript is committed and diffed.
+    const paths = inventory.map((leaf) => leaf.path);
+    expect(paths).toEqual([...paths].sort((a, b) => a.localeCompare(b)));
+    expect(tier(manuscript, 2).because).toContain("leaf catalogue");
+  });
+
+  it("keeps the leaf the declared type refused before it was ever a candidate", async () => {
+    // `stock` declared boolean, stated as a count. `typeMatches(412, "boolean")`
+    // is false, so the leaf is dropped *before* it is a candidate: nothing binds
+    // and nothing is rejected either, and on the rejection set alone the site
+    // looks silent about stock. It is not, and the catalogue is where U4 reads
+    // that the gap is a type and not an absence.
+    const asked = FIELDS.map((requested) => (requested.name === "stock" ? { name: "stock", type: "boolean" as const } : requested));
+    const manuscript = await investigate({ site: "store-b.example", fields: asked, sample, sources: sourcesOf(pages, capturesOf(detail("-3"))), now: NOW });
+    expect(field(manuscript, "stock").path).toBeUndefined();
+    expect(field(manuscript, "stock").rejected.some((entry) => entry.path.endsWith("productData.stock"))).toBe(false);
+    expect(manuscript.inventory!.find((leaf) => leaf.path === "productData.stock")!.values).toEqual([412, 57, 33]);
+  });
+
+  it("caps the catalogue rather than truncating it silently", async () => {
+    // The guard for the day the endpoint a field binds from is the enormous
+    // one: a live render answers endpoints that flatten to thousands of leaves,
+    // and a manuscript is a committed file. The cap is deterministic — the list
+    // is ordered before it is cut — and tier 2 says it fired.
+    const wide = (n: "" | "-2" | "-3"): unknown => {
+      const pad: Record<string, string> = {};
+      for (let index = 0; index < 2_200; index += 1) pad[`pad${String(index).padStart(4, "0")}`] = `constant-${index}`;
+      return { ...(detail(n) as Record<string, unknown>), pad };
+    };
+    const bodies = ["", "-2", "-3"] as const;
+    const captures = Object.fromEntries(
+      urls.map((url, index) => [
+        url,
+        { responses: [...noise(basketIds[index]!), ...detailCalls(ids[index]!, wide(bodies[index]!))], text: TEXT[index]! } satisfies Capture,
+      ]),
+    );
+    const manuscript = await investigate({ site: "store-b.example", fields: FIELDS, sample, sources: sourcesOf(pages, captures), now: NOW });
+    expect(manuscript.inventory).toHaveLength(INVENTORY_MAX_LEAVES);
+    expect(tier(manuscript, 2).because).toContain(`capped at ${INVENTORY_MAX_LEAVES}`);
+    // Capped, not abandoned: the endpoint is still the one the fields bound from.
+    expect(field(manuscript, "listPrice").match).toBe("catalog-svc/products/detail");
   });
 
   it("drops an endpoint only two of the three pages ever asked for", async () => {
