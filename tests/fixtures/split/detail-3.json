@@ -1,0 +1,45 @@
+{
+  "productData": {
+    "id": "200003",
+    "name": "Articulo Tercero 16 Unidades",
+    "price": 7490,
+    "prices": {
+      "price-list-std": 7490,
+      "price-sale-std": 6741
+    },
+    "appliedPromotions": {
+      "price-sale-std": {
+        "promotionalPrice": 6741,
+        "promotionId": "SALE-10"
+      }
+    },
+    "promotions": [
+      {
+        "id": "SALE-10",
+        "isClubPromotion": false,
+        "calloutMsg": "10% de descuento"
+      },
+      {
+        "id": "CLUB-20",
+        "isClubPromotion": true,
+        "promotionalPrice": 5990,
+        "calloutMsg": "Precio socio"
+      }
+    ],
+    "hasClubPromotion": true,
+    "stock": 33,
+    "brand": "Marca Tercera",
+    "pum": {
+      "value": 468,
+      "unit": "Unidad"
+    },
+    "seo": {
+      "metaTitle": "Articulo Tercero 16 Unidades",
+      "canonical": "/articulo/200003.html"
+    },
+    "telemetry": {
+      "sessionId": "s200003",
+      "renderedAt": 1758560200003
+    }
+  }
+}

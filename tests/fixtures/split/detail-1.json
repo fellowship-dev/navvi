@@ -1,0 +1,45 @@
+{
+  "productData": {
+    "id": "200001",
+    "name": "Articulo Ejemplo 100 g",
+    "price": 4290,
+    "prices": {
+      "price-list-std": 4290,
+      "price-sale-std": 3321
+    },
+    "appliedPromotions": {
+      "price-sale-std": {
+        "promotionalPrice": 3321,
+        "promotionId": "SALE-10"
+      }
+    },
+    "promotions": [
+      {
+        "id": "SALE-10",
+        "isClubPromotion": false,
+        "calloutMsg": "10% de descuento"
+      },
+      {
+        "id": "CLUB-20",
+        "isClubPromotion": true,
+        "promotionalPrice": 2952,
+        "calloutMsg": "Precio socio"
+      }
+    ],
+    "hasClubPromotion": true,
+    "stock": 412,
+    "brand": "Marca Ejemplo",
+    "pum": {
+      "value": 43,
+      "unit": "g"
+    },
+    "seo": {
+      "metaTitle": "Articulo Ejemplo 100 g",
+      "canonical": "/articulo/200001.html"
+    },
+    "telemetry": {
+      "sessionId": "s200001",
+      "renderedAt": 1758560200001
+    }
+  }
+}

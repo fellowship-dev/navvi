@@ -126,6 +126,7 @@ graph TD
   replay --> input
   replay --> navigate
   replay --> prestep
+  replay --> reconcile
   replay --> scraper
   replay --> secrets
   replay --> template

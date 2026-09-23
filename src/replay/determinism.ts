@@ -1,6 +1,7 @@
 import { coerceValues, type PageExtraction, type TypedValue } from "../scraper/extract.js";
 import { clip, normalize } from "../util/text.js";
 import type { FieldType } from "../input/schema.js";
+import type { AlternativeDisagreement } from "../reconcile/schema.js";
 
 /**
  * U6a: the same page, read N times.
@@ -183,29 +184,24 @@ export interface UrlRecord {
 }
 
 /**
- * **U6b's slot, and U6a never fills it.**
+ * **U6b's slot, and U6a never filled it.**
  *
  * A field can also fail because two *alternatives of the same field* disagree
  * on one page — Store B's `promoPrice`, network 3321 against dom 2952 on all
  * six URLs. That is not instability across runs: both alternatives are perfectly
  * repeatable and each is right about a different thing, which is why the answer
- * is two fields rather than a ranking. It is a different unit, and the shape is
- * declared here only so the finding lands in this artifact and this stage block
- * instead of a second one.
+ * is two fields rather than a ranking.
+ *
+ * U6a declared the record here so the finding would land in this artifact and
+ * this stage block instead of a second one. U6b **moved the declaration to
+ * `src/reconcile/schema.ts`** and left the name: the record is produced here,
+ * where the alternatives are resolved against a live page, and acted on there,
+ * where a field is a column. One type, two stages, no second spelling — and
+ * this file keeps exporting the name so nothing downstream has to know.
  *
  * Absent means nobody asked. It does not mean nothing disagreed.
  */
-export interface AlternativeDisagreement {
-  field: string;
-  /** What each alternative that answered returned, in compiled alternative order. */
-  readings: Array<{ source: string; value: TypedValue }>;
-  /** On how many sampled URLs they disagreed, of how many they were both read on. */
-  disagreedOn: number;
-  readOn: number;
-  because: string;
-  /** Free-form, for whatever U6b traces the values back to. */
-  traced?: string[];
-}
+export type { AlternativeDisagreement };
 
 /**
  * `determinism.json`.
@@ -395,6 +391,127 @@ function becauseOfRun(verdict: Determinism["verdict"], moved: readonly FieldStab
     `${moved.length === 1 ? "One field" : `${moved.length} fields`} moved on an unchanged page across ${replays} readings of ${comparable} URLs: ${names}. ` +
     `${moved.length === 1 ? "It is" : "They are"} rejected as measurement. Nothing downstream may repair, heal or drift-report ${moved.length === 1 ? "it" : "them"} — ` +
     `a finding raised against a value that will not hold still is a finding about navvi.`
+  );
+}
+
+// ------------------------------------------------- U6b: the second axis
+
+/**
+ * U6b: the same page, read once through **each alternative of one field**.
+ *
+ * U6a's axis is time — N readings of one page, where *difference* is the
+ * defect. This axis is the cascade — one reading of one page through every
+ * alternative the compile put in a field's array — and here difference is not
+ * a defect at all. `extractPage` resolves the alternatives in array order and
+ * stops at the first that answers, so on an ordinary run only one of them is
+ * ever seen and a disagreement between them is invisible by construction. That
+ * is how Store B's `promoPrice` shipped: on the three binding samples the
+ * network leaf and the DOM node both read 3321, the selector passed the gate as
+ * an honest fallback, and on the first Monday the node read 2952 because the
+ * club promotion had gone live. Neither alternative is broken. The page states
+ * two prices and the spec asked for one.
+ *
+ * **This stage reports, it does not decide.** What comes out is the
+ * observation — these alternatives returned these values on this many URLs —
+ * and nothing more. The trace back to the payload leaf, and the split into two
+ * fields, are `src/reconcile/`'s: the leaf catalogue is `Manuscript.inventory`
+ * and a replay has never read a manuscript. A determinism stage that invented a
+ * binding from a value it could not account for would be the 2026-09-22 defect
+ * with a new name.
+ */
+
+/** What one alternative of one field returned on one page. */
+export interface AlternativeValue {
+  /** The alternative as the cascade names it: `json-ld`, `network`, `dom`. */
+  source: string;
+  value: TypedValue;
+}
+
+/** One reading of one page through every alternative of every field. */
+export type AlternativesReading = Record<string, readonly AlternativeValue[]>;
+
+/** N readings of one URL, each resolved through the whole cascade rather than stopping at the first answer. */
+export interface UrlAlternatives {
+  url: string;
+  readings: readonly AlternativesReading[];
+}
+
+/**
+ * Which fields' alternatives disagreed, and on how many URLs.
+ *
+ * **`formOf` decides it, and that is deliberately not a third comparator.** It
+ * is the grouping key U6a already buckets N readings of one page by, asked
+ * along the second axis: "is this the same reading of this page" is one
+ * question whether the two readings are separated by a reload or by a cascade
+ * position. Its folding rules carry over unchanged and they are the right ones
+ * here too — `3321` and `"3321"` are two readings, because a DOM node handing
+ * back the text of a number the payload states as a number is a difference a
+ * client's column will see.
+ *
+ * Two guards keep this off U6a's ground, because a field cannot be both:
+ *
+ *  - a URL counts only when **every** reading of it saw at least two
+ *    alternatives answer, so a page that failed to load is not evidence; and
+ *  - the alternatives have to disagree **the same way on every reading** of
+ *    that URL. If the forms move between readings, what moved is the
+ *    measurement, U6a already rejects the field for it, and U6b says nothing.
+ *
+ * The values reported are the ones from the first URL that disagreed, in
+ * sample order — the same habit as `FieldStability.movements[0]`, so the block
+ * names a page a person can open.
+ */
+export function judgeAlternatives(sample: readonly UrlAlternatives[], options: DeterminismOptions = {}): AlternativeDisagreement[] {
+  const seen = new Set<string>();
+  for (const { readings } of sample) for (const reading of readings) for (const name of Object.keys(reading)) seen.add(name);
+  const order = [...(options.fields ?? [])];
+  const named = new Set(order);
+  for (const name of [...seen].sort()) if (!named.has(name)) order.push(name);
+
+  const out: AlternativeDisagreement[] = [];
+  for (const field of order) {
+    let readOn = 0;
+    let disagreedOn = 0;
+    let first: readonly AlternativeValue[] | undefined;
+    let firstUrl = "";
+
+    for (const { url, readings } of sample) {
+      if (readings.length === 0) continue;
+      const answered = readings.map((reading) => reading[field]).filter((values): values is readonly AlternativeValue[] => values !== undefined && values.length >= 2);
+      // One alternative answering is the ordinary case and proves nothing; a
+      // page that offered two on one reading and one on the next has not been
+      // measured twice, so it is not counted either way.
+      if (answered.length !== readings.length) continue;
+      readOn++;
+
+      const forms = answered.map((values) => values.map((entry) => formOf(entry.value)));
+      if (forms.some((reading) => new Set(reading).size < 2)) continue;
+      if (new Set(forms.map((reading) => reading.join(" "))).size > 1) continue;
+      disagreedOn++;
+      if (first === undefined) {
+        first = answered[0]!;
+        firstUrl = url;
+      }
+    }
+
+    if (first === undefined) continue;
+    out.push({
+      field,
+      readings: first.map(({ source, value }) => ({ source, value })),
+      disagreedOn,
+      readOn,
+      because: becauseOfDisagreement(field, first, disagreedOn, readOn, firstUrl),
+    });
+  }
+  return out;
+}
+
+function becauseOfDisagreement(field: string, readings: readonly AlternativeValue[], disagreedOn: number, readOn: number, url: string): string {
+  const shown = readings.map((reading) => `${reading.source} ${showValue(reading.value)}`).join(" against ");
+  return (
+    `${field}'s alternatives returned different values on ${disagreedOn} of the ${readOn} URLs all of them answered on, starting with ${url}: ${shown}. ` +
+    `Each one is repeatable — none of them moved across the readings of a page nobody changed — so this is not instability and neither of them is wrong. ` +
+    `The page states two facts and the spec asked for one. Ranking them would commit one and throw the other away; dropping the loser would do the same thing silently. ` +
+    `Each value is traced back to the leaf behind it and emitted as its own field, and a value with no leaf behind it is itself the finding.`
   );
 }
 

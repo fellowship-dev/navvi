@@ -1,6 +1,6 @@
 import type { TypedValue } from "../scraper/extract.js";
 import { show } from "./reconcile.js";
-import type { Ambiguity, Reading, Reconciliation } from "./schema.js";
+import type { Ambiguity, DisagreementRecord, Reading, Reconciliation } from "./schema.js";
 
 /**
  * The two spellings of a reconciliation, and they are not the same document.
@@ -45,6 +45,20 @@ function short(path: string): string {
   return segments.length > 1 ? segments.slice(1).join(".") : path;
 }
 
+/**
+ * How many fields the client asked for, which is not how many rows the
+ * obtainable table has.
+ *
+ * U6b appends a column the spec never named - a second reading of a requested
+ * field, traced to its own leaf - so counting the table would report "4 of 6"
+ * for five requested fields and make the split look like a coverage gain.
+ * A split field carries `splitFrom`, so it is subtracted here rather than
+ * hidden from the table it belongs in.
+ */
+function asked(reconciliation: Reconciliation): number {
+  return reconciliation.obtainable.filter((field) => field.splitFrom === undefined).length + reconciliation.notObtainable.length;
+}
+
 function first(values: readonly TypedValue[]): string {
   return values.length === 0 ? "-" : show(values[0]!);
 }
@@ -64,7 +78,7 @@ function readingsLine(readings: readonly Reading[]): string {
  * the brief, and any call that is still open.
  */
 export function summarize(reconciliation: Reconciliation, dataLine = ""): string {
-  const requested = reconciliation.obtainable.length + reconciliation.notObtainable.length;
+  const requested = asked(reconciliation);
   const head = dataLine === "" ? "reconcile" : `reconcile${" ".repeat(Math.max(1, 54 - "reconcile".length))}${dataLine}`;
   const lines = [head];
   const bullet = (text: string): void => {
@@ -73,7 +87,9 @@ export function summarize(reconciliation: Reconciliation, dataLine = ""): string
 
   const endpoints = [...new Set(reconciliation.obtainable.map((field) => field.match).filter((match) => match !== undefined))];
   const from = endpoints.length === 1 ? `, all from ${endpoints[0]}` : endpoints.length === 0 ? "" : `, from ${endpoints.length} sources`;
-  lines.push(`  ${pad("obtainable")}${reconciliation.obtainable.length} of ${requested}${from}`);
+  const split = reconciliation.obtainable.filter((field) => field.splitFrom !== undefined);
+  const extra = split.length === 0 ? "" : ` + ${split.length} split`;
+  lines.push(`  ${pad("obtainable")}${reconciliation.obtainable.length - split.length} of ${requested}${extra}${from}`);
 
   for (const field of reconciliation.notObtainable) {
     lines.push(`  ${pad(field.kind === "type-gap" ? "type gap" : "not obtainable")}${field.field}: ${field.because}`);
@@ -98,6 +114,18 @@ export function summarize(reconciliation: Reconciliation, dataLine = ""): string
     for (const rubric of ambiguity.settledBy) bullet(`rubric ${rubric.id}: "${rubric.rule}"`);
     if (settled && ambiguity.resolved !== undefined) bullet(`-> ${tail(ambiguity.resolved)}   (without the rubric this stops)`);
     if (!settled && ambiguity.decision !== undefined) bullet(`? ${ambiguity.decision}`);
+  }
+
+  // U6b. A split is a column the client did not ask for arriving, which is the
+  // one line in this block that can change the schema, so it names both fields.
+  for (const record of reconciliation.disagreements ?? []) {
+    const readings = record.readings.map((reading) => `${reading.source} ${show(reading.value)}`).join(" vs ");
+    lines.push(`  ${pad(record.emitted.length > 0 ? "split" : "disagreement")}${record.field}: ${readings}`);
+    for (const reading of record.readings) {
+      if (reading.outcome === "split") bullet(`-> ${reading.emitted} from ${tail(reading.leaf ?? "")}, bound to its own leaf`);
+      if (reading.outcome === "unaccounted") bullet(`! ${show(reading.value)} has no leaf behind it: the page is showing something this call did not return`);
+      if (reading.outcome === "refused") bullet(`? ${reading.because}`);
+    }
   }
 
   for (const obstacle of reconciliation.obstacles) {
@@ -127,7 +155,7 @@ function cell(text: string): string {
  */
 export function render(reconciliation: Reconciliation): string {
   const out: string[] = [];
-  const requested = reconciliation.obtainable.length + reconciliation.notObtainable.length;
+  const requested = asked(reconciliation);
 
   out.push(`# Reconciliation: ${reconciliation.site}`);
   out.push("");
@@ -139,7 +167,8 @@ export function render(reconciliation: Reconciliation): string {
 
   // ------------------------------------------------------------- obtainable
 
-  out.push(heading(`Obtainable (${reconciliation.obtainable.length} of ${requested})`));
+  const split = reconciliation.obtainable.filter((field) => field.splitFrom !== undefined);
+  out.push(heading(`Obtainable (${reconciliation.obtainable.length - split.length} of ${requested}${split.length === 0 ? "" : `, plus ${split.length} split out of a disagreement`})`));
   if (reconciliation.obtainable.length === 0) {
     out.push("Nothing was bound.");
   } else {
@@ -203,6 +232,23 @@ export function render(reconciliation: Reconciliation): string {
     for (const ambiguity of reconciliation.ambiguities) out.push(...renderAmbiguity(ambiguity));
   }
 
+  // ------------------------------------------------------- U6b: disagreements
+
+  if (reconciliation.disagreements !== undefined) {
+    const split = reconciliation.disagreements.flatMap((record) => record.emitted);
+    out.push(heading(`Alternatives that disagreed (${reconciliation.disagreements.length})`));
+    out.push(
+      "A replay resolved one field through **every** alternative the compile gave it, on a page the compile never saw, and they came back with different values. That is not instability - each alternative is repeatable - and it is not a bad alternative to drop: the page states two facts and the spec asked for one. Each value is traced back to the leaf of this call that carried it, and a value that traces to its own leaf becomes its own column. A value that traces to nothing is the finding.",
+    );
+    out.push("");
+    if (reconciliation.disagreements.length === 0) {
+      out.push("Every field's alternatives returned the same value on every page they were both read on.");
+    } else {
+      if (split.length > 0) out.push(`**${split.length} new column(s):** ${split.map((name) => `\`${name}\``).join(", ")}. They are in the Obtainable table above, bound to their own leaves.`);
+      for (const record of reconciliation.disagreements) out.push(...renderDisagreement(record));
+    }
+  }
+
   // -------------------------------------------------------------- obstacles
 
   out.push(heading(`Obstacles (${reconciliation.obstacles.length})`));
@@ -219,6 +265,46 @@ export function render(reconciliation: Reconciliation): string {
 
   out.push("");
   return out.join("\n");
+}
+
+/**
+ * One disagreement, with what every reading of it became.
+ *
+ * The `what it became` column is the whole point of the table: a reader who
+ * remembers only one sentence about this section should remember that no
+ * reading was ranked and none was dropped.
+ */
+function renderDisagreement(record: DisagreementRecord): string[] {
+  const out: string[] = [];
+  out.push("");
+  out.push(`### \`${record.field}\``);
+  out.push("");
+  out.push(record.because);
+  out.push("");
+  out.push("| reading | value | the leaf behind it | what it became |");
+  out.push("| --- | --- | --- | --- |");
+  for (const reading of record.readings) {
+    const became =
+      reading.outcome === "split"
+        ? `**\`${reading.emitted}\`**, a new column`
+        : reading.outcome === "requested"
+          ? `\`${record.field}\`, the column that was asked for`
+          : reading.outcome === "unaccounted"
+            ? "**nothing** - see below"
+            : "nothing; a person decides";
+    out.push(`| \`${reading.source}\` | ${cell(show(reading.value))} | ${reading.leaf === undefined ? "-" : `\`${cell(reading.leaf)}\``} | ${became} |`);
+  }
+  out.push("");
+  for (const reading of record.readings) {
+    if (reading.outcome === "requested") continue;
+    out.push(`- \`${reading.source}\` ${show(reading.value)} - ${reading.because}`);
+  }
+  if (record.decision !== undefined) {
+    out.push("");
+    out.push(`**A person decides:** ${record.decision}`);
+  }
+  out.push("");
+  return out;
 }
 
 function renderAmbiguity(ambiguity: Ambiguity): string[] {

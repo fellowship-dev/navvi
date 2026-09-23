@@ -61,6 +61,15 @@ export interface ObtainableField {
   aliases: string[];
   /** One line naming where it came from, for a reader who will not open the JSON. */
   where: string;
+  /**
+   * U6b: the requested field this column was split off, when the client never
+   * asked for it by name. Absent on a field the spec asked for.
+   *
+   * It is a column like any other below this line — same `values`, same
+   * `where`, same leaf — because that is the whole claim: the second reading
+   * was never a bad alternative, it was a field nobody had asked for yet.
+   */
+  splitFrom?: string;
   because: string;
 }
 
@@ -169,6 +178,95 @@ export interface Ambiguity {
   because: string;
 }
 
+// --------------------------------------------------- U6b: the two-field case
+
+/**
+ * U6b: what two alternatives of one field returned on one page.
+ *
+ * **Produced by `src/replay/determinism.ts` and declared here**, which is the
+ * one thing about this type worth explaining. The *observation* belongs to the
+ * replay stage: a compiled field's alternatives are only ever resolved
+ * together against a live page, and the Store B disagreement is invisible
+ * at compile time because on the binding samples the two readings **agreed** —
+ * the club promotion was not live that day, which is exactly why the DOM
+ * selector passed as a fallback. The *decision* belongs here, because the
+ * decision is "these are two fields" and a field is a column of the
+ * reconciliation. So the record crosses one seam, and it is declared on the
+ * side that has to keep it stable, next to the ambiguity it is the answer to.
+ *
+ * `disagreedOn` and `readOn` are counts of URLs, never of findings. Nothing in
+ * this record says an alternative is wrong: both are repeatable and each is
+ * right about a different thing.
+ */
+export interface AlternativeDisagreement {
+  field: string;
+  /** What each alternative that answered returned, in compiled alternative order. */
+  readings: Array<{ source: string; value: TypedValue }>;
+  /** On how many sampled URLs they disagreed, of how many they were both read on. */
+  disagreedOn: number;
+  readOn: number;
+  because: string;
+  /** Free-form, for the trace `src/reconcile/` puts back into the stage block. */
+  traced?: string[];
+}
+
+/**
+ * What became of one reading of a disagreement, once it was traced.
+ *
+ * `requested` — it traced to the leaf the requested field is already bound to,
+ * so this reading *is* the column the client asked for and there is nothing to
+ * emit.
+ * `split` — it traced to a **different** leaf. The page carries two facts; the
+ * second one is emitted as its own obtainable field, bound to that leaf.
+ * `unaccounted` — no leaf of this endpoint carried this value on any sample.
+ * **This is itself the finding**, and it is the one case that cannot be
+ * compiled: the page is showing something this call did not return, which
+ * means either there is an endpoint the investigation never captured or the
+ * page computes the number in the browser. navvi does not invent a binding for
+ * it — getting this wrong in the confident direction is the whole of the
+ * 2026-09-22 defects.
+ * `refused` — it traced, and navvi still would not act on it: two leaves that
+ * carry the value disagree with each other, or the derived name collides with
+ * a column that already exists, or the manuscript carries no leaf catalogue to
+ * trace against at all. A person decides; `because` says which of those it was.
+ */
+export type TraceOutcome = "requested" | "split" | "unaccounted" | "refused";
+
+export interface TracedReading {
+  /** The alternative, as the replay stage named it: `network`, `dom`, `json-ld`. */
+  source: string;
+  value: TypedValue;
+  outcome: TraceOutcome;
+  /** The leaf that carried this value, for every outcome but `unaccounted`. */
+  leaf?: string;
+  /** Other paths of the same endpoint carrying the same fact on every sample. */
+  aliases?: string[];
+  /** The field this became, for `split`. */
+  emitted?: string;
+  because: string;
+}
+
+/**
+ * One cross-alternative disagreement, traced.
+ *
+ * The reason this is a list of its own rather than a third `AmbiguityKind`:
+ * an ambiguity is a question for the client, and this is an **answer**. Two
+ * readings that each trace to their own leaf are two fields, and the client is
+ * told what they now have rather than asked which one they meant.
+ */
+export interface DisagreementRecord {
+  field: string;
+  /** Every reading, in the order replay resolved the alternatives. */
+  readings: TracedReading[];
+  /** The fields this emitted, in the order they were appended to `obtainable`. */
+  emitted: string[];
+  /** A reading had no leaf behind it. Always a decision for a person. */
+  unaccounted: boolean;
+  /** What a person has to do. Absent when the split answered the whole of it. */
+  decision?: string;
+  because: string;
+}
+
 // ----------------------------------------------------------------- obstacles
 
 /**
@@ -203,6 +301,14 @@ export interface Reconciliation {
   notObtainable: NotObtainableField[];
   available: AvailableLeaf[];
   ambiguities: Ambiguity[];
+  /**
+   * U6b. **Optional on purpose, and the reason is U6a's.** Absent means nobody
+   * handed this reconciliation a replay observation, so no alternative was
+   * ever resolved twice on one page and nothing here could have been checked.
+   * An empty array is the different claim that it was checked and every
+   * field's alternatives agreed.
+   */
+  disagreements?: DisagreementRecord[];
   obstacles: ObstacleCost[];
   /** How the leaf catalogue was built, and what it cannot see when it is `rejected`. */
   availableEvidence: LeafEvidence;

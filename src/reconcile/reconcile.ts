@@ -5,8 +5,10 @@ import type { TypedValue } from "../scraper/extract.js";
 import type { Spec } from "../spec/schema.js";
 import { normalize } from "../util/text.js";
 import type {
+  AlternativeDisagreement,
   Ambiguity,
   AvailableLeaf,
+  DisagreementRecord,
   LeafEvidence,
   NotObtainableField,
   ObstacleCost,
@@ -14,6 +16,7 @@ import type {
   QuotedRubric,
   Reading,
   Reconciliation,
+  TracedReading,
 } from "./schema.js";
 
 /**
@@ -30,11 +33,36 @@ import type {
  * already made; "available but not requested" is the only line that can change
  * the brief, and it is the line a compiler written to satisfy the brief can
  * never produce.
+ *
+ * U6b added a sixth list with the same property. When a replay hands this
+ * stage two readings of one field that disagreed on a page the compile never
+ * saw, the answer is not a ranking between them: each is traced back to the
+ * leaf that carried it and the second one becomes **its own column**. That is
+ * the other line that can change the brief, and it is further out of a
+ * prompt's reach than the third - a compiler asked to satisfy the brief would
+ * have picked one of the two and been right about a value the client did not
+ * mean. See "U6b: two fields, not one" below.
  */
 
 export interface ReconcileOptions {
   /** The clock, so a reconciliation is reproducible. */
   now?: Date | undefined;
+  /**
+   * U6b: what a replay saw a compiled field's own alternatives return on one
+   * page, from `judgeAlternatives` in `src/replay/determinism.ts`.
+   *
+   * It is an input rather than something computed here because the
+   * disagreement does not exist yet at this stage and cannot be made to: a
+   * field's alternatives are, by the manuscript's own definition of an alias,
+   * paths that carried **the same value on every binding sample**. Store B's
+   * two prices agreed on all three of them, because the club promotion was not
+   * live that day. Only a replay against a page the compile never saw can put
+   * the two readings side by side, and only this stage can say what they mean.
+   *
+   * Absent means nobody asked, and `Reconciliation.disagreements` is then
+   * absent too rather than empty.
+   */
+  disagreements?: readonly AlternativeDisagreement[] | undefined;
 }
 
 // --------------------------------------------------------------- small parts
@@ -188,6 +216,350 @@ function claimedPaths(manuscript: Manuscript): Set<string> {
     for (const alias of record.aliases) claimed.add(`${match} ${alias}`);
   }
   return claimed;
+}
+
+// ----------------------------------------------------- U6b: two fields, not one
+
+/**
+ * U6b: alternatives of one field that disagree are two fields.
+ *
+ * The 2026-09-22 compiles each had one shape of confidence in them, and this
+ * is the last one: a list price bound to a sale price, which is what a
+ * *ranking* between two readings produces when the ranking is right about
+ * which one is prettier and wrong about which one the client meant. The plan's
+ * own acceptance sentence for this unit is that **no prompt wording would have
+ * surfaced the second half** — that Store B's two readings of `promoPrice`
+ * disagree at all — because both are correct and the site's own payload names
+ * them apart. A ranking picks one and throws away a fact the page states; a
+ * rule that drops the "bad" alternative does the same thing without saying so.
+ *
+ * So the disagreement is not noise to be resolved. **It is a field that was
+ * not asked for**, and the three cases are:
+ *
+ *  1. both readings trace to a leaf — two columns, each bound to its own leaf;
+ *  2. the readings agree — nothing happens, and nothing is written down about
+ *     a field whose alternatives were never in conflict;
+ *  3. a reading traces to nothing — the page is showing a value this call did
+ *     not return, which is the finding, and navvi invents no binding for it.
+ *
+ * ## The trace is a lookup, not an extraction
+ *
+ * `Manuscript.inventory` is every leaf the bound endpoints offered, unfiltered
+ * by the requested fields' types — the catalogue U4 exists on. Tracing a value
+ * is asking which leaf of **this field's own endpoint** carried it on any
+ * sample. Nothing is re-flattened, nothing is re-read, and no page is opened:
+ * if the catalogue does not have it, the honest answer is that it is not there.
+ *
+ * A manuscript with no catalogue at all can only be read through the rejection
+ * set, which is filtered by the declared types of the fields the brief happened
+ * to name. Tracing against it would silently answer "no leaf" for every value
+ * of a type nobody asked about, which is the loudest possible finding produced
+ * by an accident of the brief — so the split is refused there rather than run.
+ */
+
+/** One fact in the catalogue: the paths that carry it, shallowest first. */
+interface Fact {
+  path: string;
+  values: TypedValue[];
+  aliases: string[];
+}
+
+/** A path segment that is an array index. `key-names-carry-the-signal` is about key names; a position is not one. */
+const POSITION = /^\d+$/;
+
+/** `promotionalPrice` becomes `["promotional", "Price"]`; `price-sale-std` becomes `["price", "sale", "cl"]`. */
+function words(text: string): string[] {
+  return text
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/)
+    .filter((word) => word !== "");
+}
+
+function camel(parts: readonly string[]): string {
+  return parts.map((word, index) => (index === 0 ? word.toLowerCase() : word[0]!.toUpperCase() + word.slice(1))).join("");
+}
+
+/** Two key words naming the same thing, give or take a plural: `promotions` and `Promotion`. */
+function sameWord(a: string, b: string): boolean {
+  const left = normalize(a);
+  const right = normalize(b);
+  return left === right || `${left}s` === right || left === `${right}s`;
+}
+
+/**
+ * `isClubPromotion` becomes `["Club", "Promotion"]`.
+ *
+ * A boolean that reads as a flag is how a payload names one entry of an array
+ * apart from its siblings, and it is the only name that entry has: `[1]` is a
+ * position, and a position is exactly what `key-names-carry-the-signal` says
+ * outranks nothing.
+ */
+function flagWords(name: string): string[] | undefined {
+  const parts = words(name);
+  const head = parts[0]?.toLowerCase();
+  if (head !== "is" && head !== "has") return undefined;
+  return parts.slice(1);
+}
+
+/** Every leaf of one endpoint that carried this value on any sample, grouped into facts. */
+function factsCarrying(leaves: readonly InventoryRecord[], match: string, value: TypedValue): Fact[] {
+  const carrying = leaves.filter((leaf) => leaf.match === match && leaf.values.some((seen) => Object.is(seen, value)));
+  const facts: Fact[] = [];
+  for (const leaf of carrying.sort((a, b) => segments(a.path).length - segments(b.path).length || a.path.localeCompare(b.path))) {
+    // Two paths carrying the same value on *every* sample are one fact stated
+    // twice - the manuscript's own definition of an alias - and the shallowest
+    // is the payload's own statement of it. Two paths that agree here and
+    // disagree elsewhere are two facts, and this refuses rather than picks.
+    const fact = facts.find((entry) => sameValues(entry.values, leaf.values));
+    if (fact === undefined) facts.push({ path: leaf.path, values: leaf.values, aliases: [] });
+    else fact.aliases.push(leaf.path);
+  }
+  return facts;
+}
+
+/**
+ * The name of the field a split emits, derived from the payload's own words.
+ *
+ * Two halves, and both come off something a person can check against the file:
+ *
+ *  - **the qualifier** — what the payload calls the thing that makes this leaf
+ *    different from the one the requested field is bound to. A named path
+ *    segment when there is one; the flag on the array entry when the segment is
+ *    a position, with any word the container already said dropped, so
+ *    `promotions[1]` + `isClubPromotion` is `club` and not `clubPromotion`.
+ *  - **the noun** — the last word of the *requested* field's own name. The
+ *    split field is the same quantity under a different qualifier and the
+ *    client's column should be in the client's vocabulary, so `promoPrice`
+ *    plus `club` is `clubPrice`.
+ *
+ * It will not always be the name a person would have chosen, and that is the
+ * trade: a derived name is checkable against the payload in one line, and a
+ * name a model invented is not checkable at all. What navvi must never do is
+ * *quietly* choose it, which is why the derivation is spelled in the record.
+ */
+function nameForSplit(leaf: Fact, bound: string | undefined, field: string, leaves: readonly InventoryRecord[], match: string): string {
+  const own = segments(leaf.path);
+  const shared = new Set(bound === undefined ? [] : segments(bound));
+  let qualifier: string[] | undefined;
+
+  for (const [index, segment] of own.entries()) {
+    if (!POSITION.test(segment)) continue;
+    const container = own[index - 1];
+    const flag = leaves.find((entry) => {
+      if (entry.match !== match) return false;
+      const parts = segments(entry.path);
+      // An immediate scalar sibling of the entry the position names.
+      if (parts.length !== index + 2) return false;
+      if (!parts.slice(0, index + 1).every((part, at) => part === own[at])) return false;
+      return entry.values.length > 0 && entry.values.every((value) => value === true) && flagWords(parts[index + 1]!) !== undefined;
+    });
+    if (flag === undefined) continue;
+    const named = flagWords(segments(flag.path).at(-1)!)!.filter((word) => container === undefined || !sameWord(word, container));
+    if (named.length > 0) qualifier = named;
+  }
+
+  if (qualifier === undefined) {
+    const distinguishing = own.slice(0, -1).filter((segment) => !POSITION.test(segment) && !shared.has(segment));
+    const nearest = distinguishing.at(-1);
+    if (nearest !== undefined) qualifier = words(nearest);
+  }
+
+  const tail = words(own.at(-1) ?? leaf.path);
+  if (qualifier === undefined) return camel(tail);
+  const noun = words(field).at(-1);
+  if (noun === undefined || sameWord(qualifier.at(-1)!, noun)) return camel(qualifier);
+  return camel([...qualifier, noun]);
+}
+
+interface SplitResult {
+  records: DisagreementRecord[];
+  emitted: ObtainableField[];
+}
+
+/**
+ * Trace every reading of every observed disagreement, and emit the fields.
+ *
+ * Nothing here decides *whether* two readings disagree — `judgeAlternatives`
+ * already did, with `formOf`, which is the key U6a buckets N readings of one
+ * page by. This stage never compares two readings to each other at all; it
+ * compares a reading's value against the catalogue, with `Object.is` over a
+ * leaf's sample values, which is the comparison `sameValues` and `varies` in
+ * this file already make. So U6b adds no comparator: the two that exist each
+ * answer the question of the stage that owns them.
+ */
+function splitDisagreements(
+  observed: readonly AlternativeDisagreement[],
+  obtainable: readonly ObtainableField[],
+  leaves: readonly InventoryRecord[],
+  evidence: LeafEvidence,
+  requested: readonly { name: string; type?: FieldType | undefined }[],
+  spec: Spec,
+): SplitResult {
+  const records: DisagreementRecord[] = [];
+  const emitted: ObtainableField[] = [];
+  const taken = new Set([...requested.map((field) => key(field.name)), ...obtainable.map((field) => key(field.field))]);
+
+  for (const disagreement of observed) {
+    const bound = obtainable.find((field) => field.field === disagreement.field);
+    const match = bound?.match ?? "";
+    const claimed = new Set([bound?.path, ...(bound?.aliases ?? [])].filter((path): path is string => path !== undefined));
+    const readings: TracedReading[] = [];
+    const made: string[] = [];
+    let unaccounted = false;
+    let decision: string | undefined;
+
+    for (const reading of disagreement.readings) {
+      const refuse = (because: string): void => {
+        readings.push({ source: reading.source, value: reading.value, outcome: "refused", because });
+        decision ??= because;
+      };
+
+      if (bound === undefined) {
+        refuse(
+          `${disagreement.field} is not in this reconciliation's obtainable list, so there is no binding for ${show(reading.value)} to be a second reading *of*. ` +
+            `A disagreement observed against a field this manuscript never bound is a question about which compile the replay was running, not about the page.`,
+        );
+        continue;
+      }
+      if (evidence !== "inventory") {
+        refuse(
+          `this manuscript carries no leaf catalogue, only the rejection set, which holds leaves that lost a competition for a field the brief *did* name and is filtered by those fields' declared types. ` +
+            `Tracing ${show(reading.value)} against it would answer "no leaf" for every value of a type nobody asked about, which is the loudest finding navvi has produced by an accident of the brief. See \`Manuscript.inventory\`.`,
+        );
+        continue;
+      }
+
+      const facts = factsCarrying(leaves, match, reading.value);
+      if (facts.length === 0) {
+        unaccounted = true;
+        readings.push({
+          source: reading.source,
+          value: reading.value,
+          outcome: "unaccounted",
+          because:
+            `no leaf of ${match === "" ? "the bound endpoint" : match} carried ${show(reading.value)} on any sample. ` +
+            `**The page is showing something this call did not return**, so either there is an endpoint the investigation never captured or the browser computes this number from ones it did. ` +
+            `Nothing is bound to it: a binding invented for a value with no leaf behind it is a column that will be confidently wrong on the first page where the arithmetic changes.`,
+        });
+        continue;
+      }
+      if (facts.length > 1) {
+        refuse(
+          `${facts.length} different facts of ${match === "" ? "the bound endpoint" : match} carried ${show(reading.value)} - ${facts.map((fact) => fact.path).join(", ")} - and they disagree with each other on the other samples. ` +
+            `One value matching two facts is not a trace, and navvi will not pick which one the page was showing.`,
+        );
+        continue;
+      }
+
+      const fact = facts[0]!;
+      if (claimed.has(fact.path)) {
+        readings.push({
+          source: reading.source,
+          value: reading.value,
+          outcome: "requested",
+          leaf: fact.path,
+          because: `${show(reading.value)} is ${fact.path}, which is what ${disagreement.field} is already bound to. This reading is the column the client asked for.`,
+        });
+        continue;
+      }
+
+      const name = nameForSplit(fact, bound.path, disagreement.field, leaves, match);
+      if (taken.has(key(name))) {
+        refuse(
+          `${show(reading.value)} traces to ${fact.path}, which is a second field and not a second reading - but the name the payload's own words derive for it, \`${name}\`, is already a column. ` +
+            `navvi will not rename it and will not write into a column somebody else's values are in: a client decides what this one is called.`,
+        );
+        continue;
+      }
+
+      taken.add(key(name));
+      const declared = requested.find((entry) => entry.name === disagreement.field)?.type;
+      emitted.push({
+        field: name,
+        type: declared ?? inferType(fact.values),
+        typeInferred: declared === undefined,
+        tier: 2,
+        source: "network",
+        ...(match === "" ? {} : { match }),
+        path: fact.path,
+        values: fact.values,
+        aliases: [...fact.aliases].sort(),
+        where: `network ${match === "" ? "" : `${match} `}${fact.path}`,
+        splitFrom: disagreement.field,
+        because:
+          `a replay resolved ${disagreement.field}'s alternatives against one page and they returned different values; ${reading.source} returned ${show(reading.value)}, which traces to ${fact.path} - ` +
+          `a different leaf of the same call than the one ${disagreement.field} is bound to. The page states both, so both are columns: this one was never a bad alternative, it was a field nobody had asked for.`,
+      });
+      made.push(name);
+      readings.push({
+        source: reading.source,
+        value: reading.value,
+        outcome: "split",
+        leaf: fact.path,
+        ...(fact.aliases.length > 0 ? { aliases: [...fact.aliases].sort() } : {}),
+        emitted: name,
+        because: `${show(reading.value)} is ${fact.path}, a different leaf of the same call, so it is emitted as \`${name}\` bound to that leaf rather than ranked against ${disagreement.field}.`,
+      });
+    }
+
+    if (unaccounted) {
+      decision =
+        `one of ${disagreement.field}'s readings has no leaf behind it. Somebody has to say where the page gets it: a capture of the page's own traffic will either show an endpoint the investigation missed, ` +
+        `in which case this is a re-investigation, or it will not, in which case the number is computed in the browser and the only honest column is the input it is computed from.`;
+    }
+    const settled = rubricsFor(spec, disagreement.field);
+    records.push({
+      field: disagreement.field,
+      readings,
+      emitted: made,
+      unaccounted,
+      ...(decision === undefined ? {} : { decision }),
+      because: becauseOfSplit(disagreement, made, unaccounted, settled.length),
+    });
+  }
+
+  return { records, emitted };
+}
+
+function becauseOfSplit(disagreement: AlternativeDisagreement, made: readonly string[], unaccounted: boolean, rubrics: number): string {
+  const head =
+    `${disagreement.field}'s alternatives disagreed on ${disagreement.disagreedOn} of the ${disagreement.readOn} URLs they were both read on: ` +
+    `${disagreement.readings.map((reading) => `${reading.source} ${show(reading.value)}`).join(" against ")}.`;
+  const tail =
+    made.length > 0
+      ? ` Traced to their own leaves and split into ${[disagreement.field, ...made].join(" and ")}, each bound to the leaf behind it. Neither reading was ranked and neither was dropped.`
+      : unaccounted
+        ? ` Nothing could be split: a reading has no leaf behind it, and that is the finding rather than a gap to fill.`
+        : ` Nothing was split; the readings resolved to the binding this field already has.`;
+  const rule =
+    rubrics > 0
+      ? ` The spec carries ${rubrics === 1 ? "a rule" : `${rubrics} rules`} for this field, and the split does not consult ${rubrics === 1 ? "it" : "them"}: a rule says which reading answers the column the client named, never that the other fact should be thrown away.`
+      : "";
+  return head + tail + rule;
+}
+
+/**
+ * The trace, as the determinism stage block prints it.
+ *
+ * `Determinism.alternatives[].traced` is free-form on purpose and this is what
+ * fills it: the replay stage observed the disagreement and cannot explain it,
+ * this stage traced it and can. The lines are generated rather than stored so
+ * the artifact keeps one copy of the facts, and a caller that never asks for
+ * them gets a determinism record with `traced` absent, which is honest - the
+ * trace did not happen.
+ */
+export function tracedAlternatives(reconciliation: Reconciliation, observed: readonly AlternativeDisagreement[]): AlternativeDisagreement[] {
+  return observed.map((disagreement) => {
+    const record = reconciliation.disagreements?.find((entry) => entry.field === disagreement.field);
+    if (record === undefined) return { ...disagreement };
+    const lines = [
+      `traced: ${record.readings.map((reading) => `${reading.source} ${show(reading.value)} is ${reading.leaf ?? "nothing this call returned"}`).join(", ")}`,
+    ];
+    const names = [record.field, ...record.emitted];
+    if (record.emitted.length > 0) lines.push(`-> split into ${names.join(" and ")}, ${names.length === 2 ? "both" : "each"} bound to their leaf`);
+    if (record.unaccounted) lines.push(`-> the page is showing something this call did not return; nothing is bound to it`);
+    return { ...disagreement, traced: lines };
+  });
 }
 
 // ------------------------------------------------------------------- the API
@@ -385,6 +757,29 @@ export function reconcile(manuscript: Manuscript, spec: Spec, options: Reconcile
     }
   }
 
+  // ----------------------------------------------- U6b: the fields nobody asked
+
+  /**
+   * The split runs last of the five lists and appends rather than interleaves.
+   *
+   * Appending keeps every field the spec asked for at the index it has always
+   * had, so a diff between two reconciliations shows the new column arriving
+   * rather than every row below it shifting - the same reason every other list
+   * in this artifact is in a declared order.
+   */
+  let disagreements: DisagreementRecord[] | undefined;
+  if (options.disagreements !== undefined) {
+    const split = splitDisagreements(options.disagreements, obtainable, leaves, evidence, manuscript.requested, spec);
+    disagreements = split.records;
+    obtainable.push(...split.emitted);
+    // A leaf that is now a column is not a leaf nobody asked for. Saying both
+    // in one artifact would make the reader decide which sentence to believe.
+    const columns = new Set(split.emitted.flatMap((field) => [`${field.match ?? ""} ${field.path}`, ...field.aliases.map((alias) => `${field.match ?? ""} ${alias}`)]));
+    for (let index = available.length - 1; index >= 0; index--) {
+      if (columns.has(`${available[index]!.match} ${available[index]!.path}`)) available.splice(index, 1);
+    }
+  }
+
   // -------------------------------------------------------------- obstacles
 
   const obstacles: ObstacleCost[] = manuscript.obstacles.map((obstacle) => ({
@@ -400,7 +795,11 @@ export function reconcile(manuscript: Manuscript, spec: Spec, options: Reconcile
   // ---------------------------------------------------------------- verdict
 
   const blocking = obstacles.some((obstacle) => obstacle.blocking);
-  const open = ambiguities.some((ambiguity) => ambiguity.settledBy.length === 0);
+  // A disagreement navvi could not settle by splitting is open for the same
+  // reason an unsettled ambiguity is: a person has to answer it before this
+  // compiles. A split that succeeded settles itself and opens nothing.
+  const undecided = (disagreements ?? []).filter((record) => record.decision !== undefined);
+  const open = ambiguities.some((ambiguity) => ambiguity.settledBy.length === 0) || undecided.length > 0;
   const verdict: Reconciliation["verdict"] = obtainable.length === 0 ? "empty" : blocking || open ? "open" : notObtainable.length > 0 ? "partial" : "complete";
 
   return {
@@ -412,10 +811,20 @@ export function reconcile(manuscript: Manuscript, spec: Spec, options: Reconcile
     notObtainable,
     available,
     ambiguities,
+    ...(disagreements === undefined ? {} : { disagreements }),
     obstacles,
     availableEvidence: evidence,
     verdict,
-    because: becauseOf(verdict, manuscript, obtainable.length, notObtainable.length, available.length, ambiguities, blocking),
+    because: becauseOf(
+      verdict,
+      manuscript,
+      obtainable.filter((field) => field.splitFrom === undefined).length,
+      notObtainable.length,
+      available.length,
+      ambiguities,
+      blocking,
+      disagreements,
+    ),
   };
 }
 
@@ -458,12 +867,17 @@ function becauseOf(
   available: number,
   ambiguities: Ambiguity[],
   blocking: boolean,
+  disagreements: readonly DisagreementRecord[] | undefined,
 ): string {
   const parts = [`${obtainable} of ${manuscript.requested.length} requested field(s) obtainable`];
   if (notObtainable > 0) parts.push(`${notObtainable} not`);
   if (available > 0) parts.push(`${available} leaf/leaves available that nothing asked for`);
   const unsettled = ambiguities.filter((ambiguity) => ambiguity.settledBy.length === 0).length;
   if (ambiguities.length > 0) parts.push(`${ambiguities.length} ambiguity/ambiguities, ${unsettled} with no rule in the spec`);
+  const split = (disagreements ?? []).flatMap((record) => record.emitted);
+  if (split.length > 0) parts.push(`${split.length} field(s) split out of a disagreement nobody asked about (${split.join(", ")})`);
+  const unaccounted = (disagreements ?? []).filter((record) => record.unaccounted).length;
+  if (unaccounted > 0) parts.push(`${unaccounted} reading(s) the page shows that this call did not return`);
   if (blocking) parts.push("a blocking obstacle stands in the way");
   const tail =
     verdict === "complete"

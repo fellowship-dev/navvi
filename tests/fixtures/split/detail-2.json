@@ -1,0 +1,45 @@
+{
+  "productData": {
+    "id": "200002",
+    "name": "Articulo Otro 250 ml",
+    "price": 12990,
+    "prices": {
+      "price-list-std": 12990,
+      "price-sale-std": 10392
+    },
+    "appliedPromotions": {
+      "price-sale-std": {
+        "promotionalPrice": 10392,
+        "promotionId": "SALE-10"
+      }
+    },
+    "promotions": [
+      {
+        "id": "SALE-10",
+        "isClubPromotion": false,
+        "calloutMsg": "10% de descuento"
+      },
+      {
+        "id": "CLUB-20",
+        "isClubPromotion": true,
+        "promotionalPrice": 9990,
+        "calloutMsg": "Precio socio"
+      }
+    ],
+    "hasClubPromotion": true,
+    "stock": 57,
+    "brand": "Marca Otra",
+    "pum": {
+      "value": 52,
+      "unit": "ml"
+    },
+    "seo": {
+      "metaTitle": "Articulo Otro 250 ml",
+      "canonical": "/articulo/200002.html"
+    },
+    "telemetry": {
+      "sessionId": "s200002",
+      "renderedAt": 1758560200002
+    }
+  }
+}

@@ -14,13 +14,15 @@
  * the spec the client approved, opens nothing and asks nobody. The only thing
  * a re-run moves is the timestamp, and that comes from an injected clock.
  */
-export { reconcile, costOf, rubricsFor, show, statedType, type ReconcileOptions } from "./reconcile.js";
+export { reconcile, costOf, rubricsFor, show, statedType, tracedAlternatives, type ReconcileOptions } from "./reconcile.js";
 export { render, summarize } from "./render.js";
 export { outputSchema, renderOutputSchema, type OutputSchemaOptions } from "./output.js";
 export type {
+  AlternativeDisagreement,
   Ambiguity,
   AmbiguityKind,
   AvailableLeaf,
+  DisagreementRecord,
   LeafEvidence,
   NotObtainableField,
   NotObtainableKind,
@@ -31,4 +33,6 @@ export type {
   Reading,
   Reconciliation,
   SchemaField,
+  TraceOutcome,
+  TracedReading,
 } from "./schema.js";
