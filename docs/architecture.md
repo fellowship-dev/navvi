@@ -139,6 +139,7 @@ graph TD
   replay --> browser
   replay --> chooser
   replay --> input
+  replay --> investigate
   replay --> navigate
   replay --> prestep
   replay --> reconcile

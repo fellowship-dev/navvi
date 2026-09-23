@@ -15,12 +15,25 @@ import type { RunSummary } from "../main.js";
 import { dismissConsent, runPreSteps, type Notifier } from "../prestep/index.js";
 import { coerceValues, extractPage, fieldTypesOf, fingerprintMatches, type ItemExtraction } from "../scraper/extract.js";
 import { cacheKey, validateScraper, type CompiledScraper, type Status, type TraceStep } from "../scraper/schema.js";
-import { ScraperStore, ScraperStoreError } from "../scraper/store.js";
+import { CACHE_STORE_NAME, ScraperStore, ScraperStoreError } from "../scraper/store.js";
 import { findPlaceholders, MASK, maskUrlCredentials, MissingSecretError, redactRunInput, resolveSecrets, type CommandRunner, type Secret } from "../secrets/resolve.js";
 import { groupByTemplate, pickSampleUrls } from "../template/index.js";
+import { recordCanary, type CanaryFingerprint, type FieldFill, type PageResponse } from "../investigate/blocked.js";
 import { compileDetail, DETAIL_LINK_FIELD, detailLinkOf, extractDetail, hasDetailTemplate, mergeDetail, withDetailLink } from "./detail.js";
+import type { Determinism } from "./determinism.js";
 import { entryModeFor, replayTrace, type ReplayPolicy, type StepFailureAction } from "./entry.js";
-import { createHealer, findUnmappedCandidates, type HealingEvent, type UnmappedCandidate } from "./heal.js";
+import {
+  createHealer,
+  findUnmappedCandidates,
+  judgePromotions,
+  licenseToHeal,
+  observeResolutions,
+  promoteFieldAlternative,
+  type HealingEvent,
+  type PromotionEvent,
+  type ResolutionTally,
+  type UnmappedCandidate,
+} from "./heal.js";
 import { defaultNavigator } from "./navigator.js";
 import { defaultPaginate } from "./paginate.js";
 
@@ -161,6 +174,24 @@ export interface CrawlDeps {
    * symptoms while the cause goes somewhere it cannot read.
    */
   log?: ((message: string) => void) | undefined;
+  /**
+   * U9c: the canary for this run, overriding the one recorded beside the
+   * scraper when it was compiled.
+   *
+   * It exists so the gate can be driven from a fixture — "a run whose canary
+   * failed does not heal" is a sentence a test has to be able to arrange — and
+   * so a caller that recorded its own canary at investigation time (`navvi
+   * make` does) can hand it over rather than letting the crawler re-record a
+   * weaker one.
+   */
+  canary?: CanaryFingerprint | undefined;
+  /**
+   * U6a's artifact. A field this rejected as unstable is never repaired: the
+   * 2026-09-22 replay reported 33 repairs against pages that had not moved,
+   * and every one of them would have appended whichever form the page happened
+   * to show that second.
+   */
+  determinism?: Determinism | undefined;
 }
 
 // ---------------------------------------------------------------- policy
@@ -326,6 +357,32 @@ interface TemplatePlan {
   cacheHit: boolean;
   /** R20: `scraper-compiled` is charged once per template, after its first page passes the fingerprint check. */
   compileCharged: boolean;
+  /** U9c: the fingerprint of a page this template's scraper was compiled from, when one was recorded. */
+  canary: CanaryFingerprint | null;
+  /**
+   * U9c: the evidence the repair gate weighs, per template.
+   *
+   * Per template and not per run, because a template is the unit a scraper is
+   * compiled and repaired for: two templates of one run are two page shapes,
+   * and a field that a listing does not carry would otherwise read as a field
+   * that stopped filling. `pages`, `fills` and `values` are one measurement
+   * over one set of pages and have to stay that way — the machine's
+   * requirement is that the field stopped filling *while the rest of the run
+   * kept answering*, which is only a comparison if both halves are about the
+   * same pages.
+   */
+  evidence: {
+    /** The pages of this template that failed their fingerprint check, with their bodies, oldest first. */
+    pages: PageResponse[];
+    /** Fill counts per field over those same pages, as the scraper stood when each was read. */
+    fills: Record<string, FieldFill>;
+    /** The values each field produced on them, so `no-variation-no-field` runs on real readings and not on a fill rate. */
+    values: Record<string, Array<string | number | null>>;
+  };
+  /** U9b: how many items each alternative of each field answered, this run. */
+  tally: ResolutionTally;
+  /** U9b: fields repaired this run, which may not be promoted from it — see `PromotionOptions.healed`. */
+  healedFields: Set<string>;
 }
 
 interface Stop {
@@ -346,6 +403,8 @@ interface RunState {
   blockedRequests: number;
   requests: Record<RequestLabel, number>;
   healingEvents: HealingEvent[];
+  /** U9b: alternatives reordered after the crawl, kept apart so a promotion never spends the healing budget. */
+  promotions: PromotionEvent[];
   unmappedCandidates: UnmappedCandidate[];
   fieldsNotFound: Set<string>;
   /** R16: dedupe keys of every record pushed this run (list rows dedupe within their listing crawl). */
@@ -384,7 +443,12 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
     pages: state.pages,
     templates: plans.length,
     cacheHit: plans.length > 0 && plans.every((p) => p.cacheHit),
-    healingEvents: state.healingEvents,
+    // U9b: promotions go out in the same list a person already reads to find
+    // out what this run changed about the scraper, and last, because they are
+    // decided after the crawl. They are kept in their own array until here so
+    // that nothing during the crawl — the healing budget, `driftSeen` —
+    // mistakes a reordering for a repair.
+    healingEvents: [...state.healingEvents, ...state.promotions],
     unmappedCandidates: state.unmappedCandidates,
     fieldsNotFound: [...state.fieldsNotFound].sort(),
     // U14: the totals are the run's; `writer` names the second source and its share of them.
@@ -572,6 +636,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     blockedRequests: 0,
     requests: { compile: 0, list: 0, record: 0 },
     healingEvents: [],
+    promotions: [],
     unmappedCandidates: [],
     fieldsNotFound: new Set(),
     seen: new Set(),
@@ -596,6 +661,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
 
   // Cache lookup per template (R5, R38) before any browser work.
   const store = deps.store ?? (await ScraperStore.open({ actor }));
+  const canaries = await CanaryRecords.open(actor, ctxLog);
   const grouped = groupByTemplate(urls);
   try {
     for (const [templateKey, templateUrls] of grouped) {
@@ -606,7 +672,18 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
         scriptId: grouped.size === 1 ? input.scriptId : undefined,
         forceRecompile: input.forceRecompile,
       });
-      plans.push({ templateKey, cacheKey: key, urls: templateUrls, scraper: loaded.scraper, cacheHit: loaded.cacheHit, compileCharged: loaded.cacheHit });
+      plans.push({
+        templateKey,
+        cacheKey: key,
+        urls: templateUrls,
+        scraper: loaded.scraper,
+        cacheHit: loaded.cacheHit,
+        compileCharged: loaded.cacheHit,
+        canary: deps.canary ?? (await canaries.get(key)),
+        evidence: { pages: [], fills: {}, values: {} },
+        tally: {},
+        healedFields: new Set(),
+      });
     }
   } catch (error) {
     if (error instanceof ScraperStoreError) return fail(error.status, error.message);
@@ -852,6 +929,12 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     const scraper = validateScraper({ ...compiled, trace, entry });
     await store.put(scraper);
     plan.scraper = scraper;
+    // U9c: this page compiled, so the site served it — which is the whole
+    // definition of a page worth fingerprinting. Recorded now because a run
+    // that heals is a run that has nothing working left to take a fingerprint
+    // from: a cache hit never opens a good page, and asking the *drifted* run
+    // for a known-good page is the circularity the canary exists to break.
+    plan.canary = (await canaries.record(plan.cacheKey, request.url, response?.status(), page)) ?? plan.canary;
     if (entryModeFor(scraper) === "trace") {
       // The session already stands on the listing: this start URL's replay is done (R14).
       state.replayed.add(replayKey(ctx));
@@ -912,11 +995,76 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     return true;
   }
 
+  /**
+   * U9c: the page in front of the healer, kept as this template's evidence.
+   *
+   * Only pages that failed their fingerprint check get here, and that is the
+   * right population rather than a saving: the question `classifyRun` is being
+   * asked is "may a repair be learned from this page", so the corpus is the
+   * pages a repair would be learned from. StoreC's 111 failures are 111
+   * copies of one apology and the apology shape sees that; a redesign's
+   * failures are as many different pages as the run read and it does not.
+   */
+  const observe = async (ctx: PlaywrightCrawlingContext, plan: TemplatePlan): Promise<PageResponse> => {
+    const url = ctx.page.url();
+    let body = "";
+    try {
+      body = await ctx.page.content();
+    } catch {
+      // The page can go out from under a repair (a navigation, a closed
+      // context). An empty body reads as `unchecked` everywhere downstream,
+      // never as a refusal, so a failure to read is not evidence of one.
+    }
+    const observed: PageResponse = { url, status: ctx.response?.status(), body };
+    const pages = plan.evidence.pages;
+    const at = pages.findIndex((page) => page.url === url);
+    if (at >= 0) pages[at] = observed;
+    else if (pages.length < HEAL_CORPUS_PAGES) pages.push(observed);
+    return observed;
+  };
+
   async function heal(ctx: PlaywrightCrawlingContext, plan: TemplatePlan, failure: HealFailure): Promise<CompiledScraper | null> {
     if (!plan.scraper || state.stop) return null;
+
+    /**
+     * **U9c: the gate.** Until this line existed `createHealer()` was called
+     * unconditionally and `classifyRun` had no importer in `src/replay/` at
+     * all — `mayHeal` was a guarantee in the type system that the run did not
+     * keep, and a recompile against StoreC's "¡Lo sentimos!" page was
+     * reachable from a blocked verdict in the code.
+     *
+     * The seam the plan flagged — `classifyRun` is offline and run-wide, the
+     * crawler is at one live page — is resolved by re-asking at every repair
+     * over everything the run has accumulated, rather than classifying once.
+     * The verdict sharpens as the corpus grows and the page about to be
+     * learned from is always its newest member, which is the only ordering
+     * under which the answer is about the right page.
+     */
+    const observed = await observe(ctx, plan);
+    const licence = licenseToHeal(failure, {
+      pages: plan.evidence.pages,
+      fields: plan.evidence.fills,
+      values: plan.evidence.values,
+      observed,
+      ...(plan.canary ? { canary: plan.canary } : {}),
+      ...(deps.determinism ? { determinism: deps.determinism } : {}),
+    });
+    if (!licence.licensed) {
+      ctxLog(`healing refused on ${observed.url}: ${licence.because}`);
+      // A refused repair is the moment a person most needs to see what was on
+      // the page, so the scan still runs. It costs no chooser call and stores
+      // nothing — `UnmappedCandidate` is reported and never written into a
+      // scraper — which is exactly why refusing the repair is no reason to
+      // refuse the diagnosis too.
+      noteUnmapped(await findUnmappedCandidates(ctx.page, plan.scraper).catch(() => []));
+      return null;
+    }
+    ctxLog(`healing licensed on ${observed.url}: ${licence.because}`);
+    const licensed: HealFailure = failure.kind === "fields" ? { kind: "fields", fields: licence.fields } : failure;
+
     let outcome: HealOutcome;
     try {
-      outcome = await healer({ page: ctx.page, scraper: plan.scraper, chooser, failure, allowMutations: input.allowMutations });
+      outcome = await healer({ page: ctx.page, scraper: plan.scraper, chooser, failure: licensed, allowMutations: input.allowMutations });
     } catch (error) {
       // R19: a chooser failure skips healing; the page counts as unhealed and the crawl goes on.
       if (error instanceof NeedsHumanError) throw error;
@@ -957,6 +1105,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       return null;
     }
     state.healingEvents.push(outcome.event);
+    if (outcome.event.kind === "field") for (const name of outcome.event.fields) plan.healedFields.add(name);
     await store.put(outcome.scraper);
     plan.scraper = outcome.scraper;
     return outcome.scraper;
@@ -1006,6 +1155,42 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     const failed = new Set<string>();
     for (const item of items) for (const name of checkFields(scraper, item)) failed.add(name);
     return { scraper, items, failed };
+  }
+
+  /**
+   * U9c: one failing page's reading, folded into the evidence the gate weighs.
+   *
+   * **Only pages that asked for a repair are counted, and that is the whole
+   * measurement rather than a saving.** The machine's requirement is that "the
+   * field stopped filling *while the rest of the run kept answering*", which is
+   * a comparison between fields on the pages that are failing — not a
+   * comparison between this page and the run's history. Counting every page
+   * read would answer a different question and answer it wrongly in both
+   * directions: a thousand good pages followed by a redesign would keep the
+   * broken field's rate above the floor forever and no repair would ever be
+   * licensed, and a run that started broken would look no different from one
+   * that broke at the end.
+   *
+   * Both halves are needed and neither is enough. The counts are what
+   * `every-field-collapsed-is-blocking` weighs; the values are what
+   * `no-variation-no-field` weighs, and without them StoreC reads as healthy
+   * — its `product_name` was 111 of 111 filled, every one of them
+   * "¡Lo sentimos!". A fill rate cannot see a column that filled perfectly
+   * with one wrong answer, and that is the exact page a repair would have
+   * learned from.
+   */
+  function countFields(plan: TemplatePlan, e: Extracted): void {
+    if (e.items.length === 0) return;
+    for (const name of Object.keys(e.scraper.fields)) {
+      const fill = (plan.evidence.fills[name] ??= { filled: 0, total: 0 });
+      const values = (plan.evidence.values[name] ??= []);
+      for (const item of e.items) {
+        const value = item.values[name] ?? null;
+        fill.total += 1;
+        if (value !== null && value !== "") fill.filled += 1;
+        if (values.length < FIELD_VALUE_SAMPLES) values.push(value);
+      }
+    }
   }
 
   /** R33: a page whose every item leaves a compiled field empty asks for healing; an empty listing is an end, not drift. */
@@ -1092,12 +1277,22 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
         // another page may have healed the template meanwhile: re-check on the live scraper first
         if (plan.scraper && plan.scraper !== current.scraper) current = await extractChecked(page, plan.scraper, sourceUrl);
         if (!needsHealing(current)) return;
+        // U9c: the reading *before* the repair, and only from a page that
+        // asked for one. Counting the post-repair reading would hand
+        // `classifyRun` a fill rate that already contains the repair it is
+        // being asked to license; counting the pages that did not ask would
+        // answer a different question — see `countFields`.
+        countFields(plan, current);
         healAttempted = true;
         const healed = await heal(ctx, plan, { kind: "fields", fields: [...current.failed] });
         if (healed) current = await extractChecked(page, healed, sourceUrl);
         else if (!state.stop) state.unhealed += 1;
       });
     }
+    // U9b: the resolution votes are the *settled* reading — after a repair,
+    // not before — because the alternative that answered is the one that put
+    // the value in the row.
+    for (const item of current.items) observeResolutions(plan.tally, item.resolvedBy);
     if (state.stop) return 0;
     if (!healAttempted && driftSeen()) noteUnmapped(await findUnmappedCandidates(page, current.scraper).catch(() => []));
     if (!(await chargeCompiled(plan, current, sourceUrl))) return 0;
@@ -1251,7 +1446,155 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     throw error;
   }
   if (state.fatal) throw state.fatal;
+  await promoteAlternatives();
   return summaryOf(input, state, plans, chooser, charger);
+
+  /**
+   * **U9b: an alternative that keeps working outranks one that keeps failing.**
+   *
+   * After the crawl, not during it. A promotion is a claim about a whole run —
+   * this alternative answered every item and the ones ahead of it answered
+   * none — and mid-crawl there is no such thing as a whole run. It is also the
+   * only honest moment: `judgePromotions` needs the counts to be final, and a
+   * reorder applied to a template another page is still extracting against
+   * would change the cascade under it.
+   *
+   * A run that stopped short promotes nothing. Its counts are a prefix of a
+   * measurement rather than one, and a charge limit or a block is exactly the
+   * kind of thing that makes a good alternative look like a failing one.
+   */
+  async function promoteAlternatives(): Promise<void> {
+    if (state.stop) return;
+    for (const plan of plans) {
+      const scraper = plan.scraper;
+      if (!scraper) continue;
+      const promotions = judgePromotions(scraper, plan.tally, { healed: plan.healedFields });
+      if (promotions.length === 0) continue;
+      let promoted = scraper;
+      for (const promotion of promotions) promoted = promoteFieldAlternative(promoted, promotion.field, promotion.from);
+      const at = new Date().toISOString();
+      try {
+        await store.put(validateScraper(promoted));
+      } catch (error) {
+        // A reorder that will not validate is a defect in the reorder, not a
+        // reason to ship it: the stored scraper is left exactly as it was.
+        ctxLog(`promotion skipped for ${plan.templateKey}: ${error instanceof Error ? error.message : String(error)}`);
+        continue;
+      }
+      plan.scraper = promoted;
+      for (const promotion of promotions) {
+        ctxLog(`promoted ${promotion.field} on ${plan.templateKey}: ${promotion.because}`);
+        state.promotions.push({ kind: "promotion", field: promotion.field, from: promotion.from, observations: promotion.observations, at, because: promotion.because });
+      }
+    }
+  }
+}
+
+/**
+ * How many failed pages the repair gate keeps bodies for.
+ *
+ * The corpus is only there so the apology shape has something to compare
+ * against, and that shape is decided by whether the *same document* comes back
+ * on different URLs — a question two dozen pages answer as well as a thousand.
+ * StoreC's run was 111 URLs of one page and would have been settled by the
+ * second. The cap is what stops a long crawl of a genuinely broken template
+ * from carrying its whole HTML in memory.
+ */
+const HEAL_CORPUS_PAGES = 24;
+
+/** How many readings of one field the gate keeps for the variation check. Enough to be a sample, bounded so a long run is not a leak. */
+const FIELD_VALUE_SAMPLES = 200;
+
+/** How many words a canary has to carry before it is worth recording. See `CanaryRecords.record`. */
+const MIN_CANARY_WORDS = 8;
+
+/**
+ * Where a canary lives, and the honest statement of why it lives there.
+ *
+ * **It belongs on `CompiledScraper`.** A canary is a property of one compiled
+ * scraper — recorded from the page that compiled it, read by the run that
+ * replays it, and meaningless apart from it — and the store already keeps the
+ * two together by key. `CompiledScraperSchema` is the right home and
+ * `src/scraper/schema.ts` was not this session's file to change, so this
+ * writes a record beside the scraper in the scraper's own store instead. The
+ * two can fall out of step, which is the whole objection to a side-car: a
+ * `forceRecompile` that failed leaves the old canary in place. The migration
+ * is a `canary` field on the scraper and the deletion of this class.
+ *
+ * Everything here fails quietly toward `unchecked`. A canary that cannot be
+ * read is not evidence that the site is refusing you, and a run that could not
+ * open its own key-value store has a bigger problem than healing.
+ */
+class CanaryRecords {
+  private constructor(
+    private readonly store: KeyValueStore | null,
+    private readonly log: (message: string) => void,
+  ) {}
+
+  static async open(actor: CrawlActor, log: (message: string) => void): Promise<CanaryRecords> {
+    try {
+      return new CanaryRecords(await actor.openKeyValueStore(CACHE_STORE_NAME), log);
+    } catch (error) {
+      log(`canaries unavailable: ${error instanceof Error ? error.message : String(error)}`);
+      return new CanaryRecords(null, log);
+    }
+  }
+
+  /** The key a canary is filed under. Prefixed so it cannot collide with a cache key. */
+  static keyFor(cacheKey: string): string {
+    return `canary-${cacheKey}`.slice(0, 256);
+  }
+
+  async get(cacheKey: string): Promise<CanaryFingerprint | null> {
+    if (!this.store) return null;
+    try {
+      const raw = await this.store.getValue<unknown>(CanaryRecords.keyFor(cacheKey));
+      return isCanaryFingerprint(raw) ? raw : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Fingerprint a page that just compiled, and refuse to record a fingerprint
+   * too thin to disprove anything.
+   *
+   * `checkCanary` reads an empty word list as full overlap, so a canary taken
+   * off a page with nothing on it resolves against every page there will ever
+   * be — including the refusal it is supposed to catch. A canary that always
+   * resolves is worse than none: none reads `unchecked` and refuses a total
+   * collapse, and that one reads `resolved` and licenses a repair against an
+   * error page.
+   */
+  async record(cacheKey: string, url: string, status: number | undefined, page: Page): Promise<CanaryFingerprint | null> {
+    if (!this.store) return null;
+    try {
+      const canary = recordCanary({ url, status: status ?? 200, body: await page.content() });
+      if (canary.words.length < MIN_CANARY_WORDS) {
+        this.log(`no canary recorded for ${url}: ${canary.words.length} words is not a fingerprint that could fail`);
+        return null;
+      }
+      await this.store.setValue(CanaryRecords.keyFor(cacheKey), canary);
+      return canary;
+    } catch (error) {
+      this.log(`no canary recorded for ${url}: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+}
+
+/** A stored canary, checked before it is trusted: it comes back off a key-value store months later. */
+function isCanaryFingerprint(value: unknown): value is CanaryFingerprint {
+  if (value === null || typeof value !== "object") return false;
+  const record = value as Partial<CanaryFingerprint>;
+  return (
+    typeof record.url === "string" &&
+    typeof record.recordedAt === "string" &&
+    typeof record.textChars === "number" &&
+    typeof record.declaredProduct === "boolean" &&
+    Array.isArray(record.words) &&
+    record.words.every((word) => typeof word === "string")
+  );
 }
 
 /** On the platform a secret may also be a `SECRET_<NAME>` record in the run's default store. */

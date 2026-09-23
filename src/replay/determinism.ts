@@ -517,12 +517,47 @@ function becauseOfDisagreement(field: string, readings: readonly AlternativeValu
 
 // --------------------------------------------------------------- the consumers
 
-/** Did this field fail to hold still? The question a healer has to ask before it repairs anything. */
+/**
+ * Did this field fail to hold still? The question a healer has to ask before
+ * it repairs anything — and U9c is the first caller, in
+ * `replay/heal.ts` `licenseToHeal`, which subtracts every field this rejects
+ * from the set a repair is allowed to touch.
+ *
+ * **Read only in the refusing direction.** `true` is a measurement: this field
+ * took two forms on a page nobody changed, and the movements that prove it are
+ * in the artifact. `false` is *not* the opposite measurement, and on
+ * 2026-09-23 it was found not to be one at all:
+ *
+ *   `FieldStability.readOn` is documented as "on how many sampled URLs it was
+ *   read at all" and is computed as `field in item` — key presence, not a
+ *   value. `extractPage` null-fills every compiled field on every page, so
+ *   that key is always there. `readOn` is therefore always the full URL count,
+ *   `Stability.absent` is unreachable through `src/make/`'s driver, and a
+ *   replay that read **nothing** comes back `held` on every field with verdict
+ *   `stable` — a `stable` that cannot be checked against the artifact, because
+ *   a `held` field stores no forms.
+ *
+ * So `isUnstable` returning `false` means "this field is not *known* to have
+ * moved", which includes "nobody looked". Anything that licenses an action on
+ * `false` is licensing it on an absence of evidence. `licenseToHeal` does not:
+ * the permission to repair comes from `mayHeal(classifyRun(...))` and this
+ * predicate can only take fields away from it.
+ *
+ * The fix is `readOn` counting a non-null value, plus `determinism.json`
+ * recording something for a field that held so `stable` is checkable. Both
+ * change this stage's contract and its artifact's shape, `src/make/make.ts`
+ * and `src/make/verify.ts` carry the defect in their own comments today, and
+ * neither was mine to move.
+ */
 export function isUnstable(determinism: Determinism, field: string): boolean {
   return determinism.fields.some((record) => record.field === field && record.rejected);
 }
 
-/** Every rejected field, in artifact order. Nothing here may be committed, healed or drift-reported. */
+/**
+ * Every rejected field, in artifact order. Nothing here may be committed,
+ * healed or drift-reported. The same one-directional reading as `isUnstable`:
+ * a field's absence from this list is not a statement that it held still.
+ */
 export function unstableFields(determinism: Determinism): string[] {
   return determinism.fields.filter((record) => record.rejected).map((record) => record.field);
 }
