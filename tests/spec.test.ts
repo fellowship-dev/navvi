@@ -5,6 +5,7 @@ import { PassThrough, Writable } from "node:stream";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { main, type CliIo } from "../bin/cli.js";
 import { QUESTIONS_END, QUESTIONS_START } from "../src/chooser/agent.js";
+import { HEURISTICS } from "../src/heuristics/bank.js";
 import type { Answer, Chooser, ChooserUsage, Question } from "../src/chooser/chooser.js";
 import { RecordedChooser } from "../src/chooser/recorded.js";
 import { CredentialInPromptError } from "../src/input/prompt.js";
@@ -338,7 +339,11 @@ describe("navvi heuristics", () => {
   it("lists the bank with the encounter behind each rule", async () => {
     const io = makeIo();
     expect(await main(["heuristics"], io)).toBe(0);
-    expect(io.stdout.text).toContain("11 heuristics");
+    // Counted off the bank rather than written out, because a literal here is
+    // a second spelling of `HEURISTICS.length` that goes stale the next time
+    // somebody adds a rule — as it did on 2026-09-23, when U6c's twelfth rule
+    // landed and this line still said eleven.
+    expect(io.stdout.text).toContain(`${HEURISTICS.length} heuristics`);
     expect(io.stdout.text).toContain("key-names-carry-the-signal");
     expect(io.stdout.text).toContain("price-list-std");
   });
