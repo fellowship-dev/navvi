@@ -14,9 +14,9 @@ export const NOTIFY_CHANNELS = ["console", "telegram"] as const;
  * and default one — `navvi "<prompt>" <url...>` — so every existing invocation
  * keeps parsing exactly as it did.
  */
-export const COMMANDS = ["run", "spec", "heuristics"] as const;
+export const COMMANDS = ["run", "spec", "heuristics", "make"] as const;
 export type Command = (typeof COMMANDS)[number];
-const SUBCOMMANDS: readonly string[] = ["spec", "heuristics"];
+const SUBCOMMANDS: readonly string[] = ["spec", "heuristics", "make"];
 
 export interface CliArgs {
   command: Command;
@@ -57,6 +57,46 @@ export interface CliArgs {
   deciderTransport: Transport | undefined;
   answers: string | undefined;
   resume: string | undefined;
+  /**
+   * U11: the directory `navvi make` keeps its artifacts and its ledger in. A
+   * new concept — before `make` there was `--out` for one file and nothing for
+   * a pipeline — so it is required by `make` and meaningless to every other
+   * command.
+   */
+  work: string | undefined;
+  /**
+   * U11: `--answer <key>=<value>`, repeatable. The client's answer to an open
+   * question the spec recorded, matched by question id or by the subject the
+   * question is about (`fields`, `inputs`, `target`, `entity`,
+   * `constraints.<name>`).
+   *
+   * Singular, and one letter away from `--answers`, which is the chooser's
+   * parked question batch and has nothing to do with this. The plan spells it
+   * `--answer` in both transcripts and renaming either one would make the
+   * transcript wrong, so the collision is carried deliberately rather than
+   * resolved: `--answers` takes a file, `--answer` takes `key=value`, and the
+   * parser refuses a value that is the wrong shape for its flag.
+   */
+  answer: string[];
+  /** U11: how many URLs the compile sample spans. Defaults to `chooseSample`'s own. */
+  sample: number | undefined;
+  /** U11: how many times each sampled URL is read by the determinism stage. */
+  replays: number | undefined;
+  /**
+   * U11: run only the stages that open nothing. A stage that would need a page
+   * is `skipped` with that reason rather than run against no evidence, which
+   * is the distinction `TierRecord.outcome` already pays for.
+   */
+  offline: boolean;
+  /**
+   * U11: treat every stage as stale, and overwrite an artifact that was edited
+   * by hand since navvi wrote it.
+   *
+   * Not `--force-recompile`, which is about the *cached compiled scraper* in
+   * `--storage` and predates the work directory by two years. The two mean
+   * different things to different stores and both names are load-bearing.
+   */
+  force: boolean;
   agentMode: (typeof AGENT_MODES)[number] | undefined;
   notify: (typeof NOTIFY_CHANNELS)[number];
   storage: string;
@@ -74,6 +114,8 @@ const BOOLEAN_FLAGS: ReadonlyArray<[string, keyof CliArgs]> = [
   ["--fresh-profile", "freshProfile"],
   ["--headed", "headed"],
   ["--force-recompile", "forceRecompile"],
+  ["--force", "force"],
+  ["--offline", "offline"],
   ["--quiet", "quiet"],
   ["--help", "help"],
   ["--version", "version"],
@@ -83,6 +125,7 @@ const VALUE_FLAGS = [
   "--mode", "--fields", "--goal", "--from-url", "--out", "--max-pages", "--max-items", "--detail-fields", "--browser", "--profile",
   "--allow-domain", "--allow-private-host", "--secret", "--secrets-file", "--allow-mutation", "--script-id", "--chooser", "--answers",
   "--resume", "--agent-mode", "--notify", "--storage", "--decider", "--writer", "--decider-transport", "--rubric", "--rubrics-file",
+  "--work", "--answer", "--sample", "--replays",
 ] as const;
 
 function isUrl(value: string): boolean {
@@ -142,6 +185,12 @@ export function defaultArgs(): CliArgs {
     rubricsFile: undefined,
     answers: undefined,
     resume: undefined,
+    work: undefined,
+    answer: [],
+    sample: undefined,
+    replays: undefined,
+    offline: false,
+    force: false,
     agentMode: undefined,
     notify: "console",
     storage: "storage",
@@ -284,6 +333,22 @@ function apply(args: CliArgs, flag: (typeof VALUE_FLAGS)[number], value: string)
     case "--resume":
       args.resume = value;
       break;
+    case "--work":
+      args.work = value;
+      break;
+    case "--answer":
+      // Shape checked here rather than in the driver, so `--answer answers.json`
+      // — the easy slip, given the flag next door — fails at the argv layer with
+      // the name of the flag that does take a file.
+      if (!/^[^=]+=/.test(value)) throw new Error(`--answer must be "key=value", got ${JSON.stringify(value)}; a parked question batch is --answers <file>`);
+      args.answer.push(value);
+      break;
+    case "--sample":
+      args.sample = positiveInt(flag, value);
+      break;
+    case "--replays":
+      args.replays = positiveInt(flag, value);
+      break;
     case "--agent-mode":
       args.agentMode = oneOf(flag, value, AGENT_MODES);
       break;
@@ -300,6 +365,7 @@ export function usage(): string {
   return `Usage: navvi [<prompt>] <url...> [flags]
        navvi --mode list|record --fields a,b,c <url...> [flags]
        navvi spec "<brief>" [flags]
+       navvi make ["<brief>"] --work <dir> [flags]
        navvi heuristics [<id>] [--json]
 
 Compile it once so you never drive it again. Prompt in, JSON out; the second
@@ -307,6 +373,11 @@ run replays the compiled scraper with zero model calls and heals drift.
 
 Commands
   (none)                    Compile and run, as above.
+  make                      The driver: spec, sample, investigate, reconcile, schema, determinism,
+                            compile, verify — each writing its artifact into --work and a block to
+                            stderr. Stops at the first blocking question (exit 3). Every stage is
+                            re-runnable from the artifact above it: edit one and re-run, and
+                            everything downstream of the edit recompiles.
   spec                      Turn a brief into a spec: what was asked for, and what the brief
                             left unsaid. JSON on stdout (or --out); the open questions it
                             could not answer are listed on stderr. Reads no page.
@@ -331,6 +402,21 @@ Output
   --out <file>              Write data to a file instead of stdout (.csv writes CSV).
   --json                    Compact JSON (default is pretty).   --csv  CSV instead of JSON.
   --quiet                   No summary block on stderr.
+
+make (the driver)
+  --work <dir>              Where the artifacts and the ledger live. Required.
+  --answer <key=value>      Answer an open question, by its id or by what it is about
+                            (fields, inputs, target, entity, constraints.<name>). Repeatable.
+                            --answer fields=a,b:money,c:boolean declares column types the spec
+                            has no room for. A key naming no part of a spec is an error, never
+                            a silently ignored answer.
+  --sample <n>              How many URLs the compile sample spans.
+  --replays <n>             How many times the determinism stage reads each sampled URL.
+  --offline                 Run only the stages that open nothing; the rest report why they were
+                            skipped rather than running against no evidence.
+  --force                   Re-run every stage, and overwrite an artifact edited by hand since
+                            navvi wrote it. Not --force-recompile, which is about the cached
+                            scraper in --storage.
 
 Sources (who answers the compile questions)
   --decider <name>          Who answers the structured questions (pick one of N, yes/no, a score):
@@ -367,6 +453,7 @@ Browser, profile, secrets
   --help, --version
 
 Exit codes
-  0 succeeded   1 no items, drift or blocked   2 configuration   3 needs_human (answer and --resume)   4 budget or model unavailable
+  0 succeeded   1 no items, drift or blocked   2 configuration   3 needs_human (answer and --resume,
+                or, under make, answer the blocking questions and re-run with --answer)   4 budget or model unavailable
 `;
 }

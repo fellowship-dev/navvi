@@ -18,8 +18,13 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const LAYERS = [
   {
     name: "entry",
-    comment: "What the outside world calls: the CLI binary and the run entry point.",
-    modules: ["bin", "main"],
+    // `make` is here and not in `stages` on purpose. A stage is one phase of a
+    // run; `make` is the *sequence* of them — U11's driver, one whole compile
+    // as a function, the way `main` is one whole run as a function. Filed as a
+    // stage it would be legal for a stage to import it, and a stage that knows
+    // about the driver is a stage that can only run inside it.
+    comment: "What the outside world calls: the CLI binary, the run entry point and the compile driver.",
+    modules: ["bin", "main", "make"],
   },
   {
     name: "stages",

@@ -1,0 +1,63 @@
+<!doctype html>
+<!--
+  Synthetic. The SHAPE is the one `tests/fixtures/investigate/storea-product.html`
+  records off a live pharmacy: a JSON-LD @graph carrying Organization, WebSite and
+  Product, plus the OpenGraph and `product:` meta namespaces. Every value is invented,
+  and the store does not exist.
+
+  These four pages exist so `navvi make` can be driven end to end offline. Tier 1
+  covers all five requested fields here, so `declared-covers-spec` fires and the
+  cascade never asks for a capture -- which is what lets the driver's test assert
+  that no browser was opened without stubbing a browser to assert it against.
+-->
+<html lang="es">
+  <head>
+    <title>Ejemplo Antialergico 10 mg 30 Comprimidos | Ejemplo Farmacia</title>
+    <meta charset="utf-8" />
+    <meta property="og:type" content="product" />
+    <meta property="og:title" content="Ejemplo Antialergico 10 mg 30 Comprimidos" />
+    <meta property="product:brand" content="Laboratorio Ejemplo" />
+    <meta property="product:price:amount" content="5490" />
+    <meta property="product:price:currency" content="CLP" />
+    <meta property="product:sale_price:amount" content="5490" />
+    <meta property="product:availability" content="in stock" />
+    <meta property="product:retailer_item_id" content="900102" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          { "@type": "Organization", "name": "Ejemplo Farmacia", "url": "https://example.test/" },
+          { "@type": "WebSite", "name": "Ejemplo Farmacia", "url": "https://example.test/" },
+          {
+            "@type": "Product",
+            "name": "Ejemplo Antialergico 10 mg 30 Comprimidos",
+            "sku": "900102",
+            "brand": { "@type": "Brand", "name": "Laboratorio Ejemplo" },
+            "offers": {
+              "@type": "Offer",
+              "price": "5490",
+              "priceCurrency": "CLP",
+              "availability": "https://schema.org/InStock"
+            }
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body class="producto">
+    <main>
+      <h1>Ejemplo Antialergico 10 mg 30 Comprimidos</h1>
+      <p class="sku">SKU 900102</p>
+      <div class="prices">
+        <span class="now">$ 5.490</span>
+      </div>
+      <p class="stock">Disponible para despacho y retiro en tienda</p>
+      <p class="desc">
+        Producto de ejemplo del catalogo sintetico de Ejemplo Farmacia. Este parrafo existe
+        para que la pagina tenga texto visible suficiente y no sea leida como un shell por
+        la regla shell-skips-tier-1, que es exactamente lo que ocurrio en la primera corrida
+        en vivo del 2026-09-22 y dejo la investigacion sin nada que leer.
+      </p>
+    </main>
+  </body>
+</html>

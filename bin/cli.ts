@@ -12,7 +12,8 @@ import { formatRows, type OutputFormat, type Row } from "../src/cli/output.js";
 import { createChooser, findOnPath, HARNESS_LABEL, loadAnswersFile, mergeAnswers, missingCredentialsMessage, NavviError, NeedsHumanError, readQuestionsFile, resolveDefaultChooser, type Chooser, type StoredAnswer } from "../src/chooser/index.js";
 import { bank, UnknownHeuristicError, type Overrides } from "../src/heuristics/index.js";
 import { defaultBrowser, parseFieldSpecs, type Chooser as ChooserId, type SourceSelection } from "../src/input/schema.js";
-import { heuristicBlock, heuristicsBlock, specBlock } from "../src/cli/render.js";
+import { heuristicBlock, heuristicsBlock, makeStop, specBlock } from "../src/cli/render.js";
+import { make as runMake, openPages, type MakeStatus } from "../src/make/index.js";
 import { briefToSpec, SpecParseError } from "../src/spec/spec.js";
 import { RubricSchema, type Rubric } from "../src/spec/schema.js";
 import { run as runNavvi, type RunSummary } from "../src/main.js";
@@ -315,6 +316,7 @@ export async function main(argv: readonly string[], io: CliIo): Promise<number> 
   }
   try {
     if (args.command === "spec") return await spec(args, io);
+    if (args.command === "make") return await make(args, io);
     return await execute(args, io);
   } catch (error) {
     if (error instanceof CliError) {
@@ -483,6 +485,72 @@ async function spec(args: CliArgs, io: CliIo): Promise<number> {
   }
   if (!args.quiet) io.stderr.write(specBlock(result, dataLine));
   return EXIT.ok;
+}
+
+/**
+ * U11: `navvi make`. The driver, and the only command that writes a directory
+ * rather than a file.
+ *
+ * The chooser is built lazily. `briefToSpec` is the one model call in the whole
+ * pipeline, and a resume — the plan's second transcript — never reaches it, so
+ * building a chooser up front would make `navvi make --work …` refuse to run
+ * for want of a credential it was never going to spend. The page driver is
+ * lazy for the same reason one layer down: the plan's first transcript ends
+ * *"nothing has opened a browser"*, and that is true here because nothing asked
+ * `openPages` for one.
+ */
+async function make(args: CliArgs, io: CliIo): Promise<number> {
+  if (!args.work) throw new CliError(`give a work directory: navvi make "<brief>" --work work/<case>`);
+  const storageDir = resolve(io.cwd, args.storage);
+  const rubrics = collectRubrics(args, io);
+
+  let chooser: Chooser | undefined;
+  const result = await runMake(
+    {
+      work: resolve(io.cwd, args.work),
+      ...(args.prompt === undefined ? {} : { brief: args.prompt }),
+      rubrics,
+      answers: args.answer,
+      urls: args.urls,
+      fromUrls: args.fromUrls,
+      allowPrivateHosts: args.allowPrivateHosts,
+      ...(args.sample === undefined ? {} : { sampleSize: args.sample }),
+      ...(args.replays === undefined ? {} : { replays: args.replays }),
+      offline: args.offline,
+      force: args.force,
+    },
+    {
+      report: (text) => {
+        if (!args.quiet) io.stderr.write(text);
+      },
+      ...(args.offline ? {} : { openPages: () => openPages({ browser: args.browser ?? defaultBrowser(io.env), headed: args.headed, storageDir }) }),
+      // Resolved, announced and credential-checked only if a brief actually
+      // has to be compiled. A resume never gets here.
+      openChooser: async () => {
+        chooser ??= chooserFor(await resolveCliSources(args, io), args, io, storageDir);
+        return chooser;
+      },
+    },
+  );
+
+  if (result.stoppedAt && result.because && !args.quiet) {
+    io.stderr.write(makeStop(result.stoppedAt, result.because, exitForMake(result.status)));
+  }
+  return exitForMake(result.status);
+}
+
+/** `make`'s own vocabulary, mapped onto the process exit codes this file owns. */
+function exitForMake(status: MakeStatus): number {
+  switch (status) {
+    case "delivered":
+      return EXIT.ok;
+    case "needs_answers":
+      return EXIT.needsHuman;
+    case "configuration":
+      return EXIT.configuration;
+    case "short":
+      return EXIT.short;
+  }
 }
 
 /** U8b: `navvi heuristics [<id>]`. The bank, inspectable without reading code. */

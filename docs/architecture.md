@@ -1,7 +1,7 @@
 # Architecture: what `src/` is made of
 
-Measured 2026-09-23 from the tree, not from memory: 20 directories under
-`src/`, 21,356 lines, 97 cross-module imports. `scripts/check-architecture.mjs`
+Measured 2026-09-23 from the tree, not from memory: 21 directories under
+`src/`, 23,993 lines, 112 cross-module imports. `scripts/check-architecture.mjs`
 produced the diagram below and fails CI when the two stop agreeing. The counts
 are a snapshot and the check does not assert them; the edges are the part it
 keeps honest.
@@ -23,6 +23,7 @@ graph TD
   subgraph entry[" entry "]
     bin
     main
+    make
   end
   subgraph stages[" stages "]
     spec
@@ -61,6 +62,7 @@ graph TD
   bin --> heuristics
   bin --> input
   bin --> main
+  bin --> make
   bin --> prestep
   bin --> replay
   bin --> secrets
@@ -102,6 +104,19 @@ graph TD
   main --> input
   main --> scraper
   main --> secrets
+  make --> browser
+  make --> chooser
+  make --> cli
+  make --> compile
+  make --> heuristics
+  make --> input
+  make --> investigate
+  make --> prestep
+  make --> reconcile
+  make --> replay
+  make --> scraper
+  make --> spec
+  make --> template
   navigate --> browser
   navigate --> chooser
   navigate --> input
@@ -141,6 +156,14 @@ graph TD
   template --> scraper
 ```
 
+`make` is in **entry** rather than in `stages`, and the distinction is the
+whole reason the layer rule is worth having. A stage is one phase of a run;
+`make` is the *sequence* of them, the way `src/main.ts` is one whole run rather
+than a phase of one. Filed as a stage it would be legal for a stage to import
+it — and a stage that knows about the driver is a stage that can only run
+inside it, which is the opposite of what "every stage independently runnable
+from the artifact above it" means.
+
 The layers are declared in `LAYERS` in the check script, and the direction rule
 is the assertion that does the work. A vocabulary module that acquires a
 dependency on a stage has stopped being vocabulary; `util` importing `chooser`
@@ -157,6 +180,7 @@ The test is whether a reader who has not opened the code can place a new file.
 | --- | --- | --- |
 | `bin/cli.ts` | 581 | The `navvi` binary: argv in, process exit code out. Commands, the stdio and file question protocols, and nothing about how a page is read. |
 | `src/main.ts` | 212 | One run as a function. Parses input, builds the chooser, calls the crawler, returns a `RunSummary`. The Apify actor entry point. |
+| `make` | 1727 | U11, `navvi make`: one whole **compile** as a function. The sequence spec → sample → investigate → reconcile → schema → determinism → compile → verify, the work directory and the ledger that decides whether a stage has to run again, `--answer`, and the one file in the repository outside `browser` that opens a page. |
 
 **stages** — the phases of one run. A stage may use another stage and the whole
 vocabulary.
@@ -276,12 +300,26 @@ list.
   seam — manuscript, reconcile, compile, then the real cascade against a real
   page — rather than asserting the shape of the object in between.
 
-What is still open is the **driver**: nothing yet runs `investigate`,
-`reconcile` and `compileFromReconciliation` in sequence as one command. That is
-U11, `navvi make`, and the plan lives in `fellowship-dev/claude-buddy` under
-`specs/plans/2026-09-22-008-navvi-remaining-phases.md`. A missing driver is a
-missing command, not a missing edge — the modules now compile against each
-other, which is the property this section exists to protect.
+The **driver** was the last thing still open here, and it is now
+`src/make/`: `navvi make` runs `investigate`, `reconcile`,
+`compileFromReconciliation` and the determinism replay in sequence as one
+command, writing each artifact into `--work`. The plan lives in
+`fellowship-dev/claude-buddy` under
+`specs/plans/2026-09-22-008-navvi-remaining-phases.md`, and its two transcripts
+are the specification.
+
+It is the first caller of five modules at once, which is the point rather than
+a side effect: a missing driver was a missing command and not a missing edge,
+but until something ran the stages together, "each half is green on its own
+fixture" was still all anyone could say about them. `tests/make.test.ts` drives
+the whole sequence against four synthetic pages — `src/make/pages.ts` is the
+only file in the module that opens anything, so everything else is drivable
+from fixtures.
+
+What `make` does **not** do is grade. The `verify` stage measures everything a
+scorecard would be computed from — tier mix, obstacle count, fill rate, model
+calls at replay — and refuses to produce the number, because the weighting is
+U12 and nobody has decided it. See `src/make/verify.ts`.
 
 **`tools/measure/`** is the other half of the older entry, and it is not an
 orphan: it is a tool, not product — the measurement harness behind
