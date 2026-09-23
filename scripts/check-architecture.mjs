@@ -24,12 +24,12 @@ const LAYERS = [
   {
     name: "stages",
     comment: "The phases of one run. A stage may use another stage and the whole vocabulary.",
-    modules: ["spec", "cli", "investigate", "compile", "replay", "navigate", "prestep"],
+    modules: ["spec", "cli", "investigate", "reconcile", "compile", "replay", "navigate", "prestep"],
   },
   {
     name: "vocabulary",
     comment: "The nouns every stage shares. These must not know which stage is running.",
-    modules: ["input", "scraper", "declared", "browser", "chooser", "blocked", "heuristics", "template", "billing", "secrets", "util"],
+    modules: ["input", "scraper", "declared", "agree", "browser", "chooser", "blocked", "heuristics", "template", "billing", "secrets", "util"],
   },
 ];
 
@@ -57,7 +57,7 @@ const KNOWN_CYCLES = [
 // Directories under src/ that nothing in src/ or bin/ imports, on purpose.
 // Each entry states why, the way tsconfig.actor.json states its exclusion.
 const ORPHAN_ALLOWLIST = [
-  ["investigate", "The discovery cascade, reached today only by scripts/live-investigate.ts. Phase E's U7a wires it into the compile path; the plan is claude-buddy specs/plans/2026-09-22-008-navvi-remaining-phases.md."],
+  ["reconcile", "Phase D's argument (U4) and the schema it proves (U5), built against the manuscript ahead of its caller for the same reason investigate was. U11's `navvi make` is the driver that runs it between investigate and compile; same plan."],
 ];
 
 const layerOf = new Map();

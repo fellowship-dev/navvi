@@ -1,7 +1,7 @@
 # Architecture: what `src/` is made of
 
-Measured 2026-09-23 from the tree, not from memory: 18 directories under
-`src/`, 17,038 lines, 87 cross-module imports. `scripts/check-architecture.mjs`
+Measured 2026-09-23 from the tree, not from memory: 20 directories under
+`src/`, 18,411 lines, 94 cross-module imports. `scripts/check-architecture.mjs`
 produced the diagram below and fails CI when the two stop agreeing.
 
 This lives in `docs/` and not in the README on purpose. The README is the
@@ -26,6 +26,7 @@ graph TD
     spec
     cli
     investigate
+    reconcile
     compile
     replay
     navigate
@@ -35,6 +36,7 @@ graph TD
     input
     scraper
     declared
+    agree
     browser
     chooser
     blocked
@@ -71,6 +73,7 @@ graph TD
   cli --> input
   cli --> prestep
   cli --> spec
+  compile --> agree
   compile --> browser
   compile --> chooser
   compile --> input
@@ -80,6 +83,7 @@ graph TD
   heuristics --> declared
   heuristics --> util
   input --> util
+  investigate --> agree
   investigate --> blocked
   investigate --> browser
   investigate --> declared
@@ -106,6 +110,11 @@ graph TD
   prestep --> scraper
   prestep --> template
   prestep --> util
+  reconcile --> input
+  reconcile --> investigate
+  reconcile --> scraper
+  reconcile --> spec
+  reconcile --> util
   replay --> billing
   replay --> browser
   replay --> chooser
@@ -150,8 +159,9 @@ vocabulary.
 | --- | --- | --- |
 | `spec` | 543 | `navvi spec`: a plain-words brief becomes a `Rubric`, with what the brief left unsaid recorded as open questions. Reads no page. |
 | `cli` | 531 | How a run is *shown*: argv parsing, output formats, the rendered spec and heuristic blocks, notifications. Not the binary — the binary is `bin/`. |
-| `investigate` | 4150 | The discovery cascade: declared data, then captured JSON, then selectors, stopping as soon as the requested fields are covered, and writing down what it tried. See [`discovery.md`](discovery.md). |
-| `compile` | 679 | Turning a live page into alternatives for a field: candidates, groups, chunked questions, links to follow. The expensive phase, the one with model calls in it. |
+| `investigate` | 4255 | The discovery cascade: declared data, then captured JSON, then selectors, stopping as soon as the requested fields are covered, and writing down what it tried. See [`discovery.md`](discovery.md). |
+| `reconcile` | 1072 | Phase D: the manuscript argued into `reconcile.md` — obtainable, not obtainable, **available but not requested**, ambiguities with the rubric that settled them quoted verbatim, obstacles with their cost — and `schema.json` derived from what was proved obtainable rather than from the brief. Deterministic, offline, and it opens nothing. |
+| `compile` | 697 | Turning a live page into alternatives for a field: candidates, groups, chunked questions, links to follow. The expensive phase, the one with model calls in it. |
 | `replay` | 2217 | Running a compiled scraper again: crawl, extract, and heal the one field that moved. The only module that owns a crawler. |
 | `navigate` | 992 | Getting from the start URL to the page that has the data — a goal-driven loop over controls the code enumerated. |
 | `prestep` | 723 | What happens between the first navigation and the first charged question: credential refusal, consent banners, one Turnstile click, blocked classification. |
@@ -164,6 +174,7 @@ is running.
 | `input` | 633 | What the caller asked for: the parsed and validated run input, the field specs, the enumerations (choosers, browsers, profiles, modes) and `LIMITS`. |
 | `scraper` | 1007 | The compiled scraper JSON — the versioned `CompiledScraper` contract, `Status`, extraction against it, and where it is stored. |
 | `declared` | 207 | The one reader of a declared JSON block: JSON-LD, `@graph`, typed nodes, a path out of it. Written four times before it was a module. |
+| `agree` | 178 | "Keep only what the samples agree on": the intersection over a set of samples, and the distinction between a sample that disagreed, a sample that could not answer, and a sample that was never asked. Also written four times before it was a module — see the 2026-09-22 defect in its header. |
 | `browser` | 1196 | Playwright: launch, profiles, relaunch, navigation guards, typing, the injected snapshot and the network capture. The only module that says `chromium`. |
 | `chooser` | 2407 | Asking an intelligence a question and trusting only the index that comes back. One interface over Jev, an API model, a signed-in CLI, the host agent and recorded answers. |
 | `blocked` | 284 | The challenge lexicon: what "this site is refusing us" looks like, written once so the live check and the offline check cannot disagree. |
@@ -230,29 +241,37 @@ in `KNOWN_UPWARD`. It is type-only, so nothing points up at run time, but
 `RunSummary` is a shape both the entry point and the crawler need and belongs
 below both.
 
-## The two orphans
+## The one orphan
 
 A directory under `src/` that nothing in `src/` or `bin/` imports is dead code
-until someone says otherwise, so the check fails on one. Two exist. Only one of
-them is in `ORPHAN_ALLOWLIST`, with its reason written next to it; the other
-left `src/` altogether, which is the better answer when it is available.
+until someone says otherwise, so the check fails on one. One exists, and it is
+in `ORPHAN_ALLOWLIST` with its reason written next to it.
 
-- **`src/investigate/` (4150 lines, 24% of `src/`) has no importer at all.** Its
-  only caller anywhere is `scripts/live-investigate.ts`. This is not abandoned
-  code: it is the discovery cascade from [`discovery.md`](discovery.md), built
-  ahead of the wiring, and Phase E's U7a puts it in front of the compile path —
-  at which point `replay` or `compile` will import it and the allowlist entry
-  goes. The plan lives in `fellowship-dev/claude-buddy` under
-  `specs/plans/2026-09-22-008-navvi-remaining-phases.md`. Until that lands, the
-  largest single module in the repo is reachable only from a script, and a
-  reader is entitled to be told that rather than discover it.
-- **`tools/measure/`** is a tool, not product: the measurement harness behind
-  `npm run measure` and `npm run hillclimb`, and the numbers in
-  [`measurements.md`](measurements.md). It moved out of `src/` on 2026-09-23 for
-  exactly this reason: it imported the entry point `src/main.ts` and the fixture
-  server under `tests/`, which is why `tsconfig.actor.json` had to carve it out
-  of the actor build by name. Out of `src/`, it is outside the graph the check
-  walks and needs no allowlist.
+- **`src/reconcile/` (1,072 lines) has no importer.** Phase D: the argument
+  (U4) and the schema it proves (U5). Built against the manuscript ahead of its
+  caller for exactly the reason `investigate` was, and with the same risk — see
+  the architecture pass of 2026-09-23, which is about two halves of one program
+  never meeting. What closes it is U11, `navvi make`, the driver that runs
+  `reconcile` between `investigate` and `compile`; the plan lives in
+  `fellowship-dev/claude-buddy` under
+  `specs/plans/2026-09-22-008-navvi-remaining-phases.md`. Until that lands, a
+  reader is entitled to be told rather than to discover it.
+
+**`src/investigate/` stopped being one on 2026-09-23.** It was the largest
+module in the repo with no importer anywhere but `scripts/live-investigate.ts`;
+`src/reconcile/` reads its manuscript, so it now has one inside `src/` and the
+allowlist entry is gone. That is a smaller closing than U7a's — a consumer of
+the artifact rather than the wiring into the compile path — but it is a real
+edge and the check will not let it be claimed twice.
+
+**`tools/measure/`** is the other half of the older entry, and it is not an
+orphan: it is a tool, not product — the measurement harness behind
+`npm run measure` and `npm run hillclimb`, and the numbers in
+[`measurements.md`](measurements.md). It moved out of `src/` on 2026-09-23
+because it imported the entry point `src/main.ts` and the fixture server under
+`tests/`, which is why `tsconfig.actor.json` had to carve it out of the actor
+build by name. Out of `src/`, it is outside the graph the check walks and needs
+no allowlist.
 
 ## The check
 

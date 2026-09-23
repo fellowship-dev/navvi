@@ -18,9 +18,14 @@ import { SCENARIOS, type Row, type Scenario } from "../tools/measure/scenarios.j
  *
  * It used to drive the whole fixture set through a real browser in one
  * `beforeAll` with a 300-second budget -- nine scenarios, twelve of which
- * `vitest.config.ts` caps the workers for. That one hook was the file that
- * defeated the bound: alone the file passed in 59 s, inside a full run it
- * failed roughly one run in three on contention, with no bug behind it.
+ * `vitest.config.ts` caps the workers for. Alone the file passed in 59 s, and
+ * inside a full run it failed roughly one run in three, which was read as
+ * contention. It was not: `F3-category` fails alone on an idle machine too,
+ * in the same 2.9 s as a passing run, because the controls the navigator is
+ * offered on a long page depend on the viewport height Crawlee's fingerprint
+ * injection picked for that launch. `deps()` in `tools/measure/scenarios.ts`
+ * pins the viewport and carries the measurement; the hit test behind it is
+ * still wrong and still in `src/browser/snapshot.inject.js`.
  *
  * Most of that time bought a second spelling of assertions another file
  * already makes for real (`second-spelling.test.ts`): AE1 by
@@ -305,6 +310,16 @@ describe("cli", () => {
  */
 describe("goal-driven first crawls", () => {
   let rows: MeasurementRow[];
+  /**
+   * The harness's own line per scenario, kept so a failure says why.
+   *
+   * A failed row is `{ correct: 0, expected: <every cell> }` whether the
+   * scenario threw, ended blocked, or crawled a page and found nothing --
+   * three different causes behind one number -- and `log: () => undefined`
+   * discarded the one sentence that tells them apart. It cost a night
+   * (2026-09-23) to get that sentence back, so it is part of the assertion now.
+   */
+  const log: string[] = [];
 
   beforeAll(async () => {
     // `agentLive: false` is what this offline run means: the agent column is
@@ -315,17 +330,20 @@ describe("goal-driven first crawls", () => {
       offline: true,
       agentLive: false,
       env: {},
-      log: () => undefined,
+      log: (line) => void log.push(line),
     });
   }, 120_000);
+
+  /** What the harness said about `scenario`, as the message of the expectation about it. */
+  const why = (scenario: string): string => log.find((line) => line.includes(`/${scenario}:`)) ?? `${scenario}: the harness logged nothing`;
 
   it("navigates, then compiles on the page it reached: search 6x3, login 5x2, category 25x4", () => {
     const expected: Record<string, number> = { "F1-search": 18, "F2-login": 10, "F3-category": 100 };
     expect(rows.map((r) => r.scenario)).toEqual(Object.keys(expected));
     for (const [scenario, cells] of Object.entries(expected)) {
       const row = rowFor(rows, "agent", scenario);
-      expect(row.cells, scenario).toEqual({ correct: cells, expected: cells });
-      expect(row.status, scenario).toBe("ok");
+      expect(row.cells, why(scenario)).toEqual({ correct: cells, expected: cells });
+      expect(row.status, why(scenario)).toBe("ok");
     }
   });
 

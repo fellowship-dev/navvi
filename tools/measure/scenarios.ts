@@ -76,8 +76,50 @@ export const MEASURE_LOGIN_PASSWORD = "measure-secret";
 
 const isHealBatch = (batch: Question[]): boolean => batch.some((q) => q.id.startsWith("heal."));
 
+/**
+ * The viewport every measured crawl runs at.
+ *
+ * A recorded answer is an index into the options a question offered, and the
+ * recording states the options it answered (`src/chooser/recorded.ts`), so the
+ * replay only means anything if the run offers the same list. On a page with
+ * controls below the fold that list is viewport-dependent: `controls()` in
+ * `src/browser/snapshot.inject.js` decides `clickable` for an offscreen
+ * control by scrolling it into view and hit testing its centre, and on
+ * `python-jobs.html` there is a ~13 px band of viewport heights every ~102 px
+ * -- one per job row -- in which exactly one job link loses that hit test and
+ * is not offered at all. Measured 2026-09-23 through `getControls` itself: 54
+ * of the 326 heights between 600 and 1250 drop a link, 17% of them, and the
+ * band at 1112-1124 drops `jobs/109` -- the link missing from every observed
+ * failure. Width makes no difference.
+ *
+ * Crawlee's fingerprint injection gives every browser launch a different
+ * viewport (1366x768 to 3440x1440 over twenty launches), so which list the
+ * chooser was offered was a per-run coin flip, and F3-category failed about
+ * one run in twelve with `{ correct: 0, expected: 100 }` -- alone on an idle
+ * machine, in the same 2.9 s as a passing run. It was read as worker
+ * contention for weeks; it never was.
+ *
+ * `navigate.test.ts` pins the same 33-option list in seven recordings and has
+ * never flaked, because it drives raw Playwright, whose default viewport is
+ * this one. Fixing it here says out loud what that file gets by accident.
+ *
+ * This makes the replay reproducible. It does not make the hit test right: a
+ * link a person can click is a link the chooser should be offered, whatever
+ * the window size, and that is a defect in `controls()` that a real run hits
+ * too -- silently, by dropping a candidate the model then cannot choose.
+ */
+const MEASURE_VIEWPORT = { width: 1280, height: 720 };
+
 function deps(ctx: ScenarioContext, env: NodeJS.ProcessEnv = ctx.env): CrawlDeps {
-  return { actor: ctx.actor, chooser: ctx.chooser, env, storageDir: ctx.storageDir, attended: false, maxConcurrency: 1 };
+  return {
+    actor: ctx.actor,
+    chooser: ctx.chooser,
+    env,
+    storageDir: ctx.storageDir,
+    attended: false,
+    maxConcurrency: 1,
+    onPage: (page) => page.setViewportSize({ ...MEASURE_VIEWPORT }),
+  };
 }
 
 function baseInput(over: Record<string, unknown>): Record<string, unknown> {
