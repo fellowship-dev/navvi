@@ -1,6 +1,6 @@
 import type { LeafCandidate } from "../browser/snapshot.js";
 import type { FieldType } from "../input/schema.js";
-import type { Answer, JsonValue, Question, QuestionContext } from "../chooser/chooser.js";
+import { OPTION_VALUE_SEPARATOR, type Answer, type JsonValue, type Question, type QuestionContext } from "../chooser/chooser.js";
 import { premises } from "../chooser/questions.js";
 import { URL_ATTRS, commonShape, resolveUrl } from "../scraper/extract.js";
 import type { FieldAlternative, Shape } from "../scraper/schema.js";
@@ -92,7 +92,7 @@ export async function intersectCandidates(samples: ReadonlyArray<readonly LeafCa
 
 /** `<path> = <value on sample 1> | <value on sample 2> | ...` */
 export function candidateLabel(candidate: FieldCandidate): string {
-  return `${candidate.path} = ${candidate.values.map((v) => clip(v, LABEL_VALUE_CHARS)).join(" | ")}`;
+  return `${candidate.path}${OPTION_VALUE_SEPARATOR}${candidate.values.map((v) => clip(v, LABEL_VALUE_CHARS)).join(" | ")}`;
 }
 
 export function fieldQuestionId(name: string, suffix = ""): string {

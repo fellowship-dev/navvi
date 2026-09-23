@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Experimental_EvaluationMockModelV4 } from "ai/test";
 import type { Experimental_EvaluationModelV4CallOptions } from "@ai-sdk/provider";
 import { gateId, JevChooser, toEvaluationQuestion, toEvaluationState } from "../src/chooser/jev.js";
+import { jevFraming, premises } from "../src/chooser/questions.js";
 import type { Question } from "../src/chooser/chooser.js";
 import { familyOf } from "../src/measure/bank.js";
 
@@ -11,13 +12,16 @@ import { familyOf } from "../src/measure/bank.js";
  * field healing. Each is a measured step; these tests pin the shape.
  */
 
+/** The values earlier pages gave, shared by the premise and the question's own context. */
+const EARLIER_VALUES = ["$ 6.990"];
+
 const healQuestion = (): Question => ({
   id: "heal.price",
   kind: "choice",
-  premise: 'The compiled selectors for price no longer resolve on this page. Which candidate holds the price value here (earlier pages gave "$ 6.990")? Pick none when no candidate is right: this page may simply not show it.',
+  premise: premises.healField("price", EARLIER_VALUES),
   options: ["main/article/aside/span = $ 6.990", "main/section/ul/li/span = $ 8.490", "main/section/ul/li/span = $ 10.390"],
   state: "Healing on http://shop/p/1\nFields whose compiled selectors no longer resolve: price",
-  context: { decision: "heal_field_value", field: { name: "price" }, earlier_values: ["$ 6.990"], shape: "money", shared: { page: "http://shop/p/1", mode: "record", fields: ["name", "price"], broken_fields: ["price"] } },
+  context: { decision: "heal_field_value", field: { name: "price" }, earlier_values: EARLIER_VALUES, shape: "money", shared: { page: "http://shop/p/1", mode: "record", fields: ["name", "price"], broken_fields: ["price"] } },
   optionContext: [
     { path: "main/article/aside/span", shape: "money", values: ["$ 6.990"] },
     { path: "main/section/ul/li/span", shape: "money", values: ["$ 8.490"], candidates_on_same_path: 2 },
@@ -28,7 +32,7 @@ const healQuestion = (): Question => ({
 const fieldQuestion = (): Question => ({
   id: "field.price",
   kind: "choice",
-  premise: "Which candidate holds the price value on every sample? Pick none when no candidate is right on all samples.",
+  premise: premises.fieldChoice("price"),
   options: ["aside/span = $ 6.990 | $ 12.990", "p/span = Laboratorio: | Laboratorio:"],
   state: "Records: pharmacy product",
   context: { decision: "field_value", field: { name: "price" }, shared: { records: "pharmacy product", mode: "record", fields: [{ name: "price" }], samples: ["http://shop/p/1", "http://shop/p/2"] } },
@@ -59,11 +63,18 @@ describe("Jev framing: structured state, instructions and criteria", () => {
     const { question, keys } = toEvaluationQuestion(q);
     expect(question.type).toBe("choice");
     const instructions = question.instructions as Record<string, unknown>;
-    expect(instructions.question).toBe("Which candidate holds the price value on every sample?");
+    // The question is the premise `questions.ts` writes, minus its trailing
+    // "Pick none…" clause. Asserting a hand-copy of the string here is how a
+    // premise reword silently breaks that strip in production while this stays
+    // green (2026-09-22), so both halves are derived.
+    expect(typeof instructions.question).toBe("string");
+    expect(instructions.question).not.toMatch(/Pick none/);
+    expect(q.premise.startsWith(instructions.question as string)).toBe(true);
+    expect((instructions.question as string).length).toBeGreaterThan(0);
     expect(instructions.decision).toBe("field_value");
     expect(instructions.field).toEqual({ name: "price" });
     expect(instructions.shared).toBeUndefined();
-    expect(typeof instructions.rule).toBe("string");
+    expect(instructions.rule).toBe(jevFraming.rule("field_value"));
     expect(keys).toEqual(["option_0", "option_1", "none"]);
   });
 
@@ -92,7 +103,8 @@ describe("Jev framing: structured state, instructions and criteria", () => {
     expect(gate?.type).toBe("boolean");
     const instructions = gate!.instructions as Record<string, unknown>;
     expect(instructions.candidates).toHaveLength(3);
-    expect(instructions.earlier_values).toEqual(["$ 6.990"]);
+    expect(instructions.earlier_values).toEqual(EARLIER_VALUES);
+    expect(instructions.rule).toBe(jevFraming.presence(healQuestion().context!, [])!.rule);
   });
 
   it("the gate decides none: a no turns the chosen candidate into none, a yes keeps it", async () => {

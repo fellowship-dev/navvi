@@ -5,5 +5,6 @@
   "probability": 0.9,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": []
 }

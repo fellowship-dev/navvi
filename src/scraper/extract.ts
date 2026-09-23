@@ -1,3 +1,4 @@
+import { newestUsableResponse, type CapturedResponse } from "../browser/network-capture.js";
 import { ensureEvaluateShim } from "../browser/snapshot.js";
 import type { Page } from "playwright";
 import type { FieldType } from "../input/schema.js";
@@ -38,7 +39,7 @@ export interface ExtractOptions {
   /** Requested field names; those absent from the scraper are emitted as null (R4, R8). */
   fields?: readonly string[] | undefined;
   /** JSON responses the page fetched, for `network` alternatives (U16 cascade). */
-  captured?: readonly { url: string; status: number; body: unknown }[] | undefined;
+  captured?: readonly CapturedResponse[] | undefined;
 }
 
 const squash = (s: string | null | undefined): string => String(s ?? "").replace(/\s+/g, " ").trim();
@@ -97,7 +98,15 @@ const DECIMAL = /^[-+]?(\d{1,3}([.,]\d{3})*|\d+)[.,]\d{1,2}$/;
 const isDate = (t: string): boolean => DATE_PATTERNS.some((p) => p.test(t));
 const isMoney = (t: string): boolean => MONEY_PATTERNS.some((p) => p.test(t));
 
-/** Mirror of `shapeOf` in snapshot.inject.js: most specific shape first. */
+/**
+ * Mirror of `shapeOf` in snapshot.inject.js: most specific shape first.
+ *
+ * The injected script is evaluated as text inside a page and cannot import
+ * this, so the two copies are kept honest by a differential test over a corpus
+ * (`tests/second-spelling.test.ts`) rather than by the comment above. Edit one
+ * and the other has to follow, or that test says which string they now
+ * disagree about.
+ */
 export function shapeOf(text: string, attr?: string | undefined): Shape {
   if (attr === "href" || attr === "src") return "url";
   if (attr === "datetime") return "date";
@@ -483,22 +492,22 @@ function pickAlternative(raws: ReadonlyArray<string | null>, alternatives: reado
 async function resolveDeclared(
   page: Page,
   alternative: FieldAlternative,
-  captured: readonly { url: string; status: number; body: unknown }[],
+  captured: readonly CapturedResponse[],
 ): Promise<string | null> {
   const source = alternative.source ?? "dom";
   if (source === "dom" || !alternative.path) return null;
 
   if (source === "network") {
-    const match = alternative.match ?? "";
-    // Newest first: a page that retries leaves the failure behind too, and Cruz
-    // Verde's detail endpoint answers 401 before its anonymous session exists.
-    for (let i = captured.length - 1; i >= 0; i -= 1) {
-      const response = captured[i]!;
-      if (response.status >= 400 || !response.url.includes(match)) continue;
-      const value = readJsonPath(response.body, alternative.path);
-      if (value !== undefined && value !== null) return String(value);
-    }
-    return null;
+    // Newest usable first, and the walk itself belongs to network-capture.ts:
+    // a page that retries leaves the failure behind too, and Store B's
+    // detail endpoint answers 401 before its anonymous session exists.
+    const path = alternative.path;
+    const carries = (body: unknown): boolean => {
+      const value = readJsonPath(body, path);
+      return value !== undefined && value !== null;
+    };
+    const response = newestUsableResponse(captured, { match: alternative.match ?? "", carries });
+    return response === null ? null : String(readJsonPath(response.body, path));
   }
 
   // json-ld: every block on the page, first one carrying the path.

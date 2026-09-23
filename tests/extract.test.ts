@@ -84,7 +84,12 @@ describe("fingerprintMatches (KTD6 shapes)", () => {
     expect(fingerprintMatches(null, text)).toBe(false);
   });
 
-  it("shapeOf mirrors the snapshot classifier", () => {
+  // The name this test used to carry — "shapeOf mirrors the snapshot
+  // classifier" — was a cross-module claim tested on one side only. The
+  // mirroring itself is now measured over a corpus in
+  // tests/second-spelling.test.ts; what is left here is the table of values
+  // this module's own callers depend on.
+  it("classifies the values a compiled fingerprint is built from", () => {
     expect(shapeOf("$ 2.490")).toBe("money");
     expect(shapeOf("12.990")).toBe("int");
     expect(shapeOf("2026-08-28")).toBe("date");

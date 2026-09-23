@@ -6,5 +6,6 @@
   "inputTokens": 420,
   "outputTokens": 60,
   "chooser": "model",
-  "prompt": "All job posts on this page with title, company and link, follow next page"
+  "prompt": "All job posts on this page with title, company and link, follow next page",
+  "options": []
 }

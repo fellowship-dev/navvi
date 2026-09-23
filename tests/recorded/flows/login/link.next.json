@@ -4,5 +4,8 @@
   "index": null,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "\"Log out\" -> http://127.0.0.1:*/login/logout"
+  ]
 }

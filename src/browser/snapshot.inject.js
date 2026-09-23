@@ -14,6 +14,9 @@
  * - Password, file and hidden inputs are never typeable targets (R24).
  * - The control filter mirrors src/browser/policy.ts `allowedControl` (R38);
  *   tests assert NAVVI_DENY_LIST equals DENY_LIST there.
+ * - `shapeOf` is mirrored by `shapeOf` in src/scraper/extract.ts; because this
+ *   file cannot import it, tests/second-spelling.test.ts runs both over one
+ *   corpus and fails on the first string they classify differently.
  * - Ids are stable across calls within a page (WeakMap identity).
  */
 (() => {
@@ -718,6 +721,10 @@
     resolveLeaf: resolveLeaf,
     freshness: freshness,
     DEFAULT_CAPS: DEFAULT_CAPS,
+    // Exposed only so the differential test can run this copy beside
+    // `shapeOf` in src/scraper/extract.ts over one corpus: the injected script
+    // cannot import from src, so agreement has to be measured, not assumed.
+    shapeOf: shapeOf,
   };
   return true;
 })();

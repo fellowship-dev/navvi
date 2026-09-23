@@ -6,5 +6,6 @@
   "inputTokens": 420,
   "outputTokens": 60,
   "chooser": "model",
-  "prompt": "Get me price, name, laboratory and stock for these products"
+  "prompt": "Get me price, name, laboratory and stock for these products",
+  "options": []
 }

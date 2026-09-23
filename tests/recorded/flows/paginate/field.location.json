@@ -4,5 +4,13 @@
   "index": 3,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "h2.job-title/a = Senior Python Engineer II | Backend Developer (Django) | Data Engineer",
+    "h2.job-title/a/@href = /fixtures/jobs/100.html | /fixtures/jobs/101.html | /fixtures/jobs/102.html",
+    "span.company = Anaconda | Canonical | Mozilla",
+    "span.location = Remote | Berlin, Germany | London, UK",
+    "time.posted = 2026-08-28 | 2026-08-27 | 2026-08-26",
+    "time.posted/@datetime = 2026-08-28 | 2026-08-27 | 2026-08-26"
+  ]
 }

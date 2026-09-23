@@ -4,5 +4,8 @@
   "index": 0,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "#results > li.result (6 items): python jobs role 1Company 1 || python jobs role 2Company 2 || python jobs role 3Company 3"
+  ]
 }

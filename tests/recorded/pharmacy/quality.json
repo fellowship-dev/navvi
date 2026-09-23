@@ -2,8 +2,17 @@
   "id": "quality",
   "kind": "score",
   "index": 2,
-  "probabilities": [0.05, 0.15, 0.8],
+  "probabilities": [
+    0.05,
+    0.15,
+    0.8
+  ],
   "inputTokens": 120,
   "outputTokens": 0,
-  "chooser": "jev"
+  "chooser": "jev",
+  "options": [
+    "wrong",
+    "partial",
+    "right"
+  ]
 }

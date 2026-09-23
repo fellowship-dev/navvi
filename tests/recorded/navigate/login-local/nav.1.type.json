@@ -5,5 +5,9 @@
   "note": "Password",
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "textbox \"Email\" value=\"[secret:username]\" in \"Email Password Log in\"",
+    "textbox \"Password\" in \"Email Password Log in\""
+  ]
 }

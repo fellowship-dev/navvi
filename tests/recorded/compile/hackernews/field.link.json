@@ -4,5 +4,24 @@
   "index": 3,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "td.title/span.rank = 1. | 2. | 3.",
+    "td.votelinks/a/@href = vote?id=45000000&how=up | vote?id=45000007&how=up | vote?id=45000014&how=up",
+    "td.title/span.titleline/a.titlelink = Show HN: A self-healing scraper compiler | Rust 2.0 announced | Why SQLite is enough",
+    "td.title/span.titleline/a.titlelink/@href = https://example.org/story/45000000 | https://example.org/story/45000007 | https://example.org/story/45000014",
+    "td.title/span.titleline/span.sitebit.comhead = ( ) | ( ) | ( )",
+    "td.title/span.titleline/span.sitebit.comhead/a/@href = from?site=example.org | from?site=example.org | from?site=example.org",
+    "td.title/span.titleline/span.sitebit.comhead/a/span.sitestr = example.org | example.org | example.org",
+    "+1/td.subtext/span.subline = by | | | by | | | by | |",
+    "+1/td.subtext/span.subline/span.score = 12 points | 49 points | 86 points",
+    "+1/td.subtext/span.subline/a.hnuser = user0 | user1 | user2",
+    "+1/td.subtext/span.subline/a.hnuser/@href = user?id=user0 | user?id=user1 | user?id=user2",
+    "+1/td.subtext/span.subline/span.age/a = 1 hours ago | 2 hours ago | 3 hours ago",
+    "+1/td.subtext/span.subline/span.age/a/@href = item?id=45000000 | item?id=45000007 | item?id=45000014",
+    "+1/td.subtext/span.subline/a = hide | hide | hide",
+    "+1/td.subtext/span.subline/a/@href = hide?id=45000000 | hide?id=45000007 | hide?id=45000014",
+    "+1/td.subtext/span.subline/a = 3 comments | 16 comments | 29 comments",
+    "+1/td.subtext/span.subline/a/@href = item?id=45000000 | item?id=45000007 | item?id=45000014"
+  ]
 }

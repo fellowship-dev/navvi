@@ -6,5 +6,6 @@
   "inputTokens": 420,
   "outputTokens": 60,
   "chooser": "model",
-  "prompt": "Log in with my account and export my orders"
+  "prompt": "Log in with my account and export my orders",
+  "options": []
 }

@@ -5,5 +5,19 @@
   "inputTokens": 0,
   "outputTokens": 0,
   "chooser": "agent",
-  "note": "main/article/div/p/span = Disponible"
+  "note": "main/article/div/p/span = Disponible",
+  "options": [
+    "main/article/div/p/span = Disponible",
+    "main/article/div/h1 = Amoxicilina 500 mg x 21 cápsulas",
+    "main/article/div/p/span = Laboratorio:",
+    "main/article/div/p/span = Bagó",
+    "main/article/div/p/span = Stock:",
+    "main/article/div/p/span = SKU:",
+    "main/article/div/p/span = FA-0005",
+    "main/article/div/div/p = Amoxicilina 500 mg de Bagó. Medicamento de venta directa. L…",
+    "main/section/h2 = Productos relacionados",
+    "main/section/ul/li/a = Losartán 50 mg x 30 comprimidos",
+    "main/section/ul/li/span = Sin stock",
+    "main/section/ul/li/a = Metformina 850 mg x 60 comprimidos"
+  ]
 }

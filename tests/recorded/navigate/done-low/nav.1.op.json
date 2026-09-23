@@ -5,5 +5,12 @@
   "note": "DONE",
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "CLICK: click a link, button, checkbox, radio, tab, menu item, option or other control.",
+    "SCROLL_UP: scroll the page up.",
+    "SCROLL_DOWN: scroll the page down to reveal more content.",
+    "WAIT: wait briefly for loading content.",
+    "BLOCKED: no supported operation can make progress."
+  ]
 }

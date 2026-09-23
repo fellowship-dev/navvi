@@ -5,5 +5,14 @@
   "note": "python role 1",
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "link \"python role 1\" -> http://127.0.0.1:*/fixtures/jobs/200.html in \"python role 1Company 1\"",
+    "link \"python role 2\" -> http://127.0.0.1:*/fixtures/jobs/201.html in \"python role 2Company 2\"",
+    "link \"python role 3\" -> http://127.0.0.1:*/fixtures/jobs/202.html in \"python role 3Company 3\"",
+    "link \"python role 4\" -> http://127.0.0.1:*/fixtures/jobs/203.html in \"python role 4Company 4\"",
+    "link \"python role 5\" -> http://127.0.0.1:*/fixtures/jobs/204.html in \"python role 5Company 5\"",
+    "link \"python role 6\" -> http://127.0.0.1:*/fixtures/jobs/205.html in \"python role 6Company 6\"",
+    "link \"New search\" -> http://127.0.0.1:*/fixtures/search-form.html in \"New search\""
+  ]
 }

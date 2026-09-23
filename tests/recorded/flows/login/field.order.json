@@ -4,5 +4,11 @@
   "index": 0,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "a = Order #1001 | Order #1002 | Order #1003",
+    "a/@href = /login/orders/1001.html | /login/orders/1002.html | /login/orders/1003.html",
+    "span.status = Shipped | Delivered | Processing",
+    "span.total = $ 45.990 | $ 12.500 | $ 89.900"
+  ]
 }

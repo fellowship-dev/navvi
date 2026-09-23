@@ -4,5 +4,15 @@
   "index": 1,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "\"Previous\" -> http://127.0.0.1:*/fixtures/python-jobs.html?page=0",
+    "\"Next\" -> http://127.0.0.1:*/fixtures/python-jobs.html?page=2",
+    "\"Python Jobs\" -> http://127.0.0.1:*/fixtures/python-jobs.html",
+    "\"About\" -> http://127.0.0.1:*/fixtures/python-jobs.html#about",
+    "\"RSS\" -> http://127.0.0.1:*/fixtures/python-jobs.html#rss",
+    "\"Remote\" -> http://127.0.0.1:*/fixtures/python-jobs.html?type=remote",
+    "\"On-site\" -> http://127.0.0.1:*/fixtures/python-jobs.html?type=onsite",
+    "\"Search\" -> http://127.0.0.1:*/fixtures/search-form.html"
+  ]
 }

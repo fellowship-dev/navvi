@@ -4,5 +4,8 @@
   "index": 0,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "ul.jobs > li.job (5 items): Senior Python Engineer II Anaconda Remote 2026-08-28 || Backend Developer (Django) Canonical Berlin, Germany 2026-08-27 || Data Engineer Mozilla London, UK 2026-08-26"
+  ]
 }

@@ -4,5 +4,11 @@
   "index": 3,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "a.card-title = Card 1: Fix login | Card 2: Ship v3 | Card 3: Write docs",
+    "a.card-title/@href = /fixtures/cards/1.html | /fixtures/cards/2.html | /fixtures/cards/3.html",
+    "span.owner = ana | bruno | carla",
+    "span.points = 1 | 4 | 7"
+  ]
 }

@@ -4,5 +4,19 @@
   "index": null,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "main/section/ul/li/span = $ 6.990",
+    "main/section/ul/li/span = $ 4.390",
+    "main/section/ul/li/span = $ 4.290",
+    "main/article/div/h1 = Ibuprofeno 400 mg x 20 comprimidos",
+    "main/article/div/p/span = Laboratorio:",
+    "main/article/div/p/span = Mintlab",
+    "main/article/div/p/span = Stock:",
+    "main/article/div/p/span = Agotado",
+    "main/article/div/p/span = SKU:",
+    "main/article/div/p/span = FA-0002",
+    "main/article/div/div/p = Ibuprofeno 400 mg de Mintlab. Medicamento de venta directa.…",
+    "main/section/h2 = Productos relacionados"
+  ]
 }

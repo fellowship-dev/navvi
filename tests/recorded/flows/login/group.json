@@ -4,5 +4,8 @@
   "index": 0,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "ul.orders > li.order (5 items): Order #1001 Shipped $ 45.990 || Order #1002 Delivered $ 12.500 || Order #1003 Processing $ 89.900"
+  ]
 }

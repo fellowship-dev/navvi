@@ -4,5 +4,8 @@
   "index": 0,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "#root > div.row (10 items): Card 1: Fix loginana1 || Card 2: Ship v3bruno4 || Card 3: Write docscarla7"
+  ]
 }

@@ -4,5 +4,8 @@
   "index": 0,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "h2.job-title/a/@href = /fixtures/jobs/100.html | /fixtures/jobs/101.html | /fixtures/jobs/102.html"
+  ]
 }

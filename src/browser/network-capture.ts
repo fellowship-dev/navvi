@@ -120,17 +120,60 @@ export function readPath(body: unknown, path: string): unknown {
 }
 
 /**
- * The best response for a field: the newest match that actually contains the
- * path. "Newest that works" rather than "last" or "first", because a page that
- * retries leaves both the failure and the success behind, in that order.
+ * Did this response answer at all? A refusal is not an answer, and it is not
+ * evidence that the endpoint has nothing either: Store B's detail endpoint
+ * answers 401 before the page's anonymous session exists and 200 after.
+ *
+ * The single spelling of that test. Counting payloads, picking a field's
+ * response and compiling a `network` alternative must agree about which
+ * captures count, or one of them silently binds to a failure.
  */
-export function pickResponse(responses: readonly CapturedResponse[], path: string): CapturedResponse | null {
+export function isUsableResponse(response: CapturedResponse): boolean {
+  return response.status < 400;
+}
+
+/** Narrows which captures `newestUsableResponse` will accept. */
+export interface UsableResponseFilter {
+  /** Substring the response URL must contain. Omitted or empty matches every URL. */
+  match?: string | undefined;
+  /** The body must satisfy this to count as an answer. Omitted means any usable response counts. */
+  carries?: ((body: unknown) => boolean) | undefined;
+}
+
+/**
+ * The newest captured response that is usable — the one spelling of
+ * "newest usable captured response" (2026-09-22).
+ *
+ * "Newest that works" rather than "last" or "first", because a page that
+ * retries leaves both the failure and the success behind, in that order. Every
+ * consumer of a capture walks this list the same way and differs only in what
+ * it additionally demands: a URL substring (`resolveDeclared` compiling a
+ * `network` alternative, a HAR import's endpoint), a readable path
+ * (`pickResponse`), or nothing at all (tier 2's endpoint intersection). Before
+ * this existed the walk was written out four times, once in a test commented
+ * "copied verbatim", and nothing compared any two.
+ */
+export function newestUsableResponse(
+  responses: readonly CapturedResponse[],
+  filter: UsableResponseFilter = {},
+): CapturedResponse | null {
+  const { match, carries } = filter;
   for (let i = responses.length - 1; i >= 0; i -= 1) {
     const response = responses[i]!;
-    if (response.status >= 400) continue;
-    if (readPath(response.body, path) !== undefined) return response;
+    if (!isUsableResponse(response)) continue;
+    if (match && !response.url.includes(match)) continue;
+    if (carries && !carries(response.body)) continue;
+    return response;
   }
   return null;
+}
+
+/**
+ * The best response for a field: the newest usable capture that actually
+ * contains the path.
+ */
+export function pickResponse(responses: readonly CapturedResponse[], path: string): CapturedResponse | null {
+  return newestUsableResponse(responses, { carries: (body) => readPath(body, path) !== undefined });
 }
 
 /** Field name to dotted path, resolved against what the page fetched. */

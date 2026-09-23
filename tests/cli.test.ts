@@ -11,10 +11,9 @@ import { telegramNotifier } from "../src/cli/notify.js";
 import { toCsv } from "../src/cli/output.js";
 import { QUESTIONS_END, QUESTIONS_START } from "../src/chooser/agent.js";
 import { BudgetExhaustedError } from "../src/billing/budget.js";
-import { zeroCharges } from "../src/billing/charge.js";
 import type { Answer, Chooser, Question } from "../src/chooser/chooser.js";
 import type { CrawlDeps } from "../src/replay/crawler.js";
-import { run as runNavvi, type RunSummary } from "../src/main.js";
+import { run as runNavvi, summaryFor, type RunSummary } from "../src/main.js";
 import { startFixtureServer, type FixtureServer } from "./server.js";
 
 const REPO = resolve(import.meta.dirname, "..");
@@ -114,32 +113,23 @@ function startHelperServer(routes: Record<string, { type: string; body: string }
   });
 }
 
+/**
+ * A `RunSummary` for a stub run, derived from the production default rather
+ * than spelled out a second time.
+ *
+ * This was a hand-copy of `summaryFor()` and it had already drifted: three
+ * fields `RunSummary` requires were missing from the literal, each typed
+ * `T | undefined`, and nothing read the mismatch while `tests/` sat outside
+ * every typecheck (U14). Copying it again is how that happens again
+ * (2026-09-22), so the copy is gone: the only thing this adds is `templates`,
+ * because a stub that returns rows came from one template.
+ */
 function summary(over: Partial<RunSummary> = {}): RunSummary {
-  return {
-    status: "succeeded",
-    items: 0,
-    pages: 0,
-    templates: 1,
-    cacheHit: false,
-    healingEvents: [],
-    unmappedCandidates: [],
-    fieldsNotFound: [],
-    chooser: null,
-    input: null,
-    requests: { compile: 0, list: 0, record: 0 },
-    traceReplays: 0,
-    blockedRequests: 0,
-    unhealed: 0,
-    // Three fields RunSummary requires that this literal never had, and a
-    // spread of a Partial cannot supply: each typed as `T | undefined` and
-    // nothing read the mismatch while tests/ was outside every typecheck
-    // (U14). The values are `summaryFor()`'s own defaults for a run that did
-    // nothing: no scraper pinned, nothing charged, no chooser to report ZDR.
-    scriptId: null,
-    charges: zeroCharges(),
-    zeroDataRetention: null,
-    ...over,
-  };
+  const { status = "succeeded", message = "", ...rest } = over;
+  const base = summaryFor(status, null, message);
+  // `summaryFor` always carries a message; a stub that succeeded has none.
+  if (message === "") delete base.message;
+  return { ...base, templates: 1, ...rest };
 }
 
 function expectTwelveProducts(items: Array<Record<string, unknown>>): void {

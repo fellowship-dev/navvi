@@ -50,6 +50,26 @@ export const DEFAULT_CAPS = {
   maxControls: 150,
 } as const;
 
+/**
+ * The injected `shapeOf`, evaluated outside a page.
+ *
+ * `src/scraper/extract.ts` carries a second spelling of this classifier and
+ * says so in a comment ("Mirror of `shapeOf` in snapshot.inject.js"), because
+ * an injected script cannot import from `src`. Where sharing is impossible,
+ * agreement has to be measured: this hands a test the page's own copy so both
+ * can be run over one corpus of strings (`tests/second-spelling.test.ts`).
+ *
+ * The script needs nothing but a `window` object to install itself on, so no
+ * browser and no DOM are involved — the classifier is pure.
+ */
+export function injectedShapeOf(): (text: string, attr?: string | undefined) => Shape {
+  const sandbox: { __navvi?: { shapeOf?: unknown } } = {};
+  new Function("window", SNAPSHOT_SOURCE)(sandbox);
+  const shapeOf = sandbox.__navvi?.shapeOf;
+  if (typeof shapeOf !== "function") throw new Error("snapshot.inject.js: window.__navvi.shapeOf not found");
+  return shapeOf as (text: string, attr?: string | undefined) => Shape;
+}
+
 /** The deny list literal inside snapshot.inject.js; tests assert it equals policy.ts DENY_LIST. */
 export const SNAPSHOT_DENY_LIST: readonly string[] = (() => {
   const match = /NAVVI_DENY_LIST\s*=\s*(\[[\s\S]*?\]);/.exec(SNAPSHOT_SOURCE);
@@ -167,6 +187,8 @@ declare global {
       candidates(opts: unknown): Candidates;
       resolveLeaf(opts: unknown): string | null;
       freshness(): { url: string; text: string; values: Array<[number, string, boolean]> };
+      /** The in-page shape classifier, exposed for the differential test against `shapeOf` in src/scraper/extract.ts. */
+      shapeOf(text: string, attr?: string | undefined): Shape;
     };
   }
 }

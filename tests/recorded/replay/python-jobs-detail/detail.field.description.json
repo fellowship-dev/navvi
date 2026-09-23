@@ -4,5 +4,14 @@
   "index": 2,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "main/article.job-detail/h1.title = Senior Python Engineer II | Backend Developer (Django) | Data Engineer",
+    "main/article.job-detail/p.company = Anaconda | Canonical | Mozilla",
+    "main/article.job-detail/p.description = Own the packaging pipeline for conda and lead a team of fou… | Build the Django services behind Ubuntu Pro subscriptions. | Design the telemetry warehouse that powers Firefox release …",
+    "main/article.job-detail/p.apply/a = Apply | Apply | Apply",
+    "main/article.job-detail/p.apply/a/@href = /fixtures/python-jobs.html#apply | /fixtures/python-jobs.html#apply | /fixtures/python-jobs.html#apply",
+    "header/a.brand = Python Jobs | Python Jobs | Python Jobs",
+    "header/a.brand/@href = /fixtures/python-jobs.html | /fixtures/python-jobs.html | /fixtures/python-jobs.html"
+  ]
 }

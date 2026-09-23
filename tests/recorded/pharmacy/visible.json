@@ -5,5 +5,6 @@
   "probability": 0.93,
   "inputTokens": 120,
   "outputTokens": 0,
-  "chooser": "jev"
+  "chooser": "jev",
+  "options": []
 }

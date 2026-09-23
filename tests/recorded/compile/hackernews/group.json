@@ -4,5 +4,11 @@
   "index": 0,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "table.itemlist > tbody > tr.athing (30 items, 3 rows each): 1. Show HN: A self-healing scraper compiler (example.org) | 12 points by user0 1 hours ago | hide | 3 comments || 2. Rust 2.0 announced (example.org) | 49 points by user1 2 hours ago | hide | 16 comments || 3. Why SQLite is enough (example.org) | 86 points by user2 3 hours ago | hide | 29 comments",
+    "table.itemlist > tbody > tr.athing (30 items): 1. Show HN: A self-healing scraper compiler (example.org) || 2. Rust 2.0 announced (example.org) || 3. Why SQLite is enough (example.org)",
+    "#hnmain > tbody > tr (5 items): Hacker News new | past | comments | ask | show | jobs | submit login ||  || 1. Show HN: A self-healing scraper compiler (example.org) 12 points by user0 1 hours ago | hide | 3 comments 2. Rust 2.0 announced (example.",
+    "table.itemlist > tbody > tr (92 items): 1. Show HN: A self-healing scraper compiler (example.org) || 12 points by user0 1 hours ago | hide | 3 comments || "
+  ]
 }

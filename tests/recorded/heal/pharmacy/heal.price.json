@@ -5,5 +5,19 @@
   "inputTokens": 0,
   "outputTokens": 0,
   "chooser": "agent",
-  "note": "main/article/aside/span = $ 6.990"
+  "note": "main/article/aside/span = $ 6.990",
+  "options": [
+    "main/article/aside/span = $ 6.990",
+    "main/section/ul/li/span = $ 8.490",
+    "main/section/ul/li/span = $ 10.390",
+    "main/section/ul/li/span = $ 9.990",
+    "main/article/div/h1 = Amoxicilina 500 mg x 21 cápsulas",
+    "main/article/div/p/span = Laboratorio:",
+    "main/article/div/p/span = Bagó",
+    "main/article/div/p/span = Stock:",
+    "main/article/div/p/span = Disponible",
+    "main/article/div/p/span = SKU:",
+    "main/article/div/p/span = FA-0005",
+    "main/article/div/div/p = Amoxicilina 500 mg de Bagó. Medicamento de venta directa. L…"
+  ]
 }

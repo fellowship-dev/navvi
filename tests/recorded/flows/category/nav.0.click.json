@@ -4,5 +4,13 @@
   "index": 1,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "link \"Jobs by language\" -> http://127.0.0.1:*/fixtures/categories.html in \"Jobs by language\"",
+    "link \"Python\" -> http://127.0.0.1:*/fixtures/python-jobs.html in \"Python 25 jobs\"",
+    "link \"Java\" -> http://127.0.0.1:*/fixtures/search-form.html in \"Java 0 jobs\"",
+    "link \"Go\" -> http://127.0.0.1:*/fixtures/search-form.html in \"Go 0 jobs\"",
+    "link \"Rust\" -> http://127.0.0.1:*/fixtures/search-form.html in \"Rust 0 jobs\"",
+    "link \"Search all jobs\" -> http://127.0.0.1:*/fixtures/search-form.html in \"Search all jobs\""
+  ]
 }

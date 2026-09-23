@@ -4,5 +4,9 @@
   "index": null,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "button \"Log in\" in \"Email Password Log in\"",
+    "link \"Forgot your password?\" -> http://127.0.0.1:*/login/ in \"Forgot your password?\""
+  ]
 }

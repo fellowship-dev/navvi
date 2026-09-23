@@ -4,5 +4,9 @@
   "index": null,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "\"All\" -> http://127.0.0.1:*/fixtures/placeholder-board.html?view=all",
+    "\"Mine\" -> http://127.0.0.1:*/fixtures/placeholder-board.html?view=mine"
+  ]
 }

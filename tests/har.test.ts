@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { importHar, safeUrl, type CapturedResponse } from "../src/investigate/har.js";
+import { newestUsableResponse } from "../src/browser/network-capture.js";
+import { importHar, safeUrl } from "../src/investigate/har.js";
 import { flatten } from "../src/investigate/leaves.js";
 
 /**
@@ -26,16 +27,6 @@ const HAR = readFileSync(join(DIR, "laptop-capture.har"), "utf8");
 const DETAIL = "https://api.tienda.ejemplo.cl/catalog-svc/products/detail/1234?token=SECRET-QUERY-TOKEN";
 const PRODUCT_PAGE = "https://tienda.ejemplo.cl/producto/jarabe-ejemplo-120ml";
 
-/** `resolveDeclared`'s walk, copied verbatim, because that is the consumer. */
-function newestThatWorks(captured: readonly CapturedResponse[], match: string): CapturedResponse | null {
-  for (let i = captured.length - 1; i >= 0; i -= 1) {
-    const response = captured[i]!;
-    if (response.status >= 400 || !response.url.includes(match)) continue;
-    return response;
-  }
-  return null;
-}
-
 describe("importHar", () => {
   it("returns the shape network capture returns, and nothing else", () => {
     const { responses } = importHar(HAR);
@@ -54,8 +45,10 @@ describe("importHar", () => {
     // would also delete the evidence that the endpoint needs a session.
     expect(detail.map((response) => response.status)).toEqual([401, 200]);
 
-    // And the consumer's newest-first walk therefore lands on the product.
-    const picked = newestThatWorks(responses, "/catalog-svc/products/detail/");
+    // And the consumer's own newest-first walk therefore lands on the product.
+    // `newestUsableResponse` is the function `resolveDeclared` calls, not a
+    // copy of it: a change to what "usable" means has to break this test.
+    const picked = newestUsableResponse(responses, { match: "/catalog-svc/products/detail/" });
     expect(picked?.status).toBe(200);
     expect(flatten(picked?.body).map((leaf) => leaf.path)).toContain("productData.prices[price-list-std]");
   });

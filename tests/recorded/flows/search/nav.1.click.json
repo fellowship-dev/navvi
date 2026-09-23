@@ -4,5 +4,9 @@
   "index": 0,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "button \"Search\" in \"Search jobs Search\"",
+    "link \"Browse all jobs\" -> http://127.0.0.1:*/fixtures/python-jobs.html in \"Browse all jobs\""
+  ]
 }

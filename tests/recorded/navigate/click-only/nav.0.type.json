@@ -5,5 +5,8 @@
   "note": "Search jobs (wrong head, must be ignored)",
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "searchbox \"Search jobs\" in \"Search jobs Search\""
+  ]
 }

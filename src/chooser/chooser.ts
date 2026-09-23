@@ -108,6 +108,25 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
+/**
+ * What separates a code-enumerated option's *identity* from the page content it
+ * quotes: `main/h1.name = Paracetamol 500 mg | Ibuprofeno 400 mg`.
+ *
+ * The identity is the candidate the chooser is picking; the tail is whatever
+ * the sampled pages happened to show on the run that built the question. A
+ * recorded answer is therefore compared on the identity (see
+ * `src/chooser/recorded.ts`): the same recorded fixture is replayed by callers
+ * that sample different pages of the same site, and the index answers the
+ * candidate, not the sample.
+ */
+export const OPTION_VALUE_SEPARATOR = " = ";
+
+/** The part of an option that names the candidate rather than the values it sampled. */
+export function optionIdentity(option: string): string {
+  const at = option.indexOf(OPTION_VALUE_SEPARATOR);
+  return at < 0 ? option : option.slice(0, at);
+}
+
 export function questionChars(q: Question): number {
   return q.state.length + q.premise.length + (q.options ?? []).reduce((n, o) => n + o.length, 0);
 }

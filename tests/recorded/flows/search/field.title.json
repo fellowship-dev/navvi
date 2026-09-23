@@ -4,5 +4,10 @@
   "index": 0,
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "a = python jobs role 1 | python jobs role 2 | python jobs role 3",
+    "a/@href = /fixtures/jobs/200.html | /fixtures/jobs/201.html | /fixtures/jobs/202.html",
+    "span.company = Company 1 | Company 2 | Company 3"
+  ]
 }

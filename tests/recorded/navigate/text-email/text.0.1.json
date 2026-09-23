@@ -5,5 +5,6 @@
   "text": "{\"text\":\"a@b.com\"}",
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": []
 }

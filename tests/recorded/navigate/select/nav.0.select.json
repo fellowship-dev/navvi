@@ -5,5 +5,9 @@
   "note": "Oldest",
   "inputTokens": 0,
   "outputTokens": 0,
-  "chooser": "agent"
+  "chooser": "agent",
+  "options": [
+    "combobox \"Sort by\" value=\"new\" in \"Listing Sort by Newest Oldest\" = \"Newest\"",
+    "combobox \"Sort by\" value=\"new\" in \"Listing Sort by Newest Oldest\" = \"Oldest\""
+  ]
 }
