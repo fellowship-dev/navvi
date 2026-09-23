@@ -1,8 +1,10 @@
 # Architecture: what `src/` is made of
 
 Measured 2026-09-23 from the tree, not from memory: 20 directories under
-`src/`, 18,411 lines, 94 cross-module imports. `scripts/check-architecture.mjs`
-produced the diagram below and fails CI when the two stop agreeing.
+`src/`, 21,356 lines, 97 cross-module imports. `scripts/check-architecture.mjs`
+produced the diagram below and fails CI when the two stop agreeing. The counts
+are a snapshot and the check does not assert them; the edges are the part it
+keeps honest.
 
 This lives in `docs/` and not in the README on purpose. The README is the
 hottest file in the repo — 15 of the last 60 commits touched it — and a diagram
@@ -77,7 +79,10 @@ graph TD
   compile --> browser
   compile --> chooser
   compile --> input
+  compile --> investigate
+  compile --> reconcile
   compile --> scraper
+  compile --> spec
   compile --> template
   compile --> util
   heuristics --> declared
@@ -159,10 +164,10 @@ vocabulary.
 | --- | --- | --- |
 | `spec` | 543 | `navvi spec`: a plain-words brief becomes a `Rubric`, with what the brief left unsaid recorded as open questions. Reads no page. |
 | `cli` | 531 | How a run is *shown*: argv parsing, output formats, the rendered spec and heuristic blocks, notifications. Not the binary — the binary is `bin/`. |
-| `investigate` | 4255 | The discovery cascade: declared data, then captured JSON, then selectors, stopping as soon as the requested fields are covered, and writing down what it tried. See [`discovery.md`](discovery.md). |
-| `reconcile` | 1072 | Phase D: the manuscript argued into `reconcile.md` — obtainable, not obtainable, **available but not requested**, ambiguities with the rubric that settled them quoted verbatim, obstacles with their cost — and `schema.json` derived from what was proved obtainable rather than from the brief. Deterministic, offline, and it opens nothing. |
-| `compile` | 697 | Turning a live page into alternatives for a field: candidates, groups, chunked questions, links to follow. The expensive phase, the one with model calls in it. |
-| `replay` | 2217 | Running a compiled scraper again: crawl, extract, and heal the one field that moved. The only module that owns a crawler. |
+| `investigate` | 4447 | The discovery cascade: declared data, then captured JSON, then selectors, stopping as soon as the requested fields are covered, and writing down what it tried. See [`discovery.md`](discovery.md). |
+| `reconcile` | 1094 | Phase D: the manuscript argued into `reconcile.md` — obtainable, not obtainable, **available but not requested**, ambiguities with the rubric that settled them quoted verbatim, obstacles with their cost — and `schema.json` derived from what was proved obtainable rather than from the brief. Deterministic, offline, and it opens nothing. |
+| `compile` | 1867 | Turning a page into alternatives for a field — and, since U7a, turning a *reconciliation* into them without one. `compile.ts` is the expensive half: a live page, model calls, candidates, groups, chunked questions, links to follow. `proven.ts` is the model-free half: it reads what the investigation proved, emits the `json-ld` / `network` / `dom` cascade `replay` resolves, and renders `rationale.md`. `gate.ts` refuses a selector that will not survive a page it was not compiled from. |
+| `replay` | 2759 | Running a compiled scraper again: crawl, extract, and heal the one field that moved. The only module that owns a crawler. |
 | `navigate` | 992 | Getting from the start URL to the page that has the data — a goal-driven loop over controls the code enumerated. |
 | `prestep` | 723 | What happens between the first navigation and the first charged question: credential refusal, consent banners, one Turnstile click, blocked classification. |
 
@@ -172,13 +177,13 @@ is running.
 | module | lines | owns |
 | --- | --- | --- |
 | `input` | 633 | What the caller asked for: the parsed and validated run input, the field specs, the enumerations (choosers, browsers, profiles, modes) and `LIMITS`. |
-| `scraper` | 1007 | The compiled scraper JSON — the versioned `CompiledScraper` contract, `Status`, extraction against it, and where it is stored. |
+| `scraper` | 1818 | The compiled scraper JSON — the versioned `CompiledScraper` contract, `Status`, extraction against it, and where it is stored. |
 | `declared` | 207 | The one reader of a declared JSON block: JSON-LD, `@graph`, typed nodes, a path out of it. Written four times before it was a module. |
-| `agree` | 178 | "Keep only what the samples agree on": the intersection over a set of samples, and the distinction between a sample that disagreed, a sample that could not answer, and a sample that was never asked. Also written four times before it was a module — see the 2026-09-22 defect in its header. |
-| `browser` | 1196 | Playwright: launch, profiles, relaunch, navigation guards, typing, the injected snapshot and the network capture. The only module that says `chromium`. |
+| `agree` | 217 | "Keep only what the samples agree on": the intersection over a set of samples, and the distinction between a sample that disagreed, a sample that could not answer, and a sample that was never asked. Also written four times before it was a module — see the 2026-09-22 defect in its header. |
+| `browser` | 1203 | Playwright: launch, profiles, relaunch, navigation guards, typing, the injected snapshot and the network capture. The only module that says `chromium`. |
 | `chooser` | 2407 | Asking an intelligence a question and trusting only the index that comes back. One interface over Jev, an API model, a signed-in CLI, the host agent and recorded answers. |
 | `blocked` | 284 | The challenge lexicon: what "this site is refusing us" looks like, written once so the live check and the offline check cannot disagree. |
-| `heuristics` | 642 | The named, overridable rules that decide what a model is even asked, each shipping with its fixture. |
+| `heuristics` | 804 | The named, overridable rules that decide what a model is even asked, each shipping with its fixture. |
 | `template` | 222 | A **page template**: a host plus a URL pattern with the varying path segments blanked — `/producto/{slug}`, `/p/{id}`, `?page={page}`. Pages under one key share one set of alternatives, which is what makes a listing and its detail pages two things instead of two hundred. It surfaces as `RunSummary.templates`. It is not string interpolation. |
 | `billing` | 183 | The budget and the pay-per-event charging: what a run is allowed to spend, what was charged, and the error raised when it runs out. |
 | `secrets` | 178 | `{{secret:name}}`: where a value is resolved from, and the guarantee that every rendering path prints `[secret]`. |
@@ -241,28 +246,41 @@ in `KNOWN_UPWARD`. It is type-only, so nothing points up at run time, but
 `RunSummary` is a shape both the entry point and the crawler need and belongs
 below both.
 
-## The one orphan
+## No orphans
 
 A directory under `src/` that nothing in `src/` or `bin/` imports is dead code
-until someone says otherwise, so the check fails on one. One exists, and it is
-in `ORPHAN_ALLOWLIST` with its reason written next to it.
+until someone says otherwise, so the check fails on one. `ORPHAN_ALLOWLIST` is
+**empty**, and the last two entries came out on 2026-09-23.
 
-- **`src/reconcile/` (1,072 lines) has no importer.** Phase D: the argument
-  (U4) and the schema it proves (U5). Built against the manuscript ahead of its
-  caller for exactly the reason `investigate` was, and with the same risk — see
-  the architecture pass of 2026-09-23, which is about two halves of one program
-  never meeting. What closes it is U11, `navvi make`, the driver that runs
-  `reconcile` between `investigate` and `compile`; the plan lives in
-  `fellowship-dev/claude-buddy` under
-  `specs/plans/2026-09-22-008-navvi-remaining-phases.md`. Until that lands, a
-  reader is entitled to be told rather than to discover it.
+An allowlisted orphan is not a tidiness problem. It is a module whose first
+real caller has never compiled against it — which is how two halves of one
+program stay green on separate fixtures until a live run introduces them, and
+is the shape all four defects of 2026-09-22 had. Both entries here were exactly
+that, and both were closed by writing the caller rather than by widening the
+list.
 
-**`src/investigate/` stopped being one on 2026-09-23.** It was the largest
-module in the repo with no importer anywhere but `scripts/live-investigate.ts`;
-`src/reconcile/` reads its manuscript, so it now has one inside `src/` and the
-allowlist entry is gone. That is a smaller closing than U7a's — a consumer of
-the artifact rather than the wiring into the compile path — but it is a real
-edge and the check will not let it be claimed twice.
+- **`src/investigate/` (4,447 lines)** was the largest module in the repo with
+  no importer anywhere but `scripts/live-investigate.ts`. `src/reconcile/` began
+  reading its manuscript, and `src/compile/proven.ts` now reads it too — for
+  `FieldRecord.rejected`, the candidates a tier considered and did not bind,
+  which is the half of the rationale that says what a binding *beat*.
+- **`src/reconcile/` (1,094 lines)** — Phase D: the argument (U4) and the schema
+  it proves (U5) — was built against the manuscript ahead of its caller, with
+  the same risk, and the entry said so. U7a is the caller:
+  `src/compile/proven.ts` reads a `Reconciliation`, turns each
+  `ObtainableField` into the `FieldAlternative`s `scraper/extract.ts` resolves,
+  and asks `reconcile`'s own `rubricsFor` for the rules it quotes verbatim into
+  `rationale.md`. That is the wiring into the compile path, not a second
+  consumer of the artifact, and `tests/compile-proven.test.ts` runs the whole
+  seam — manuscript, reconcile, compile, then the real cascade against a real
+  page — rather than asserting the shape of the object in between.
+
+What is still open is the **driver**: nothing yet runs `investigate`,
+`reconcile` and `compileFromReconciliation` in sequence as one command. That is
+U11, `navvi make`, and the plan lives in `fellowship-dev/claude-buddy` under
+`specs/plans/2026-09-22-008-navvi-remaining-phases.md`. A missing driver is a
+missing command, not a missing edge — the modules now compile against each
+other, which is the property this section exists to protect.
 
 **`tools/measure/`** is the other half of the older entry, and it is not an
 orphan: it is a tool, not product — the measurement harness behind

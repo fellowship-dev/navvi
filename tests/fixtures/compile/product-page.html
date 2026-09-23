@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Antigripal Comprimidos 500 mg 20 Comprimidos - Tienda Ejemplo</title>
+<meta property="og:title" content="Antigripal Comprimidos 500 mg 20 Comprimidos">
+<meta property="product:retailer_item_id" content="100001">
+<!--
+  One sample page of an invented store, shaped like the ones investigated on
+  2026-09-22 and carrying none of their content. Three things about it are
+  deliberate:
+
+  1. The JSON-LD is an @graph whose first two nodes are an Organization and a
+     WebSite, both named after the store. A reader that walks the graph until
+     something answers to `name` binds the product name to "Tienda Ejemplo".
+  2. <body> is captured with `modal-open` on it, which is the state class that
+     produced one of the three failures: a selector rooted here matches on this
+     page and on no other.
+  3. The only price in the rendered markup is the club price, and it is styled
+     exactly like the heading - the Tailwind pair a selector picked in the
+     third failure, which is how it read the club price for the list price.
+     Neither of the two prices the scraper returns is anywhere in this HTML.
+-->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    { "@type": ["Organization", "OnlineStore"], "name": "Tienda Ejemplo", "url": "https://tienda.ejemplo.test/" },
+    { "@type": "WebSite", "name": "Tienda Ejemplo" },
+    {
+      "@type": "Product",
+      "name": "Antigripal Comprimidos 500 mg 20 Comprimidos",
+      "sku": "100001",
+      "offers": { "@type": "Offer", "price": "4491", "priceCurrency": "CLP" }
+    }
+  ]
+}
+</script>
+</head>
+<body class="one-col modal-open">
+  <header><nav><a href="/">Tienda Ejemplo</a></nav></header>
+  <main>
+    <h1 class="font-semibold leading-6">Antigripal Comprimidos 500 mg 20 Comprimidos</h1>
+    <p class="font-semibold leading-16">$ 3.992</p>
+    <p class="text-sm">Precio Club</p>
+    <div class="css-1x2y3z"><span>Laboratorio Ejemplo</span></div>
+  </main>
+</body>
+</html>

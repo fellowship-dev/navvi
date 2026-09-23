@@ -1,0 +1,26 @@
+{
+  "productData": {
+    "id": "100001",
+    "name": "Antigripal Comprimidos 500 mg 20 Comprimidos",
+    "price": 4990,
+    "prices": {
+      "price-list-std": 4990,
+      "price-sale-std": 4491
+    },
+    "listing": {
+      "price": 4990,
+      "currency": "CLP"
+    },
+    "appliedPromotions": {
+      "price-sale-std": {
+        "promotionalPrice": 4491,
+        "promotionId": "SALE-10"
+      },
+      "price-list-std": {
+        "previousPrice": 4990
+      }
+    },
+    "stock": 412,
+    "laboratory": "Laboratorio Ejemplo"
+  }
+}

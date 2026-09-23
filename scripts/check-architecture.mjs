@@ -56,9 +56,14 @@ const KNOWN_CYCLES = [
 
 // Directories under src/ that nothing in src/ or bin/ imports, on purpose.
 // Each entry states why, the way tsconfig.actor.json states its exclusion.
-const ORPHAN_ALLOWLIST = [
-  ["reconcile", "Phase D's argument (U4) and the schema it proves (U5), built against the manuscript ahead of its caller for the same reason investigate was. U11's `navvi make` is the driver that runs it between investigate and compile; same plan."],
-];
+//
+// Empty since 2026-09-23. `reconcile` was the last one: U7a's
+// src/compile/proven.ts reads a Reconciliation and compiles it, which is the
+// wiring into the compile path that entry said was still missing. Keep it
+// empty if you can — an allowlisted orphan is a module whose first real caller
+// has never compiled against it, which is how two halves of one program stay
+// green on separate fixtures until a live run introduces them.
+const ORPHAN_ALLOWLIST = [];
 
 const layerOf = new Map();
 for (const [index, layer] of LAYERS.entries()) {

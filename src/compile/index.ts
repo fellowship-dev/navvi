@@ -29,6 +29,19 @@ export {
   type LeafSpec,
   type SampleResolver,
 } from "./fields.js";
+export {
+  FAMILIES,
+  REFUSE_FALLBACK,
+  REFUSE_SOLE,
+  auditSelector,
+  gateAlternative,
+  type FamilyPolicy,
+  type GateDecision,
+  type GateOptions,
+  type RiskFamily,
+  type SelectorAudit,
+  type SelectorRisk,
+} from "./gate.js";
 export { GROUP_QUESTION_ID, RETRY_SUFFIX, buildGroupQuestion, groupLabel, isDegenerateGroup, itemFromGroup } from "./groups.js";
 export {
   DETAIL_LINK_QUESTION_ID,
@@ -41,3 +54,16 @@ export {
   nextLinkCandidates,
   paginationFrom,
 } from "./links.js";
+export {
+  MAX_ALTERNATIVES,
+  NothingCompilableError,
+  compileFromReconciliation,
+  renderRationale,
+  type AlternativeRationale,
+  type CompileRationale,
+  type FieldRationale,
+  type ProvenCompile,
+  type ProvenCompileOptions,
+  type RefusedAlternative,
+  type UnboundField,
+} from "./proven.js";
