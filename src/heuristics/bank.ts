@@ -4,12 +4,16 @@ import { REPLAY_HEURISTICS } from "./rules/replay.js";
 import type { AnyHeuristic, Overrides, Stage, Verdict } from "./types.js";
 
 /**
- * U8b: the bank. Eleven rules, each from one encounter on 2026-09-22, each with
+ * U8b: the bank. Twelve rules, each from one encounter on 2026-09-22, each with
  * a fixture in `tests/fixtures/heuristics/`.
  *
  * The measurable output of dogfooding is this list growing: not "navvi handled
- * client", but *this engagement added eleven heuristics and eleven evals, and the
- * next site starts from them.*
+ * client", but *this engagement added twelve heuristics and twelve evals, and the
+ * next site starts from them.* The twelfth, `machine-value-is-not-a-fact`, is
+ * U6c's and is the only rule in the bank with no caller in `src/` yet: the
+ * observation it needs is `InventoryRecord` (path, values, anchored), which is
+ * built in `src/investigate/investigate.ts`. A rule nothing executes is navvi's
+ * signature defect, and saying so here is cheaper than discovering it live.
  */
 
 export const HEURISTICS: readonly AnyHeuristic[] = [...INVESTIGATE_HEURISTICS, ...BIND_HEURISTICS, ...REPLAY_HEURISTICS];

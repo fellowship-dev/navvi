@@ -6,8 +6,15 @@ import { define, type AnyHeuristic } from "../types.js";
 /**
  * Binding heuristics: collecting candidate values is easy, deciding which one
  * is `listPrice` is not. These narrow the table before Jev is shown it, and
- * three of them reject an answer outright — which is the more valuable half,
+ * four of them reject an answer outright — which is the more valuable half,
  * because a wrong binding passes every "did it extract?" check.
+ *
+ * Two of those four are a pair, and they are a pair because neither can see
+ * what the other can. `no-variation-no-field` catches the value that never
+ * changes: the site's own name, arriving as a product name. `machine-value-is-
+ * not-a-fact` catches the value at the other end — one that changes on every
+ * request, that no reader was ever shown, and that is shaped like a clock
+ * reading or a token. Between them, neither has to know what schema.org is.
  */
 
 /** Everything that is arguably the same value: "3.690", "$3.690", 3690. */
@@ -72,6 +79,157 @@ const noVariationNoField = define({
       fires: true,
       because: `${field} is ${JSON.stringify(String(values[0] ?? ""))} on all ${values.length} samples${only === "" ? " (and empty)" : ""}`,
       action: "reject this candidate: it is describing the site, not the record",
+    };
+  },
+});
+
+/**
+ * Shannon entropy per character, in bits.
+ *
+ * Words repeat letters and are drawn from a small alphabet; a token is drawn
+ * from a large one and repeats nothing. This is the only *statistical* signal
+ * in the bank, and it is here because the alternative — a list of key names
+ * that mean "noise" — is the thing `src/reconcile/schema.ts` refuses to write.
+ */
+function entropyPerChar(text: string): number {
+  if (text.length === 0) return 0;
+  const counts = new Map<string, number>();
+  for (const character of text) counts.set(character, (counts.get(character) ?? 0) + 1);
+  let bits = 0;
+  for (const count of counts.values()) {
+    const share = count / text.length;
+    bits -= share * Math.log2(share);
+  }
+  return bits;
+}
+
+/** A date with a time of day on it. A bare calendar date is left alone: that can be a release date, which is a fact about the record. */
+const INSTANT = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/;
+
+/** The longest run of consecutive letters, case-folded. `gel-frio` is 4; a uuid never reaches 5. */
+function longestLetterRun(text: string): number {
+  let longest = 0;
+  let run = 0;
+  for (const character of text) {
+    if (/\p{L}/u.test(character)) {
+      run += 1;
+      if (run > longest) longest = run;
+    } else run = 0;
+  }
+  return longest;
+}
+
+/**
+ * Is this value shaped like something a machine wrote for itself?
+ *
+ * Returns the sentence the verdict says out loud, or `null` to abstain. Every
+ * test here is on the **value**, never on the key that carried it, and every
+ * one of them is conservative on purpose: abstaining leaves a leaf in the
+ * catalogue for a reader to dismiss, and firing wrongly deletes a fact.
+ */
+function readsAsMachinery(value: string | number | boolean | null): string | null {
+  if (value === null || typeof value === "boolean") return null;
+  const text = String(value).trim();
+  if (text === "") return null;
+
+  // 1. An instant. `2026-09-22` is a date and might be a release date;
+  //    `2026-09-22T18:04:09Z` is a clock reading, and the only clock running
+  //    while a page is being scraped is the one that served it.
+  if (INSTANT.test(text)) return `${JSON.stringify(text)} is an instant to the minute or finer — when the response was made, not when anything about the record was`;
+  if (/^\d+$/.test(text)) {
+    const epoch = text.length === 13 ? Number(text) : text.length === 10 ? Number(text) * 1000 : NaN;
+    if (Number.isFinite(epoch) && epoch >= Date.UTC(2001, 0, 1) && epoch <= Date.UTC(2100, 0, 1)) {
+      return `${text} reads as epoch ${text.length === 13 ? "milliseconds" : "seconds"} — the instant the response was made`;
+    }
+    // Any other run of digits is left alone: a sku is a long digit run and so
+    // is an internal id, and nothing about the digits tells them apart.
+    return null;
+  }
+
+  // 2. An opaque token. Four conditions, all structural, all reported.
+  if (/\s/.test(text)) return null; // whitespace means it was typed for a person
+  if (text.length < 12) return null; // short enough to be a code someone quotes over the phone
+  const letters = (text.match(/\p{L}/gu) ?? []).length;
+  const digits = (text.match(/\d/gu) ?? []).length;
+  if (letters === 0 || digits === 0) return null; // one alphabet only is a word or a number, not a token
+  if (digits / (letters + digits) < 0.3) return null; // mostly letters: a slug, and a slug names the record
+  const run = longestLetterRun(text);
+  if (run > 4) return null; // something in here can be read aloud
+  const bits = entropyPerChar(text);
+  if (bits < 3) return null;
+  return `${JSON.stringify(text)} is ${text.length} characters with no word longer than ${run} letter(s) in it, ${Math.round((100 * digits) / (letters + digits))}% digits and ${bits.toFixed(1)} bits of entropy per character — the shape of a token, a hash or a session`;
+}
+
+/**
+ * Key names that *suggest* machinery. This list decides nothing.
+ *
+ * `src/reconcile/schema.ts` declines to blacklist key names, and it is right:
+ * "guessing which key names are noise is a word list nobody can check". So the
+ * list below can never make this rule fire and can never make it abstain. It
+ * is only ever appended to a `because` that two pieces of evidence have already
+ * earned, so a reader of the manuscript can see that the path agreed — or, more
+ * usefully, see a rejection where the path said nothing at all.
+ */
+const MACHINERY_WORDS = ["session", "token", "csrf", "nonce", "trace", "span", "correlation", "request", "build", "revision", "etag", "hash", "checksum", "telemetry", "analytics", "timestamp", "epoch", "uuid", "guid"];
+
+function namesMachinery(path: string): string | undefined {
+  return keyTokens(path).find((token) => MACHINERY_WORDS.includes(token));
+}
+
+const machineValueIsNotAFact = define({
+  id: "machine-value-is-not-a-fact",
+  title: "A value no reader was ever shown, shaped like a token or a clock reading, is the machine's bookkeeping and not a field.",
+  stage: "bind",
+  decides: "Whether a leaf that survived every other filter may be bound, or belongs in the catalogue as machinery.",
+  encounter:
+    "Store B, 2026-09-22: the products/detail payload carried `telemetry.renderedAt` = 1758560000000 among its 170 leaves — the millisecond the response was built, " +
+    "on no page any reader saw. It changes every request, so `no-variation-no-field` has nothing to say about it, and it coerces to a number, so a spec asking for an integer field could bind it.",
+  input: z.object({
+    /** Where the value came from — the payload key path or the declared path. Spelled as `InventoryRecord.path` spells it. */
+    path: z.string().min(1),
+    /** One sample's value per entry. This rule never compares them to each other; that is `no-variation-no-field`'s question. */
+    values: z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])).min(1),
+    /**
+     * Was every sample's value in what that page showed a reader?
+     *
+     * Handed in, never computed: `anchors()` lives in `investigate/leaves.ts`
+     * and `heuristics` is vocabulary — it may not import a stage, and a second
+     * copy of the anchor test here is exactly the defect
+     * `tests/second-spelling.test.ts` exists to fail. `undefined` means nobody
+     * looked, which is a different answer from `false` and is the answer tier 1
+     * gives: it does not anchor, on purpose, because a declared sku is never
+     * rendered anywhere.
+     */
+    anchored: z.boolean().optional(),
+    /** The requested field this was a candidate for, when it was one. */
+    field: z.string().min(1).optional(),
+  }),
+  evaluate: ({ path, values, anchored, field }) => {
+    const subject = field === undefined ? path : `${field} at ${path}`;
+    const hinted = namesMachinery(path);
+    if (anchored === undefined) {
+      return {
+        fires: false,
+        because: `nothing says whether a reader was shown ${subject}${hinted === undefined ? "" : `, and "${hinted}" in the path is a hint rather than evidence`}`,
+      };
+    }
+    if (anchored) {
+      return { fires: false, because: `${subject} is in what every page showed a reader, so whatever else it is, it is not the machine talking to itself` };
+    }
+    const shapes = values.map((value) => readsAsMachinery(value));
+    const abstained = shapes.findIndex((shape) => shape === null);
+    if (abstained !== -1) {
+      return {
+        fires: false,
+        because:
+          `no page showed ${subject} to a reader, but ${JSON.stringify(String(values[abstained] ?? ""))} is not shaped like machinery` +
+          `${hinted === undefined ? "" : `; "${hinted}" in the path is a hint, and this rule does not reject on a key name`}`,
+      };
+    }
+    return {
+      fires: true,
+      because: `no page showed ${subject} to a reader, and on all ${values.length} sample(s) ${shapes[0]}${hinted === undefined ? "" : `; the path names "${hinted}" too`}`,
+      action: "reject this candidate: it is the machine's own bookkeeping — a session, a build, or the instant the request was served — not a fact about the record",
     };
   },
 });
@@ -249,4 +407,4 @@ const keyNamesCarryTheSignal = define({
   },
 });
 
-export const BIND_HEURISTICS: readonly AnyHeuristic[] = [jsonLdNeedsProductNode, noVariationNoField, machineAttributeOverText, struckPriceIsPrevious, urlVariantBeatsMaster, keyNamesCarryTheSignal];
+export const BIND_HEURISTICS: readonly AnyHeuristic[] = [jsonLdNeedsProductNode, noVariationNoField, machineValueIsNotAFact, machineAttributeOverText, struckPriceIsPrevious, urlVariantBeatsMaster, keyNamesCarryTheSignal];

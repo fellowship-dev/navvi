@@ -44,8 +44,8 @@ function fixtures(): Fixture[] {
 }
 
 describe("the heuristic bank (U8b)", () => {
-  it("holds the eleven heuristics of 2026-09-22, each with an encounter", () => {
-    expect(HEURISTICS).toHaveLength(11);
+  it("holds the twelve heuristics of 2026-09-22, each with an encounter", () => {
+    expect(HEURISTICS).toHaveLength(12);
     for (const heuristic of HEURISTICS) {
       expect(heuristic.encounter, `${heuristic.id} has no encounter`).toMatch(/2026-09-22/);
       expect(heuristic.title.length).toBeGreaterThan(10);
@@ -89,7 +89,7 @@ describe.each(fixtures())("$heuristic", (fixture: Fixture) => {
   const view = bank();
 
   // Bank membership and the 2026-09-22 encounter on every rule are proved once,
-  // file-wide, by "holds the eleven heuristics of 2026-09-22" and "has a fixture
+  // file-wide, by "holds the twelve heuristics of 2026-09-22" and "has a fixture
   // for every heuristic" above; asserting them again per fixture only re-read the
   // fixture this block had already loaded.
 

@@ -1,0 +1,151 @@
+{
+  "heuristic": "machine-value-is-not-a-fact",
+  "encounter": "Store B, 2026-09-22. The products/detail payload carried telemetry.renderedAt = 1758560000000 among its 170 leaves: the millisecond the response was built, on no page any reader saw. It changes every request, so no-variation-no-field has nothing to say about it, and it coerces to a number, so a spec asking for an integer field could bind it.",
+  "cases": [
+    {
+      "name": "the millisecond the response was built, which no page ever showed",
+      "observation": {
+        "path": "productData.telemetry.renderedAt",
+        "values": [1758560000000, 1758560062000, 1758560119000],
+        "anchored": false
+      },
+      "expect": {
+        "fires": true,
+        "becauseIncludes": "epoch milliseconds",
+        "actionIncludes": "not a fact about the record"
+      }
+    },
+    {
+      "name": "and the path agreeing is said out loud, after the evidence rather than instead of it",
+      "observation": {
+        "path": "productData.telemetry.renderedAt",
+        "values": [1758560000000, 1758560062000],
+        "anchored": false
+      },
+      "expect": {
+        "fires": true,
+        "becauseIncludes": "the path names \"telemetry\" too"
+      }
+    },
+    {
+      "name": "a session token: long, mixed, unpronounceable, and on no page",
+      "observation": {
+        "path": "productData.session.id",
+        "values": ["sess-9f8a4c2e1b7d6a3f", "sess-4b1e7d9c2a6f8e3b"],
+        "anchored": false
+      },
+      "expect": {
+        "fires": true,
+        "becauseIncludes": "the shape of a token, a hash or a session"
+      }
+    },
+    {
+      "name": "an instant to the second is a clock reading, not a date",
+      "observation": {
+        "path": "productData.pricedAt",
+        "values": ["2026-09-22T18:04:09Z", "2026-09-22T18:05:41Z"],
+        "anchored": false
+      },
+      "expect": {
+        "fires": true,
+        "becauseIncludes": "an instant to the minute or finer"
+      }
+    },
+    {
+      "name": "but a release date is a fact about the record and is left alone",
+      "observation": {
+        "path": "productData.releasedAt",
+        "values": ["2026-09-22", "2026-08-01"],
+        "anchored": false
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "is not shaped like machinery"
+      }
+    },
+    {
+      "name": "a sku is a long run of digits and so is an internal id; nothing about the digits tells them apart",
+      "observation": {
+        "path": "sku",
+        "values": ["8820237", "8820238"],
+        "anchored": false
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "\"8820237\" is not shaped like machinery"
+      }
+    },
+    {
+      "name": "a slug is mostly letters, so the digit share leaves it alone",
+      "observation": {
+        "path": "productData.slug",
+        "values": ["gel-frio-100g", "gel-frio-250g"],
+        "anchored": false
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "is not shaped like machinery"
+      }
+    },
+    {
+      "name": "and a slug that passes the digit share has a word in it a person can read",
+      "observation": {
+        "path": "productData.slug",
+        "values": ["jarabe-120ml-x2", "jarabe-240ml-x2"],
+        "anchored": false
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "\"jarabe-120ml-x2\" is not shaped like machinery"
+      }
+    },
+    {
+      "name": "telemetry.sessionId is named as machinery by its key and rejected by nothing: the value is six characters",
+      "observation": {
+        "path": "productData.telemetry.sessionId",
+        "values": ["a1b2c3", "d4e5f6"],
+        "anchored": false
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "this rule does not reject on a key name"
+      }
+    },
+    {
+      "name": "a token the page actually printed is the record's, whatever its shape",
+      "observation": {
+        "path": "productData.batchCode",
+        "values": ["lote-4f9a2c8e1b7d", "lote-7c3e9a1f5b2d"],
+        "anchored": true
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "not the machine talking to itself"
+      }
+    },
+    {
+      "name": "nobody looked, so the rule has nothing to say — which is the answer tier 1 gets, because tier 1 does not anchor",
+      "observation": {
+        "path": "productData.telemetry.renderedAt",
+        "values": [1758560000000, 1758560062000]
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "nothing says whether a reader was shown"
+      }
+    },
+    {
+      "name": "and the field it was a candidate for is named when there was one",
+      "observation": {
+        "field": "listPrice",
+        "path": "productData.telemetry.renderedAt",
+        "values": [1758560000000, 1758560062000],
+        "anchored": false
+      },
+      "expect": {
+        "fires": true,
+        "becauseIncludes": "listPrice at productData.telemetry.renderedAt"
+      }
+    }
+  ]
+}
