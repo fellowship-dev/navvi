@@ -12,7 +12,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/fellowship-dev/navvi" alt="MIT license" /></a>
 </p>
 
-<p align="center"><a href="#see-it-work">Demo</a> · <a href="#install-and-run">Install</a> · <a href="#choosers">Choose a model</a> · <a href="#development-and-tests">Contribute</a></p>
+<p align="center"><a href="#see-it-work">Demo</a> · <a href="#install-and-run">Install</a> · <a href="#navvi-make-the-driver"><code>navvi make</code></a> · <a href="#choosers">Choose a model</a> · <a href="#development-and-tests">Contribute</a></p>
 
 Navvi uses a model to choose among controls and fields found by code, then saves
 a scraper with selectors, fingerprints and a navigation trace. Healthy repeat
@@ -23,6 +23,13 @@ still require a person or recompilation.
 Jev supplies fast typed decisions. Navvi adds persistence, structured extraction,
 replay and repair around those decisions. Jev also uses a text-capable fallback
 for prompt interpretation and values to type; those calls are included in usage.
+
+`navvi "<prompt>" <url...>` compiles and runs in one step; [`navvi
+make`](#navvi-make-the-driver) is the same pipeline taken apart into eight
+inspectable stages — spec, sample, investigate, reconcile, schema,
+determinism, compile, verify — each writing its own artifact so you can read,
+edit and re-run from any point in it. It is the way to run navvi against a
+site you actually care about getting right.
 
 ## See it work
 
@@ -141,19 +148,19 @@ is, what varies per run, the fields asked for — and, the part that earns it, t
 things the brief did *not* say, as open questions with the brief quoted back.
 
 ```bash
-navvi spec "I need the product info of a dynamic set of products in Store B."
+navvi spec "I need the product info of a rotating set of products on a store site."
 ```
 
 ```
-navvi: spec for Store B (product pages), one row per product
-  inputs: unknown — "a dynamic set of products"
+navvi: spec for a store site (product pages), one row per product
+  inputs: unknown — "a rotating set of products"
   fields requested: none — the brief names no field
-  fields inferred (the brief did not ask for these): product_name, sku, list_price, promo_price, stock
+  fields inferred (the brief did not ask for these): product_name, sku, price, promo_price, stock
   open questions (2 blocking of 3):
     ! [fields-unnamed] Which fields should the scraper return?
         because the brief says "product info", which names no field; client answers
     ! [inputs-shape] In what shape do the inputs arrive: a URL list, a SKU or code list, or search terms?
-        because the brief describes the inputs as "a dynamic set of products", which fits all three
+        because the brief describes the inputs as "a rotating set of products", which fits all three
   not ready to investigate: answer the blocking questions and recompile the spec.
 ```
 
@@ -169,6 +176,100 @@ whether a bad run is drift or a site refusing you. Each carries the encounter
 that produced it and is pinned by a fixture, so a rule that stops firing is a
 failing test. `navvi heuristics <id>` shows one with the observation shape it
 takes; `--json` gives the machine form.
+
+## `navvi make`: the driver
+
+The command above (and `navvi spec`) each do one thing. `navvi make` is the
+whole pipeline as one command, staged so you can inspect and re-run any part
+of it: **spec → sample → investigate → reconcile → schema → determinism →
+compile → verify**, each stage writing its own artifact into a work directory
+you name, plus a block on stderr saying what it read, what it wrote, and
+whether it even ran.
+
+`make` is on `main`, newer than the published `3.0.0`; build from source
+(above) to get it — `node dist/bin/cli.js make --help` shows the same block
+this section describes.
+
+```bash
+navvi make "Search Remote OK for Python jobs and extract up to 10 results with job title, company, location and job link. Exclude ads." \
+  https://remoteok.com/ --browser chromium --work work/remoteok
+```
+
+A brief that names no field and no input shape stops at the first stage with
+open questions and exit 3 — same as `navvi spec` above, because `spec` is the
+first stage. Answer and continue with `--answer`:
+
+```bash
+navvi make --work work/remoteok \
+  --answer fields=title,company,location,link \
+  --answer inputs=url_list
+```
+
+`--work` is the one required flag and the one new idea: a directory, not a
+file. Re-run the same command against it and only stages whose inputs moved
+run again — the rest print `reused` and point at the artifact already on
+disk. Everything else `make` needs is either on the command line the way
+`navvi` already takes it (`<url...>`, `--from-url`, `--rubric`, `--decider`,
+`--writer`, `--browser`, `--headed`, `--storage`) or new to `make` itself:
+
+| flag | what it does |
+| --- | --- |
+| `--work <dir>` | Where the artifacts and the ledger live. Required. |
+| `--answer <key=value>` | Answer an open question, by its id or by what it's about (`fields`, `inputs`, `target`, `entity`, `constraints.<name>`). Repeatable. |
+| `--sample <n>` | How many URLs the compile sample spans. |
+| `--replays <n>` | How many times the determinism stage reads each sampled URL (default 3, over up to 6 URLs). |
+| `--offline` | Run only the stages that open nothing; the rest report why they were skipped. |
+| `--force` | Re-run every stage, and overwrite an artifact edited by hand since navvi wrote it. |
+
+`--work` and `--storage` are different directories for different things:
+`--work` holds the pipeline's own artifacts, `--storage` (default
+`./storage`) holds browser profiles and parked questions, same as the plain
+`navvi` command.
+
+### What lands in `--work`
+
+| stage | artifact(s) |
+| --- | --- |
+| spec | `spec.json` |
+| sample | `sample.json` |
+| investigate | `investigation.json` |
+| reconcile | `reconcile.json`, `reconcile.md` |
+| schema | `schema.json` |
+| determinism | `determinism.json` |
+| compile | `scraper.json`, `rationale.md`, `machine.mmd` |
+| verify | `scorecard.md` |
+
+Plus `make.json`, the ledger: a SHA-256 over the exact bytes each stage read,
+not the file's mtime — a `git checkout`, a `cp -r` or an editor that writes
+through a temp file all move mtime without changing a byte. So editing an
+artifact by hand and re-running is the supported way to correct a run: `make`
+notices which bytes changed and recompiles only what actually reads them,
+nothing upstream and nothing unaffected downstream. Re-running over an
+edited artifact without `--force` stops and names the file instead of
+overwriting your edit.
+
+### Reading a result that isn't 100%
+
+`verify`'s stage line reads `<N> of <M> compiled`, and `reconcile.md` names
+which requested fields it could and couldn't get, and why. Fewer than
+requested is an expected outcome, not a broken run: a field can fail to
+survive the determinism stage (it moved between reads of an unchanged page,
+so it's dropped rather than shipped as a guess) or simply never turn up in
+what the page declares, fetches, or renders. On the one real site `make` has
+been run against end to end so far, it binds 3 of 5 requested fields; the
+other two are named, with the stage that couldn't reach them, in its own
+`reconcile.md` and `scorecard.md` — that transparency is the point of staging
+the pipeline in the first place. `make` does not yet handle every input
+shape either: a spec whose `inputs.shape` is anything but `url_list` — a SKU
+list, search terms — stops at the sample stage with a configuration error
+rather than guessing at pages to read.
+
+Two things worth knowing before you rely on `make` unattended: it has no
+grade yet (`scorecard.md`'s numbers are the measurements a score would come
+from — tier mix, fill rate, model calls at replay — the 100-point scorecard
+itself is undecided), and its output shape (Markdown plus JSON artifacts in
+a directory) is not the same as the plain `navvi` command's data-file output
+above — the two are not drop-in replacements for each other yet.
 
 ## Choosers
 
@@ -363,6 +464,11 @@ paragraph is updated with the observed numbers.
 | 2 | configuration or validation error | Bad flags, missing key (the message names `AI_GATEWAY_API_KEY` / `TYPESAFE_API_KEY` / `ANTHROPIC_API_KEY` and reminds you `--chooser agent` needs none), a CLI chooser that is not signed in (`claude`, `codex login`), a private host without `--allow-private-host` |
 | 3 | `needs_human` | Questions parked in `storage/questions/<token>.json`; answer and `--resume` |
 | 4 | `budget_exhausted`, `model_unavailable`, `charge_limit` | Retry later, raise the cap, or switch chooser |
+
+`navvi make` uses the same numbers under its own names: `delivered` is 0,
+`short` (a stage stopped, e.g. nothing obtainable) is 1, a bad flag or an
+edited artifact `make` refuses to overwrite is 2, `needs_answers` (open
+questions at the spec stage) is 3.
 
 ## Limits
 

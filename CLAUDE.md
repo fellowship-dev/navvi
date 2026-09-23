@@ -4,7 +4,12 @@ Self-healing scraper compiler. The current plan lives in
 `fellowship-dev/claude-buddy` under
 `specs/plans/2026-09-22-007-navvi-prompt-to-scraper.md` — brief to spec to
 investigation to scraper, with the original compiler plan
-(`specs/plans/2026-09-19-001-feat-jev-compiled-scraper-actor-plan.md`) behind it.
+(`specs/plans/2026-09-19-001-feat-jev-compiled-scraper-actor-plan.md`) behind
+it, and `specs/plans/2026-09-22-008-navvi-remaining-phases.md` after it — the
+driver (`navvi make`, `src/make/`), sample, determinism, and the live run
+that found three seam defects no unit test could see. That plan's two
+transcripts under "The flow" are `tests/make.test.ts`'s specification,
+*exactly as written*.
 
 ## Verify
 

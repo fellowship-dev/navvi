@@ -40,6 +40,22 @@ npx navvi heuristics [<id>] [--json]
 
 `heuristics` lists the rules that decide **what a model is even asked**: which tier to spend, which candidates to reject before a question is written, whether a bad run is drift or a site refusing you. Each names the encounter that produced it. Use it to understand why a compile went the way it did, or before adding a rule of your own.
 
+## The Driver: `navvi make`
+
+The one command above compiles and runs in a single step. `navvi make` is the same pipeline taken apart into eight stages you can inspect and re-run individually — `spec, sample, investigate, reconcile, schema, determinism, compile, verify` — each writing its own artifact into a work directory (`--work`, required) plus a block to stderr saying what it read, what it wrote, and whether it even ran. Use it over the one command when you (or a client) need to read, edit, or approve an intermediate artifact rather than trust a single JSON-out/JSON-in step.
+
+```bash
+npx navvi make "<brief>" <url...> --work work/<case> [--answer key=value] [--sample n] [--replays n] [--offline] [--force]
+```
+
+A brief that leaves a field or the input shape unnamed stops at the `spec` stage with open questions and exit 3 — resume with `--answer key=value` (repeatable; keys are `fields`, `inputs`, `target`, `entity`, `constraints.<name>`), the same idea as `--resume`/`--answers` below but for the spec's own open questions rather than a parked chooser batch. Give no brief on a later run to resume from the `spec.json` already in `--work`.
+
+`--work` holds the pipeline's artifacts and its ledger (`make.json`); `--storage` (default `./storage`) still holds browser profiles and parked questions, unchanged. The ledger is a SHA-256 over the bytes each stage actually read, not mtime, so hand-editing an artifact and re-running recompiles only what depends on it — the point of staging the pipeline at all. Re-running over an artifact edited since navvi wrote it refuses and asks for `--force` rather than silently overwriting the edit.
+
+`make` can sample only a `url_list` input shape today; a spec whose inputs are a SKU list or search terms stops at the `sample` stage with a configuration error. It also has no grade yet: `scorecard.md` reports the measurements a score would be computed from (tier mix, fill rate, model calls at replay) and no letter grade, because the weighting is undecided. Binding fewer fields than requested is an expected result, not a failure — `reconcile.md` and `scorecard.md` name which fields and why (dropped by the determinism stage for moving on an unchanged page, or never found in what the page declares, fetches or renders).
+
+Exit codes are the same table as below, under `make`'s own names: `delivered` is 0, `short` (a stage stopped short, e.g. nothing was obtainable) is 1, a bad flag or a refused overwrite is 2, `needs_answers` (open questions at `spec`) is 3.
+
 ## Who Answers the Questions
 
 Navvi never asks a model for a selector or code; it asks it to pick among options it enumerated from the page. A run configures **two sources, chosen independently**:

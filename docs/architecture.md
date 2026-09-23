@@ -130,6 +130,7 @@ graph TD
   prestep --> scraper
   prestep --> template
   prestep --> util
+  reconcile --> heuristics
   reconcile --> input
   reconcile --> investigate
   reconcile --> scraper
