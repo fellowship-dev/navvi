@@ -1,3 +1,4 @@
+import { UNASKED, agree, answered } from "../agree/agree.js";
 import type { LeafCandidate } from "../browser/snapshot.js";
 import type { FieldType } from "../input/schema.js";
 import { OPTION_VALUE_SEPARATOR, type Answer, type JsonValue, type Question, type QuestionContext } from "../chooser/chooser.js";
@@ -78,12 +79,29 @@ export async function intersectCandidates(samples: ReadonlyArray<readonly LeafCa
 
   const out: FieldCandidate[] = [];
   entries.forEach(([key, e], index) => {
-    const values: string[] = [];
-    for (const sample of perSample) {
-      const value = sample[index];
-      if (value === null || value === undefined || value === "") return;
-      values.push(value);
-    }
+    /**
+     * R30, asked through the rule's one owner (`agree` in `agree/agree.ts`)
+     * rather than spelled a fourth time. This call site's policy is the
+     * strictest of the four and stays that way: a selector that does not
+     * resolve on some sample is not a candidate, full stop.
+     *
+     * A selector that resolved to null or "" is `unasked` and not
+     * `unservable`, which is the only honest reading available here: the
+     * resolver ran against every sample and reported back, so it has told us
+     * "nothing there", never "I could not look". The day it can distinguish a
+     * sample it failed to reach from a sample with no such node, that sample
+     * becomes `unservable` and this call site gets the tier 2 question rather
+     * than inheriting the answer by accident.
+     */
+    const agreement = agree(
+      perSample.map((sample) => {
+        const value = sample[index];
+        return value === null || value === undefined || value === "" ? UNASKED : answered(value);
+      }),
+      { requireAskedByAll: true, subject: "this selector" },
+    );
+    if (agreement === null) return;
+    const values = agreement.values;
     if (values.length !== resolver.count) return;
     out.push({ key, path: e.path, selector: e.selector, attr: e.attr, values, shape: commonShape(values, e.attr) });
   });

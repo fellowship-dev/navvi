@@ -1,3 +1,4 @@
+import { UNASKED, agree, answered, type Observation } from "../agree/agree.js";
 import { coerceValue, type TypedValue } from "../scraper/extract.js";
 import type { FieldType } from "../input/schema.js";
 import { normalize } from "../util/text.js";
@@ -158,23 +159,40 @@ export interface Candidate {
  */
 export function narrow(samples: readonly Leaf[][], options: NarrowOptions = {}): Candidate[] {
   if (samples.length === 0) return [];
-  const byPath = new Map<string, TypedValue[]>();
+  const byPath = new Map<string, Observation<TypedValue>[]>();
   for (const [index, leaves] of samples.entries()) {
     for (const leaf of leaves) {
-      let values = byPath.get(leaf.path);
-      if (!values) byPath.set(leaf.path, (values = Array(samples.length).fill(undefined) as TypedValue[]));
-      values[index] = leaf.value;
+      let observations = byPath.get(leaf.path);
+      if (!observations) byPath.set(leaf.path, (observations = Array.from({ length: samples.length }, (): Observation<TypedValue> => UNASKED)));
+      observations[index] = answered(leaf.value);
     }
   }
 
   const candidates: Candidate[] = [];
-  for (const [path, values] of byPath) {
-    // Present on every sample: a path that appears on one page is not a binding.
-    if (values.some((value) => value === undefined)) continue;
+  for (const [path, observations] of byPath) {
+    /**
+     * Present on every sample: a path that appears on one page is not a
+     * binding. `agree` owns that rule for the whole repository (`agree/agree
+     * .ts`), and this call states the policy this call site wants rather than
+     * spelling it again.
+     *
+     * A sample missing the path is `unasked` and not `unservable`, which is
+     * the honest reading of what this function is handed: `flatten` already
+     * ran over a payload the sample *did* produce, so "no leaf at this path"
+     * is that sample having no such fact, not that sample failing to answer.
+     * There is no `unservable` here, and `requireAskedByAll` therefore decides
+     * everything — one sample without the path and the path is gone, exactly
+     * as before 2026-09-23.
+     */
+    const agreement = agree(observations, { requireAskedByAll: true, subject: "this path" });
+    if (agreement === null) continue;
+    const values = agreement.values;
     if (!values.every((value) => typeMatches(value, options.type))) continue;
     if (options.pageText) {
       const texts = options.pageText;
-      if (!values.every((value, index) => anchors(value, texts[index] ?? ""))) continue;
+      // Indexed through `contributors`: today that is 0,1,2… because nothing
+      // is ever dropped here, and it stays like-with-like the day something is.
+      if (!values.every((value, position) => anchors(value, texts[agreement.contributors[position]!] ?? ""))) continue;
     }
     if (options.requireVariation !== false && samples.length > 1) {
       const distinct = new Set(values.map((value) => normalize(String(value ?? ""))));
