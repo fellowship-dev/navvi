@@ -428,3 +428,72 @@ export function chooseSample(probes: readonly UrlProbe[], options: ChooseOptions
 
   return { picks, unfilled, excluded, considered: unique.size, because };
 }
+
+// ----------------------------------------------------------------- binding
+
+/**
+ * Whether a pick may be compared against the other picks.
+ *
+ * `bind: false` never means "drop this URL". It is fetched, it is rendered, it
+ * is recorded as a source and it may still be the page tier 2 binds from. What
+ * it is kept out of is the *comparison* — the "present on every sample"
+ * intersection that tier 1's `bindRole` and `bind.ts`'s `narrow` both are.
+ */
+export interface Bindable {
+  bind: boolean;
+  /** Why, in the words the manuscript prints. */
+  because: string;
+}
+
+/**
+ * The shell set as it stands before a single byte has been fetched: empty, and
+ * honestly so. See `bindable` for why this is a parameter at all.
+ */
+export const NO_SHELLS_YET: ReadonlySet<string> = new Set<string>();
+
+/**
+ * One answer to "does this pick belong in a comparison set", asked once.
+ *
+ * Before 2026-09-23 the question was asked three times in `investigate.ts` with
+ * three different filters: dead-only when recording `bound`, **no filter at
+ * all** when building tier 1's declared samples, and shells-only when picking
+ * the canary — the same set, the same function, twenty lines apart, two of them
+ * disagreeing. The middle one was the defect: one JS shell among N real pages
+ * contributes an empty declaration list, `bindRole` opens with "every sample
+ * must declare this role", and tier 1 therefore bound *nothing* on a site the
+ * cascade had just deliberately decided was worth the cheapest request. It is
+ * the fourth instance of one cause — a rule correct in its own encounter,
+ * contradicting another rule at a seam — and the first with a test.
+ *
+ * Two exclusions, and they are known at different moments, which is why one is
+ * read off the pick and the other is handed in:
+ *
+ *  - **dead** is a fact about the probe. `classify` owns it and this function
+ *    does not get a second opinion. A dead pick belongs in the sample — 73% of
+ *    client's StoreA URLs 302 away, and reproducing a blank is what parity
+ *    means — but it declares nothing, and a sample that declares nothing does
+ *    not merely fail to contribute: it deletes every candidate for every field.
+ *  - **shell** cannot be known until the plain fetch has happened, because it
+ *    is a property of the bytes that came back, not of the probe.
+ *    `shell-skips-tier-1` is the detector and `investigate.ts` runs it. So the
+ *    caller hands in what it knows so far, and `NO_SHELLS_YET` is what that is
+ *    before the fetch. The asymmetry is real; hiding it behind a field on the
+ *    pick would only mean storing an answer nobody had yet.
+ */
+export function bindable(pick: SamplePick, shells: ReadonlySet<string> = NO_SHELLS_YET): Bindable {
+  const reading = classify(pick.probe);
+  if (reading.strata.includes("dead")) {
+    return {
+      bind: false,
+      because: `dead (${reading.note}): in the sample because reproducing a blank is parity, out of every comparison because a page that declares nothing deletes every candidate for every field`,
+    };
+  }
+  if (shells.has(pick.url)) {
+    return {
+      bind: false,
+      because:
+        "a JS shell: the content arrives later, so there is nothing here for the other samples to agree with — it is still fetched, still rendered, and still where tier 2 binds from",
+    };
+  }
+  return { bind: true, because: `${reading.note}: a page that was served, so what it declares can be compared with what the others declare` };
+}

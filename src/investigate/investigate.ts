@@ -9,7 +9,7 @@ import { safeUrl, type CapturedResponse } from "./har.js";
 import { flatten, type Leaf } from "./leaves.js";
 import type { FieldRecord, Manuscript, Obstacle, RejectionRecord, RequestedField, SamplePickRecord, SourceRecord, TierRecord, VerdictLog } from "./manuscript.js";
 import { KIND_PRECEDENCE, acceptedRoles, resolutionOrder, roleOfDeclared, type DeclaredRole } from "./roles.js";
-import { classify, type SampleChoice } from "./sample.js";
+import { NO_SHELLS_YET, bindable, type SampleChoice } from "./sample.js";
 
 /**
  * U2c: the cascade. The five modules beside this one, in the order that makes
@@ -220,15 +220,17 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
    * A `dead` pick belongs in the sample — reproducing a blank is parity, and on
    * StoreA 73% of the catalogue redirects — but it declares no product and
    * carries no payload, so including it in the binding set deletes every
-   * candidate for every field ("present on every sample"). `classify` decides
-   * which is which, so this module does not get a second opinion about what
-   * dead means.
+   * candidate for every field ("present on every sample"). `bindable` decides
+   * which is which, so this module does not get a second opinion — and it is
+   * the same function asked again below, once the fetch has said which pages
+   * came back a shell. `NO_SHELLS_YET` is what is known at this line: nothing
+   * has been fetched, so no page can be a shell yet.
    */
   const picks: SamplePickRecord[] = options.sample.picks.map((pick) => ({
     url: pick.url,
     stratum: pick.stratum,
     because: pick.because,
-    bound: !classify(pick.probe).strata.includes("dead"),
+    bound: bindable(pick, NO_SHELLS_YET).bind,
   }));
   const bindingUrls = picks.filter((pick) => pick.bound).map((pick) => pick.url);
 
@@ -288,6 +290,18 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
     if (source) source.because = verdict.because;
   }
   const allShells = fetched.length > 0 && shells === fetched.length;
+
+  /**
+   * The same question as `bound` above, asked again now that the fetch has
+   * answered the half of it the probe could not.
+   *
+   * Everything below that compares one sample against another — tier 1's
+   * `bindRole`, the `takeByKeyNames` fallback, the canary — reads this and
+   * nothing else. Three filters that disagreed is what made this the fourth
+   * instance of one cause; one map, computed once, is the fix.
+   */
+  const comparability = new Map(options.sample.picks.map((pick) => [pick.url, bindable(pick, shellUrls)] as const));
+  const comparable = (url: string): boolean => comparability.get(url)?.bind === true;
 
   /**
    * The render, taken once and shared.
@@ -410,8 +424,18 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
   }
 
   const declaredSamples: DeclaredSample[] = [];
+  /** Fetched, recorded, but left out of the comparison — and the manuscript says which and why. */
+  const uncomparable: PageResponse[] = [];
   if (!allShells) {
     for (const [index, page] of fetched.entries()) {
+      if (!comparable(page.url)) {
+        // A shell among real pages. It declares nothing, and "present on every
+        // sample" would read that as "no field is present anywhere" — which is
+        // exactly what it did before 2026-09-23. Its `SourceRecord` keeps the
+        // shell verdict written above it, so the run still says it was read.
+        uncomparable.push(page);
+        continue;
+      }
       const reading = readDeclared(page.body ?? "", { view });
       tier1Verdicts.push(...reading.verdicts);
       declaredSamples.push({ url: page.url, sources: reading.sources });
@@ -453,7 +477,10 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
     outcome: allShells ? "skipped" : "ran",
     because: allShells
       ? `shell-skips-tier-1 fired on ${shells} of ${fetched.length} plain fetches: the content arrives later, so the cheapest request cannot answer here`
-      : `${declaredSamples.reduce((total, sample) => total + sample.sources.length, 0)} declared finding(s) over ${declaredSamples.length} plain fetch(es)`,
+      : `${declaredSamples.reduce((total, sample) => total + sample.sources.length, 0)} declared finding(s) over ${declaredSamples.length} plain fetch(es)` +
+        (uncomparable.length === 0
+          ? ""
+          : `; ${uncomparable.length} of ${fetched.length} fetch(es) left out of the comparison — ${comparability.get(uncomparable[0]!.url)?.because ?? "nothing there to compare"}`),
     asked: fields.map((field) => field.name),
     covered: covered1,
     sources: fetchSources,
@@ -679,7 +706,10 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
 
   // ----------------------------------------------------------------- canary
 
-  const canary = pickCanary([...rendered, ...fetched.filter((page) => !shellUrls.has(page.url))], now);
+  // A render is always a page that was served; a plain fetch is one only when
+  // `bindable` says so — the same answer tier 1 compared against, not a second
+  // filter that happens to agree today.
+  const canary = pickCanary([...rendered, ...fetched.filter((page) => comparable(page.url))], now);
 
   return manuscriptOf({
     site,

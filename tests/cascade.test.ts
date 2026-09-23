@@ -207,6 +207,86 @@ describe("StoreA — the run stops at tier 1", () => {
   });
 });
 
+// ------------------ shape 1a: a mixed sample — two real pages and one shell
+
+/**
+ * The fourth instance of one cause (2026-09-23), and the first with a test.
+ *
+ * `investigate` decides once, deliberately, that a site serving a real page
+ * *sometimes* is still worth the cheapest request: tier 1 is skipped only when
+ * `shell-skips-tier-1` fires on **every** binding URL. Having decided that, it
+ * then built the tier 1 comparison set from every fetch with no shell filter at
+ * all — while `pickCanary`, twenty lines further down the same function,
+ * filtered the same list by the same shell set.
+ *
+ * A shell declares nothing, so it contributes an empty `sources` list, and
+ * `bindRole` opens with "every sample must declare this role". One shell among
+ * N real pages therefore returned `undefined` for every role of every field,
+ * and the fallback `bindField` -> `narrow` deleted the rest for the same
+ * reason. Tier 1 bound nothing on a site the code had just decided was worth
+ * trying — the `bindingUrls` defect one layer down, and the tier 2 "answered by
+ * every sample" defect one layer up, for the third time.
+ *
+ * It was never observed because no test had a mixed sample. This is that test.
+ */
+describe("a mixed sample — one shell must not delete tier 1 for the pages that declared", () => {
+  const REAL = ["https://example.test/p/complejo-b", "https://example.test/p/vitamina-c"];
+  const SHELL = "https://example.test/p/render-later";
+  const probes: UrlProbe[] = [
+    live(REAL[0]!, { priceCount: 2, inStock: true }),
+    live(REAL[1]!, { priceCount: 2, inStock: false }),
+    // A shell is not dead, and `classify` is the only module that says so: it
+    // takes `isShell === false` for the no-Product rule to fire. So this URL is
+    // in the sample *and* in the binding set, which is the whole premise.
+    { url: SHELL, status: 200, hasDeclaredProduct: false, isShell: true, priceCount: 1, inStock: true },
+  ];
+  const sample = chooseSample(probes, { size: 3 });
+  const pages = {
+    [REAL[0]!]: page("storea-product"),
+    [REAL[1]!]: page("storea-product-2"),
+    [SHELL]: page("storeb-shell"),
+  };
+
+  async function run(): Promise<{ manuscript: Manuscript; sources: ReturnType<typeof sourcesOf> }> {
+    const sources = sourcesOf(pages, {});
+    return { manuscript: await investigate({ site: "mixed.test", fields: FIELDS, sample, sources, now: NOW }), sources };
+  }
+
+  it("fetches all three, because one real page is enough to be worth the cheapest request", async () => {
+    const { manuscript, sources } = await run();
+    expect(sources.fetched.sort()).toEqual([...REAL, SHELL].sort());
+    expect(manuscript.sample.picks).toHaveLength(3);
+    expect(manuscript.sample.picks.every((pick) => pick.bound)).toBe(true);
+    // Tier 1 is skipped only when the shell rule fires on *all* of them.
+    expect(tier(manuscript, 1).outcome).toBe("ran");
+  });
+
+  it("still binds every field the two real pages agree on", async () => {
+    const { manuscript } = await run();
+    expect(tier(manuscript, 1).covered.sort()).toEqual(["listPrice", "productName", "promoPrice", "sku", "stock"]);
+    expect(field(manuscript, "productName").path).toBe("name");
+    expect(field(manuscript, "productName").tier).toBe(1);
+    expect(field(manuscript, "sku").path).toBe("sku");
+    expect(field(manuscript, "listPrice").path).toBe("product:price:amount");
+    expect(field(manuscript, "promoPrice").path).toBe("product:sale_price:amount");
+    expect(field(manuscript, "stock").path).toBe("offers.availability");
+    expect(manuscript.uncovered).toEqual([]);
+    expect(manuscript.verdict).toBe("covered");
+  });
+
+  it("reads the two pages that declared, and says the shell was left out of the comparison", async () => {
+    const { manuscript } = await run();
+    // The shell is still fetched, still recorded, still an obstacle — it is
+    // only the *binding comparison* it is kept out of.
+    expect(manuscript.obstacles.some((obstacle) => obstacle.kind === "shell" && obstacle.url === SHELL && !obstacle.blocking)).toBe(true);
+    expect(tier(manuscript, 1).sources).toHaveLength(3);
+    expect(tier(manuscript, 1).because).toContain("2 plain fetch");
+    // And the canary comes off a page a reader was served, as it already did.
+    expect(manuscript.canary?.declaredProduct).toBe(true);
+    expect(manuscript.canary?.url).not.toContain("render-later");
+  });
+});
+
 // -------------------------------------------- shape 2: a shell, then payload
 
 describe("Store B — tier 1 is skipped as a shell and the payload answers", () => {

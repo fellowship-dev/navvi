@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { STRATA, chooseSample, classify, type Stratum, type UrlProbe } from "../src/investigate/sample.js";
+import { STRATA, bindable, chooseSample, classify, type Stratum, type UrlProbe } from "../src/investigate/sample.js";
 
 /**
  * U2d: the compile sample chooser.
@@ -317,6 +317,9 @@ describe("chooseSample — the degenerate catalogues, answered honestly", () => 
     }));
     const choice = chooseSample(probes, { size: 4 });
     expect(choice.picks.length).toBe(4);
-    expect(choice.picks.every((pick) => !classify(pick.probe).strata.includes("dead"))).toBe(true);
+    // `bindable` is where "may this pick be compared against the others" is
+    // written; a test that spells the rule out again is a second copy that
+    // drifts silently, which is what `second-spelling.test.ts` exists to forbid.
+    expect(choice.picks.every((pick) => bindable(pick).bind)).toBe(true);
   });
 });
