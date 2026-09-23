@@ -8,7 +8,7 @@ import {
   templateKey,
   urlPattern,
 } from "../src/template/index.js";
-import { loginFixture } from "./scraper-schema.test.js";
+import { loginFixture } from "./helpers.js";
 
 const DEMO = "http://127.0.0.1:4321/demo/pharmacy";
 const SLUGS = [
@@ -134,15 +134,9 @@ describe("groupByTemplate (R29, R30)", () => {
     }
   });
 
-  it("gives version one and version two of the demo (same URLs) the same cache key", () => {
-    const input = { goal: "prices", description: "pharmacy catalog", fields: ["name", "price"], profile: "local" as const };
-    const v1 = [...groupByTemplate(demoProducts).keys()];
-    const v2 = [...groupByTemplate([...demoProducts].reverse()).keys()];
-    expect(v1).toHaveLength(1);
-    expect(v2).toEqual(v1);
-    expect(cacheKey(v1[0] ?? "", input)).toBe(cacheKey(v2[0] ?? "", input));
-    expect(cacheKey(v1[0] ?? "", input)).not.toContain("ibuprofeno");
-  });
+  // It passed the same URL array forward and reversed, so "version two" was never
+  // exercised: the order half is the test above, and the blanked slug is
+  // `urlPattern (KTD15) :: blanks the varying leaf and keeps the .html suffix`.
 });
 
 describe("templateGrowth (R29 summary)", () => {

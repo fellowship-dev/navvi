@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as schema from "../src/scraper/schema.js";
 import { appendFieldAlternative, appendStepAlternative, markHealed, validateScraper } from "../src/scraper/schema.js";
-import { loginFixture } from "./scraper-schema.test.js";
+import { loginFixture } from "./helpers.js";
 
 describe("merge rules (R31, R32)", () => {
   it("appends a field alternative at the end, keeping existing order and the input untouched", () => {

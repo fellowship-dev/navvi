@@ -45,11 +45,10 @@ describe("browser pool options", () => {
     expect(storeProfile.browserPoolOptions.useFingerprints).toBe(false);
   });
 
-  it("keeps the fingerprint choice each browser needs", async () => {
-    const chromium = await buildCrawleeLaunchContext({ browser: "chromium", headed: false });
-    expect(chromium.browserPoolOptions.useFingerprints).toBe(true);
-    expect(chromium.userDataDir).toBeUndefined();
-  });
+  // chromium's useFingerprints is asserted by `crawler.test.ts :: camoufox sets
+  // useFingerprints false with the firefox launcher; chromium sets it true`, and
+  // its absent userDataDir by `relaunch.test.ts :: gives a store run no
+  // userDataDir, so a relaunch has no lock to lose`.
 });
 
 /**

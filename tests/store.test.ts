@@ -6,7 +6,7 @@ import { MemoryStorage } from "crawlee";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { ScraperStore } from "../src/scraper/store.js";
 import type { CompiledScraper } from "../src/scraper/schema.js";
-import { loginFixture } from "./scraper-schema.test.js";
+import { loginFixture } from "./helpers.js";
 import { storageAdditions } from "./storage-guard.js";
 
 let dir: string;

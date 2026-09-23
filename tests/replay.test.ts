@@ -12,7 +12,6 @@ import { parseInput, type RunInput } from "../src/input/schema.js";
 import { urlPatternFor } from "../src/navigate/trace.js";
 import { runCrawl, type CrawlDeps } from "../src/replay/crawler.js";
 import { replayTrace, resolveLocator, type ReplayPolicy } from "../src/replay/entry.js";
-import { MAX_SCROLL_ROUNDS } from "../src/replay/paginate.js";
 import { SCRAPER_VERSION, cacheKey, type CompiledScraper, type TraceStep } from "../src/scraper/schema.js";
 import { ScraperStore } from "../src/scraper/store.js";
 import { Secret } from "../src/secrets/resolve.js";
@@ -104,7 +103,6 @@ async function seedJobs(actor: Actor, urls: string[]): Promise<void> {
 
 describe("pagination (R15)", () => {
   it("AE9: scroll pagination treats each growth of the item container as a page and stops when the feed stops growing", async () => {
-    expect(MAX_SCROLL_ROUNDS).toBe(10);
     const actor = makeActor();
     const urls = [`${server.baseUrl}/fixtures/infinite-scroll.html`];
     const store = await ScraperStore.open({ actor });

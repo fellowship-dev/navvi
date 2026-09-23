@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  DENY_LIST_EN,
-  DENY_LIST_ES,
   allowedControl,
   isAllowedRequestUrl,
   isAllowedUrl,
@@ -59,14 +57,13 @@ describe("allowedControl (R38, KTD14)", () => {
     expect(isSecretCapable({ role: "textbox", name: "Email", tag: "input", inputType: "email" })).toBe(false);
   });
 
-  it("exposes the deny lists", () => {
-    expect(DENY_LIST_EN).toContain("checkout");
-    expect(DENY_LIST_ES).toContain("cerrar sesión");
-  });
+  // The deny lists are not asserted as literals: "Delete account"/"Eliminar cuenta",
+  // "Cerrar sesión" and "Checkout" are each refused by the tests above.
 });
 
 describe("url guard (R26)", () => {
-  it.each(["file:///etc/passwd", "http://169.254.169.254/", "http://localhost:9222/json", "javascript:alert(1)", "http://box.internal/"])(
+  // The last two came from smoke.test.ts, whose copy of this table asserted isAllowedUrl only.
+  it.each(["file:///etc/passwd", "http://169.254.169.254/", "http://localhost:9222/json", "javascript:alert(1)", "http://box.internal/", "http://10.0.0.5/", "http://[::1]/"])(
     "rejects %s",
     (url) => {
       expect(isAllowedUrl(url)).toBe(false);
@@ -74,6 +71,8 @@ describe("url guard (R26)", () => {
     },
   );
   it("passes a public host, and 127.0.0.1 only when allowlisted", () => {
+    expect(isAllowedUrl("https://news.ycombinator.com/")).toBe(true);
+    expect(isAllowedUrl("http://127.0.0.1:4321/fixture", ["127.0.0.1"])).toBe(true);
     expect(isAllowedRequestUrl("https://news.ycombinator.com/", [])).toBe(true);
     expect(isAllowedRequestUrl("http://127.0.0.1:4321/fixture", [])).toBe(false);
     expect(isAllowedRequestUrl("http://127.0.0.1:4321/fixture", ["127.0.0.1"])).toBe(true);

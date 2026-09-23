@@ -32,6 +32,11 @@ const byScenario = (chooser: string, scenario: string): MeasurementRow => {
   return row;
 };
 
+// The per-scenario acceptance criteria are owned by the files that run them for
+// real: AE7's twelve pharmacy rows by `crawler.test.ts :: AE12`, AE8's healing
+// and AE15's renamed login step by `heal.test.ts`. What is unique here is that
+// the harness writes a row per scenario per chooser, skips the keyless ones with
+// a reason, and fills the complex-flow cells.
 describe("offline harness run", () => {
   it("writes one row per scenario for the agent chooser and skips jev and model with a named reason when no key is set", () => {
     const ids = SCENARIOS.map((s) => s.id);
@@ -68,31 +73,6 @@ describe("offline harness run", () => {
     expect(byScenario("agent", "F1-search").questions).toBe(15);
     expect(byScenario("agent", "F2-login").questions).toBe(15);
   });
-
-  it("AE8 (v1 then v2 under the same URLs) reports at least one healing event and fieldsCorrect >= 0.9", () => {
-    const row = byScenario("agent", "AE8");
-    expect(row.healingEvents).toBeGreaterThanOrEqual(1);
-    expect(fieldsCorrect(row)).toBeGreaterThanOrEqual(0.9);
-    expect(row.cells.expected).toBe(48);
-  });
-
-  it("AE7 (pharmacy v1 record) asks four questions and gets every cell right", () => {
-    const row = byScenario("agent", "AE7");
-    expect(row.questions).toBe(4);
-    expect(fieldsCorrect(row)).toBe(1);
-    expect(row.cells).toEqual({ correct: 48, expected: 48 });
-    expect(row.healingEvents).toBe(0);
-  });
-
-  it("AE1 (python-jobs list) fills 25 rows of 5 fields with 7 questions; AE15 heals the renamed login step", () => {
-    const ae1 = byScenario("agent", "AE1");
-    expect(ae1.questions).toBe(7);
-    expect(ae1.cells).toEqual({ correct: 125, expected: 125 });
-    const ae15 = byScenario("agent", "AE15");
-    expect(ae15.healingEvents).toBe(1);
-    expect(ae15.cells).toEqual({ correct: 10, expected: 10 });
-    expect(ae15.questions).toBe(1);
-  });
 });
 
 describe("report", () => {
@@ -102,6 +82,14 @@ describe("report", () => {
     { chooser: "model", scenario: "AE7", questions: 0, inputTokens: 0, chooserWaitMs: 0, totalMs: 0, costUsd: 0, cells: { correct: 0, expected: 0 }, healingEvents: 0, status: "skipped", skipped: "no key (set ANTHROPIC_API_KEY)" },
     { chooser: "jev", scenario: "live:python.org", questions: 7, inputTokens: 9000, chooserWaitMs: 800, totalMs: 12000, costUsd: 0.000378, cells: { correct: 50, expected: 100 }, healingEvents: 0, status: "failed" },
   ];
+
+  // `renderTable` prints `correct/expected` itself, so R44's ratio -- and its
+  // divide-by-zero guard for a skipped row -- has no other caller under test.
+  it("fieldsCorrect is correct over expected, and zero when nothing was expected", () => {
+    expect(fieldsCorrect(sample[0]!)).toBe(1);
+    expect(fieldsCorrect(sample[1]!)).toBeCloseTo(46 / 48);
+    expect(fieldsCorrect(sample[2]!)).toBe(0);
+  });
 
   it("readMeasurements(renderTable(rows)) round-trips", () => {
     const md = renderTable(sample);

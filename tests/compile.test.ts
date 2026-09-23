@@ -17,7 +17,7 @@ import {
   type CompileResult,
   type FieldCandidate,
 } from "../src/compile/index.js";
-import { extractPage, fingerprintMatches, validateScraper, type CompiledScraper } from "../src/scraper/index.js";
+import { extractPage, fingerprintMatches, validateScraper } from "../src/scraper/index.js";
 import { startFixtureServer, type FixtureServer } from "./server.js";
 
 let server: FixtureServer;
@@ -417,13 +417,8 @@ describe("pure helpers", () => {
     expect(toAlternative(data, [base]).fingerprint).toEqual({ samples: [], shape: "url" });
   });
 
-  it("a compiled scraper document round-trips through validateScraper", () => {
-    const doc: CompiledScraper = validateScraper({
-      version: 1, templateKey: "t", cacheKey: "c", profile: "store", chooser: "agent", mode: "record",
-      entry: { mode: "direct", url: "http://x/" }, trace: [], pagination: { mode: "none" }, detail: null, createdAt: "2026-09-19T00:00:00.000Z",
-      fields: { a: { alternatives: [{ selector: "h1", fingerprint: { samples: ["x"], shape: "text" } }] } },
-    });
-    expect(doc.fields.a).toBeDefined();
-  });
+  // Round-tripping a compiled document is owned by `scraper-schema.test.ts ::
+  // round-trips a valid v1 document with a login trace unchanged`, which compares
+  // the whole document rather than one field being defined.
 });
 

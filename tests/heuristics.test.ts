@@ -88,10 +88,10 @@ describe("the heuristic bank (U8b)", () => {
 describe.each(fixtures())("$heuristic", (fixture: Fixture) => {
   const view = bank();
 
-  it("is in the bank, and its encounter is recorded on the rule itself", () => {
-    expect(() => view.get(fixture.heuristic)).not.toThrow();
-    expect(fixture.encounter).toMatch(/2026-09-22/);
-  });
+  // Bank membership and the 2026-09-22 encounter on every rule are proved once,
+  // file-wide, by "holds the eleven heuristics of 2026-09-22" and "has a fixture
+  // for every heuristic" above; asserting them again per fixture only re-read the
+  // fixture this block had already loaded.
 
   it.each(fixture.cases)("$name", (testCase: Case) => {
     const verdict = view.run(fixture.heuristic, testCase.observation);

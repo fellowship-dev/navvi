@@ -918,24 +918,9 @@ describe("text fallback precedence: subscription before metered", () => {
  * keeps working: it names the decider alone and leaves the writer derived.
  */
 describe("decider and writer (U14)", () => {
-  it("chooser alone is unchanged: it names the decider and the writer stays derived", async () => {
-    const jev = jevMock();
-    const cli = cliRunner("answers");
-    const urls: string[] = [];
-    const chooser = createChooser({
-      chooser: "jev",
-      env: { AI_GATEWAY_API_KEY: "g", PATH: fakeBin(["claude"]) },
-      jev: { evaluationModel: jev.model },
-      cli: { runner: cli },
-      model: { fetch: recordingFetch(urls), maxAttempts: 1 },
-    });
-    const answers = await chooser.ask([batch()[0]!, textQuestion()]);
-    expect(chooser.name).toBe("jev");
-    expect(answers[0]?.index).toBe(1);
-    expect(answers[1]?.text).toBe("from the subscription");
-    expect(cli.calls).toEqual(["claude"]);
-    expect(urls).toEqual([]);
-  });
+  // Byte-identical to "gateway key with a CLI on PATH: Jev answers the choice, the
+  // CLI answers the text, nothing is metered", which also asserts the Jev call
+  // count and the metered cost.
 
   it("decider and writer are set independently: Jev decides, the metered model writes past an installed CLI", async () => {
     const jev = jevMock();

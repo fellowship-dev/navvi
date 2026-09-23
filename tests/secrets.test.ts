@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MASK, MissingSecretError, Secret, findPlaceholders, maskUrlCredentials, redactRunInput, resolveSecrets, secretEnvName, type CommandRunner } from "../src/secrets/resolve.js";
 import { parseInput } from "../src/input/schema.js";
 import { summaryFor } from "../src/main.js";
-import { loginFixture } from "./scraper-schema.test.js";
+import { loginFixture } from "./helpers.js";
 
 describe("Secret (R39)", () => {
   it("never renders its value through toString, JSON or inspect", () => {

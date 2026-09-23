@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { InputSchema, isAllowedUrl, defaultChooser, defaultBrowser } from "../src/input/schema.js";
-import { InvalidInputError, run } from "../src/main.js";
-import type { Chooser } from "../src/chooser/chooser.js";
+import { InputSchema, defaultBrowser } from "../src/input/schema.js";
+import { run } from "../src/main.js";
 
 describe("input schema", () => {
   it("rejects an empty input naming the missing fields", () => {
@@ -56,29 +55,14 @@ describe("input schema", () => {
   });
 });
 
-describe("url guard (R26)", () => {
-  it.each([
-    "file:///etc/passwd",
-    "http://169.254.169.254/",
-    "http://localhost:9222/json",
-    "javascript:alert(1)",
-    "http://box.internal/",
-    "http://10.0.0.5/",
-    "http://[::1]/",
-  ])("rejects %s", (url) => {
-    expect(isAllowedUrl(url)).toBe(false);
-  });
-  it("passes a public https host and an explicitly allowlisted private host", () => {
-    expect(isAllowedUrl("https://news.ycombinator.com/")).toBe(true);
-    expect(isAllowedUrl("http://127.0.0.1:4321/fixture", ["127.0.0.1"])).toBe(true);
-  });
-});
+// The R26 url guard lives in `policy.test.ts :: url guard (R26)`, which runs the
+// same seven URLs through `isAllowedUrl` *and* `isAllowedRequestUrl`, and proves
+// the public-host / allowlisted-127.0.0.1 pass through both.
 
 describe("defaults", () => {
-  it("chooses the agent chooser with no keys and camoufox off-platform", () => {
-    expect(defaultChooser({})).toBe("agent");
-    expect(defaultChooser({ AI_GATEWAY_API_KEY: "k" })).toBe("jev");
-    expect(defaultChooser({ ANTHROPIC_API_KEY: "k" })).toBe("model");
+  // Chooser precedence is exhaustively owned by `cli-chooser.test.ts :: keys win,
+  // then claude, then codex, then agent`; only the browser default is unique here.
+  it("defaults to camoufox off-platform, chromium on it and whatever NAVVI_BROWSER names", () => {
     expect(defaultBrowser({})).toBe("camoufox");
     expect(defaultBrowser({ APIFY_IS_AT_HOME: "1" })).toBe("chromium");
     expect(defaultBrowser({ NAVVI_BROWSER: "chromium" })).toBe("chromium");
@@ -90,16 +74,8 @@ describe("run", () => {
     await expect(run({})).rejects.toThrow(/startUrls/);
   });
 
-  it("maps a prompt-derived input that fails validation to InvalidInputError", async () => {
-    const structured = JSON.stringify({ mode: "record", description: "orders", fields: [{ name: "id" }], goal: "sign in with token: abc123" });
-    const chooser: Chooser = {
-      name: "agent",
-      ask: async (batch) => batch.map((q) => ({ id: q.id, index: null, text: structured })),
-      usage: () => ({ chooser: "agent", questions: 0, textQuestions: 0, batches: 0, inputTokens: 0, outputTokens: 0, waitMs: 0, costUsd: 0, zeroDataRetention: "not_applicable" }),
-    };
-    const err = await run({ prompt: "list my orders", startUrls: ["https://example.org/orders"] }, { chooser }).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(InvalidInputError);
-    expect((err as InvalidInputError).status).toBe("configuration_error");
-    expect((err as InvalidInputError).message).toMatch(/goal/);
-  });
+  // The prompt-derived InvalidInputError path is owned by `cli.test.ts :: a prompt
+  // whose structured answer fails input validation is a configuration error, not a
+  // stack trace`, which runs the same fixture through the real binary and also
+  // asserts the exit code and that no ZodError leaks.
 });

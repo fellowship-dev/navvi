@@ -329,12 +329,9 @@ describe("navvi spec", () => {
     expect(empty.stderr.text).toContain("give a brief");
   });
 
-  it("needs no start URL: it reads no page", async () => {
-    const io = makeIo();
-    const code = await main(["spec"], io);
-    expect(io.stderr.text).not.toContain("give at least one start URL");
-    expect(code).toBe(2);
-  });
+  // "spec needs no start URL" is proved by "writes the spec to a file and names
+  // the blocking questions on stderr", which runs `navvi spec` with a brief and
+  // no start URL; a bare `main(["spec"])` never reaches the start-URL guard.
 });
 
 describe("navvi heuristics", () => {

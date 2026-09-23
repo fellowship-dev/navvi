@@ -3,7 +3,7 @@ import type { Page } from "playwright";
 import { launch, type LaunchedBrowser } from "../src/browser/launch.js";
 import type { Answer, Chooser, Question } from "../src/chooser/chooser.js";
 import { RecordedChooser } from "../src/chooser/recorded.js";
-import { navigate, type NavigateOptions, type NavigateResult, type Navigator } from "../src/navigate/index.js";
+import { navigate, type NavigateOptions, type NavigateResult } from "../src/navigate/index.js";
 import { captureExpectation, matchesUrlPattern, recordStep, secretNameFor, uniqueName, urlPatternFor, type Landmark } from "../src/navigate/trace.js";
 import type { SnapshotControl } from "../src/browser/snapshot.js";
 import { TraceStepSchema } from "../src/scraper/schema.js";
@@ -447,12 +447,7 @@ describe("navigate: trace helpers (R12, R42)", () => {
     expect(uniqueName([a, b, c], a)).toBe(false);
   });
 
-  it("exposes a Navigator signature the crawler can inject", async () => {
-    const nav: Navigator = (page, goal, ctx) => navigate(page, { ...ctx, goal });
-    await withPage("/fixtures/python-jobs.html", async (page) => {
-      const spy = spyFor("done-low");
-      const result = await nav(page, "open the python jobs listing", { chooser: spy, profile: "store", startUrls: [server.baseUrl + "/"] });
-      expect(result.status).toBe("BLOCKED");
-    });
-  });
+  // The Navigator signature is checked by `npm run typecheck:tests`; its only
+  // runtime claim (BLOCKED on done-low) is a subset of "DONE with low confidence
+  // cannot be retried on the unchanged page" above.
 });

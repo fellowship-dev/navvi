@@ -344,31 +344,10 @@ describe("crawler runs", () => {
     expect(summary.traceReplays).toBe(1);
   });
 
-  it("the route guard aborts a subresource on a private port while the fixture host passes", async () => {
-    const helper = await startHelperServer({
-      "/tools.html": { type: "text/html; charset=utf-8", body: `<!doctype html><title>Tools</title><h1 id="h">Internal tools</h1><img src="http://127.0.0.1:9/x.png" alt=""><p><a href="${server.baseUrl}/fixtures/redirect-private.html">Fixture</a></p>` },
-    });
-    try {
-      const actor = makeActor(dir);
-      const startUrls = [`${helper.baseUrl}/tools.html`];
-      const key = keyFor(startUrls, { fields: ["heading"], profile: "store" });
-      const store = await ScraperStore.open({ actor });
-      await store.put(
-        seeded({
-          ...key,
-          mode: "record",
-          entry: { mode: "direct", url: startUrls[0]! },
-          fields: { heading: { alternatives: [{ selector: "h1", fingerprint: { samples: ["Internal tools"], shape: "text" } }] } },
-        }),
-      );
-      const summary = await runCrawl(fixtureInput({ startUrls, mode: "record", fields: F("heading") }), makeDeps(dir, actor, new RecordedChooser({ fixture: "crawler/empty" })));
-      expect(summary.status).toBe("succeeded");
-      expect(summary.blockedRequests).toBe(1);
-      expect((await datasetItems(actor))[0]).toMatchObject({ heading: "Internal tools" });
-    } finally {
-      await helper.close();
-    }
-  });
+  // A single blocked subresource is a strict subset of the concurrency test
+  // below, which serves the same helper page with the same blocked <img> on two
+  // requests and asserts blockedRequests, the extracted heading, and that both
+  // navigations happened behind an installed guard.
 
   it("two requests that open concurrently on one context both navigate behind the route guard (R26)", async () => {
     const blockedImg = `<img src="http://127.0.0.1:9/x.png" alt="">`;

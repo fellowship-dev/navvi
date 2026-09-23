@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   causeChain,
   createLaunchCounter,
-  DEFAULT_RETIRE_AFTER_PAGE_COUNT,
   DEFAULT_SESSION_MAX_USAGE_COUNT,
   formatLaunchFailure,
   isForcedRepro,
@@ -30,8 +29,12 @@ import { buildCrawleeLaunchContext } from "../src/browser/launch.js";
 describe("relaunch knobs", () => {
   it("defaults to one browser and one session for the whole run", () => {
     const knobs = resolveRelaunchKnobs({});
-    expect(knobs.retireBrowserAfterPageCount).toBe(DEFAULT_RETIRE_AFTER_PAGE_COUNT);
-    expect(knobs.sessionMaxUsageCount).toBe(DEFAULT_SESSION_MAX_USAGE_COUNT);
+    // Asserted as floors, not as `toBe(DEFAULT_*)`: the constants restating
+    // themselves stayed green when they were lowered back to the values that
+    // produced the 2026-09-21 relaunch failures. `launch-pool.test.ts` uses the
+    // same floors for the pool.
+    expect(knobs.retireBrowserAfterPageCount).toBeGreaterThanOrEqual(100_000);
+    expect(knobs.sessionMaxUsageCount).toBeGreaterThanOrEqual(1_000_000);
     // Crawlee's default (3) is deliberately left in place: this build is meant
     // to reproduce the error-score path, not to paper over it.
     expect(knobs.sessionMaxErrorScore).toBeUndefined();

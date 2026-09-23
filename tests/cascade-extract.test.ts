@@ -11,34 +11,10 @@ import { readJsonPath } from "../src/scraper/extract.js";
  * looked, and a scraper written before it still parses.
  */
 describe("field sources", () => {
+  // The positive shapes of every source are asserted once, through a whole
+  // scraper, by "a scraper may mix sources" below: parsing each alternative on
+  // its own only echoed the literal the test had just passed in.
   const fingerprint = { samples: ["$3.690"], shape: "money" as const };
-
-  it("an alternative with no source is a DOM selector, exactly as before", () => {
-    const parsed = FieldAlternativeSchema.parse({ selector: "h1.product-name", fingerprint });
-    expect(parsed.source).toBeUndefined();
-  });
-
-  it("accepts a json-ld alternative with a path", () => {
-    const parsed = FieldAlternativeSchema.parse({
-      selector: 'script[type="application/ld+json"]',
-      source: "json-ld",
-      path: "offers.price",
-      fingerprint,
-    });
-    expect(parsed.path).toBe("offers.price");
-  });
-
-  it("accepts a network alternative with a match and a path", () => {
-    const parsed = FieldAlternativeSchema.parse({
-      selector: "catalog-svc/products/detail",
-      source: "network",
-      match: "catalog-svc/products/detail",
-      // The key carries dashes, so it is addressed in brackets.
-      path: "productData.prices[price-list-std]",
-      fingerprint,
-    });
-    expect(parsed.match).toBeTruthy();
-  });
 
   it("refuses a declared alternative that does not say what to read", () => {
     expect(() => FieldAlternativeSchema.parse({ selector: "x", source: "json-ld", fingerprint })).toThrow(/needs a path/);
@@ -59,7 +35,9 @@ describe("field sources", () => {
         listPrice: {
           type: "money",
           alternatives: [
+            // The key carries dashes, so it is addressed in brackets.
             { selector: "catalog-svc/products/detail", source: "network", match: "catalog-svc/products/detail", path: "productData.prices[price-list-std]", fingerprint },
+            { selector: 'script[type="application/ld+json"]', source: "json-ld", path: "offers.price", entity: "Product", fingerprint },
             // Kept deliberately: the DOM answer is worse, not absent, and a
             // fallback that is worse still beats no value at all.
             { selector: "p.font-semibold", fingerprint },
@@ -71,9 +49,13 @@ describe("field sources", () => {
       createdAt: new Date().toISOString(),
     });
 
-    expect(scraper.fields.listPrice!.alternatives).toHaveLength(2);
-    expect(scraper.fields.listPrice!.alternatives[0]!.source).toBe("network");
-    expect(scraper.fields.listPrice!.alternatives[1]!.source).toBeUndefined();
+    const [network, jsonLd, dom] = scraper.fields.listPrice!.alternatives;
+    expect(scraper.fields.listPrice!.alternatives).toHaveLength(3);
+    expect(network).toMatchObject({ source: "network", match: "catalog-svc/products/detail", path: "productData.prices[price-list-std]" });
+    // The entity is the half that stops the StoreA Organization answering as the Product.
+    expect(jsonLd).toMatchObject({ source: "json-ld", path: "offers.price", entity: "Product" });
+    // No source at all is a DOM selector, exactly as before.
+    expect(dom!.source).toBeUndefined();
   });
 });
 
@@ -178,14 +160,4 @@ describe("reading a value out of a JSON-LD graph", () => {
     expect(declared(both, "name", "Product")).toBe("Norvasc (R) Amlodipino 5mg 30 Comprimidos");
   });
 
-  it("the schema carries the entity so a scraper can state it", () => {
-    const parsed = FieldAlternativeSchema.parse({
-      selector: 'script[type="application/ld+json"]',
-      source: "json-ld",
-      path: "name",
-      entity: "Product",
-      fingerprint: { samples: ["Norvasc"], shape: "text" as const },
-    });
-    expect(parsed.entity).toBe("Product");
-  });
 });

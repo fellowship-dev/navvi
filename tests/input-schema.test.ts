@@ -142,8 +142,7 @@ describe("actorInput: the U16 retirement knobs", () => {
     expect(input).toEqual({ startUrls: ["https://example.org/"] });
   });
 
-  it("leaves a run that sets none of them untouched", () => {
-    const { env } = actorInput({ startUrls: ["https://example.org/"] }, { PATH: "/bin" });
-    expect(env).toEqual({ PATH: "/bin" });
-  });
+  // Base-env passthrough is asserted by "moves them into the run env and strips
+  // them from the input" (PATH survives); "ignores a nonsensical threshold"
+  // asserts that no NAVVI_* var is invented when none is set.
 });
