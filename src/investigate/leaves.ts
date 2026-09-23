@@ -11,7 +11,7 @@ import { normalize } from "../util/text.js";
  * require variation across samples. What survives is a handful of leaves per
  * field, and the `key-names-carry-the-signal` heuristic ranks those.
  *
- * Paths are emitted in the form `readJsonPath` in `scraper/extract.ts` accepts:
+ * Paths are emitted in the form `readDeclared` in `declared/json.ts` accepts:
  * dotted, with brackets for a key carrying a dot or a dash. That is not
  * cosmetic — Store B's answer lives at
  * `productData.prices[price-list-std]`, and a path this module cannot express is

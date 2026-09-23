@@ -1,4 +1,5 @@
 import { newestUsableResponse, type CapturedResponse } from "../browser/network-capture.js";
+import { readDeclared } from "../declared/json.js";
 import { ensureEvaluateShim } from "../browser/snapshot.js";
 import type { Page } from "playwright";
 import type { FieldType } from "../input/schema.js";
@@ -503,11 +504,11 @@ async function resolveDeclared(
     // detail endpoint answers 401 before its anonymous session exists.
     const path = alternative.path;
     const carries = (body: unknown): boolean => {
-      const value = readJsonPath(body, path);
+      const value = readDeclared(body, path);
       return value !== undefined && value !== null;
     };
     const response = newestUsableResponse(captured, { match: alternative.match ?? "", carries });
-    return response === null ? null : String(readJsonPath(response.body, path));
+    return response === null ? null : String(readDeclared(response.body, path));
   }
 
   // json-ld: every block on the page, first one carrying the path.
@@ -517,80 +518,20 @@ async function resolveDeclared(
   for (const block of blocks) {
     let parsed: unknown;
     try { parsed = JSON.parse(block.trim()); } catch { continue; }
-    const value = readJsonPath(parsed, alternative.path, alternative.entity);
+    const value = readDeclared(parsed, alternative.path, alternative.entity);
     if (value !== undefined && value !== null) return String(value);
   }
   return null;
 }
 
-/** schema.org `@type`, which may be a string or a list of them. */
-function isType(node: unknown, entity: string): boolean {
-  if (node === null || typeof node !== "object") return false;
-  const type = (node as Record<string, unknown>)["@type"];
-  const types = Array.isArray(type) ? type : [type];
-  return types.some((t) => typeof t === "string" && t.toLowerCase() === entity.toLowerCase());
-}
-
-/**
- * A dotted path, with brackets for a key that contains a dot or a dash --
- * `productData.prices[price-list-std]`, which Store B's payload needs.
- *
- * With an `entity`, the value is read only off a node the site typed that way,
- * and the search for such a node goes exactly two places: through arrays (a
- * page ships several blocks, and a block may itself be a list) and into
- * `@graph` (one block holding several nodes), because a site is free to bury
- * its Product beside its Organization, and StoreA does.
- *
- * It deliberately descends nowhere else. A Product hanging off `isSimilarTo`,
- * `isRelatedTo`, `isAccessoryOrSparePartFor` or a `BreadcrumbList` item is a
- * *different* product, and binding to it produces a row with a real name at a
- * price that is not this page's -- the same failure as StoreA,
- * 2026-09-22, where a walk that kept going until something answered bound
- * `productName` to the `Organization` node and returned "StoreA" on all 33
- * URLs that redirect away from their product page. Those rows carried a name, a
- * SKU off the URL and a price from a surviving meta tag, so they passed every
- * "did it extract?" check and would have entered a price index at invented
- * prices. A plausible wrong row is worse than a blank one.
- *
- * `json-ld-needs-product-node` (bind) and `typedNodes` (investigate) read a
- * block the same way. The gate, the compile and the replay must not disagree
- * about what a declared block contains.
+/*
+ * `readJsonPath` and `isType` used to live here, and were one of four copies of
+ * "read a path out of a declared block, optionally only off a typed node". They
+ * are now `readDeclared`/`typedNodes`/`declares` in `src/declared/json.ts`,
+ * which carries the StoreA encounter and the rule that `@graph` and arrays
+ * are the only nesting the walk descends into. Nothing here parses a path or
+ * walks a graph any more. See `docs/adr/0001-one-declared-json-reader.md`.
  */
-export function readJsonPath(body: unknown, path: string, entity?: string): unknown {
-  const segments = path.replace(/\[([^\]]+)\]/g, ".$1").split(".").filter(Boolean);
-  const direct = (node: unknown): unknown => {
-    let current = node;
-    for (const segment of segments) {
-      if (current === null || current === undefined || typeof current !== "object") return undefined;
-      current = (current as Record<string, unknown>)[segment];
-    }
-    return current;
-  };
-
-  // Without an entity the top-level object is the whole contract: a bare
-  // `{"@type":"Product", ...}` block reads directly and nothing is searched.
-  if (!entity) return direct(body);
-  if (isType(body, entity)) {
-    const hit = direct(body);
-    if (hit !== undefined) return hit;
-  }
-
-  // With one, resolve only against nodes of that type, and look for them only
-  // in the arrays and `@graph` a declared block is allowed to hide them in.
-  const queue: unknown[] = [body];
-  for (let guard = 0; queue.length > 0 && guard < 500; guard += 1) {
-    const node = queue.shift();
-    if (Array.isArray(node)) { queue.push(...node); continue; }
-    if (node === null || typeof node !== "object") continue;
-    if (isType(node, entity)) {
-      const found = direct(node);
-      if (found !== undefined) return found;
-    }
-    const graph = (node as Record<string, unknown>)["@graph"];
-    if (graph !== undefined) queue.push(graph);
-  }
-  return undefined;
-}
 
 export async function extractPage(page: Page, scraper: CompiledScraper, options: ExtractOptions = {}): Promise<PageExtraction> {
   const sourceUrl = options.sourceUrl ?? page.url();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CompiledScraperSchema, FieldAlternativeSchema, SCRAPER_VERSION } from "../src/scraper/schema.js";
-import { readJsonPath } from "../src/scraper/extract.js";
+import { readDeclared } from "../src/declared/json.js";
 
 /**
  * The extraction cascade, at the schema boundary.
@@ -87,7 +87,7 @@ describe("reading a value out of a JSON-LD graph", () => {
   // rule goes on passing on its own terms while the one that runs against live
   // pages drifts -- and it was a live run, not a unit test, that caught the bug
   // below in the first place.
-  const declared = (body: unknown, path: string, entity?: string) => readJsonPath(body, path, entity);
+  const declared = (body: unknown, path: string, entity?: string) => readDeclared(body, path, entity);
 
   it("takes the name from the Product, not from the store that sells it", () => {
     expect(declared(storeaGraph, "name", "Product")).toBe("Norvasc (R) Amlodipino 5mg 30 Comprimidos");
@@ -121,7 +121,8 @@ describe("reading a value out of a JSON-LD graph", () => {
    * name at a price that is not this page's -- plausible, unfalsifiable at a
    * glance, and worse than the blank it replaces. `@graph` is the only nesting
    * a declared block may hide this page's own Product in, which is what the
-   * `json-ld-needs-product-node` gate and `typedNodes` already assume.
+   * `json-ld-needs-product-node` gate and `typedNodes` already assume — and
+   * since 0001 they assume it by calling the same walk rather than by comment.
    */
   it("a Product hung off isSimilarTo is a different product and is not read", () => {
     const withRelated = {

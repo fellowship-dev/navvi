@@ -1,3 +1,4 @@
+import { typedNodes } from "../declared/json.js";
 import { bank, type Bank, type Verdict } from "../heuristics/index.js";
 import { visibleText } from "../heuristics/rules/investigate.js";
 import type { TypedValue } from "../scraper/extract.js";
@@ -28,7 +29,7 @@ import { flatten } from "./leaves.js";
  *   microdata   `itemscope` / `itemtype` / `itemprop`
  *   meta        the OpenGraph and `product:` namespaces
  *
- * Paths are spelled the way `readJsonPath` in `scraper/extract.ts` reads them
+ * Paths are spelled the way `readDeclared` in `declared/json.ts` reads them
  * back — dotted, brackets for a key carrying a dot or a dash. That is the same
  * constraint `leaves.ts` works under and for the same reason: a path this
  * module can express but the extractor cannot read is a binding the compiler
@@ -43,10 +44,10 @@ export interface DeclaredSource {
   kind: DeclaredKind;
   /**
    * For `json-ld` and `microdata`: the path *relative to the item node*, as
-   * `readJsonPath` reads it — `offers.price`, `prices[price-list-std]`.
+   * `readDeclared` reads it — `offers.price`, `prices[price-list-std]`.
    *
    * For `meta`: the property name, `product:sale_price:amount`. That one is not
-   * read back through `readJsonPath` (see `source` below); it is the key a
+   * read back through `readDeclared` (see `source` below); it is the key a
    * binder matches a field name against, and the property name is what the
    * whole OpenGraph namespace is named by.
    */
@@ -205,40 +206,6 @@ function fromJsonLd(tokens: readonly Token[], want: string, view: Bank, verdicts
     }
   }
   return sources;
-}
-
-/**
- * Every node of the wanted `@type`, `@graph` included.
- *
- * All of them, not the first: a page is free to declare two Products, and two
- * nodes disagreeing about `name` is an ambiguity the caller should see rather
- * than one this function resolves by arriving first.
- */
-function typedNodes(block: unknown, want: string): unknown[] {
-  const wanted = want.toLowerCase();
-  const found: unknown[] = [];
-  const seen = new WeakSet<object>();
-  const walk = (node: unknown, depth: number): void => {
-    if (depth > 8 || found.length > 50) return;
-    if (Array.isArray(node)) {
-      for (const item of node) walk(item, depth + 1);
-      return;
-    }
-    if (typeof node !== "object" || node === null) return;
-    if (seen.has(node)) return;
-    seen.add(node);
-    const record = node as Record<string, unknown>;
-    const type = record["@type"];
-    const types = (Array.isArray(type) ? type : [type]).filter((name): name is string => typeof name === "string");
-    if (types.some((name) => name.toLowerCase() === wanted)) found.push(node);
-    // `@graph` is the only nesting a declared block hides a node in — the same
-    // reading `json-ld-needs-product-node` takes, so the gate and the read
-    // cannot disagree about what is in the block.
-    const graph = record["@graph"];
-    if (Array.isArray(graph)) walk(graph, depth + 1);
-  };
-  walk(block, 0);
-  return found;
 }
 
 // ---------------------------------------------------------------- microdata

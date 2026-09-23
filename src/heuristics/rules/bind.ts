@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { declares, declaredTypes } from "../../declared/json.js";
 import { normalize } from "../../util/text.js";
 import { define, type AnyHeuristic } from "../types.js";
 
@@ -30,24 +31,21 @@ const jsonLdNeedsProductNode = define({
     want: z.string().min(1).default("Product"),
   }),
   evaluate: ({ jsonLd, want }) => {
-    const found: string[] = [];
-    const walk = (node: unknown): boolean => {
-      if (Array.isArray(node)) return node.some(walk);
-      if (typeof node !== "object" || node === null) return false;
-      const record = node as Record<string, unknown>;
-      const type = record["@type"];
-      const types = Array.isArray(type) ? type.map(String) : typeof type === "string" ? [type] : [];
-      for (const name of types) found.push(name);
-      if (types.some((name) => normalize(name) === normalize(want))) return true;
-      // @graph is the only nesting a declared block is allowed to hide a node in.
-      return Array.isArray(record["@graph"]) ? (record["@graph"] as unknown[]).some(walk) : false;
-    };
-    if (jsonLd.some(walk)) {
+    // The gate asks `src/declared/json.ts` — the same walk the compile
+    // (`typedNodes`) and the replay (`readDeclared`) ask. It used to keep its
+    // own copy, which accepted only an array-shaped `@graph` and compared
+    // `@type` accent-folded, so a block shaped `"@graph": {"@type":"Product"}`
+    // was refused here and read by replay. The gate and the read are one
+    // answer now; see `docs/adr/0001-one-declared-json-reader.md`.
+    if (declares(jsonLd, want)) {
       return { fires: false, because: `the block declares a ${want} node; read it` };
     }
+    // Nothing of the wanted type: say what the block *did* declare, because
+    // "no Product" and "no @type at all" are different pages to a reader.
+    const found = declaredTypes(jsonLd);
     return {
       fires: true,
-      because: found.length > 0 ? `the block declares ${[...new Set(found)].join(", ")} but no ${want} node` : `the block declares no @type at all, so no ${want} node`,
+      because: found.length > 0 ? `the block declares ${found.join(", ")} but no ${want} node` : `the block declares no @type at all, so no ${want} node`,
       action: `treat this page as having no declared ${want}: fall through to the next tier rather than walking the graph for any node that answers`,
     };
   },

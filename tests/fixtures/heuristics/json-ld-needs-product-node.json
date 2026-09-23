@@ -1,6 +1,6 @@
 {
   "heuristic": "json-ld-needs-product-node",
-  "encounter": "StoreA, 2026-09-22. The graph walk kept walking until something had a name and bound productName to the Organization node: \"StoreA\" on 33 redirect URLs.",
+  "encounter": "StoreA, 2026-09-22. The graph walk kept walking until something had a name and bound productName to the Organization node: \"StoreA\" on 33 redirect URLs. The gate kept its own copy of the walk until 2026-09-23 and required @graph to be an array, so a block declaring its Product as a single node object was refused here and read by replay (docs/adr/0001).",
   "cases": [
     {
       "name": "StoreA's redirect page declares an Organization and a WebSite, no Product",
@@ -47,6 +47,26 @@
                 "sku": "300123"
               }
             ]
+          }
+        ],
+        "want": "Product"
+      },
+      "expect": {
+        "fires": false,
+        "becauseIncludes": "declares a Product node"
+      }
+    },
+    {
+      "name": "@graph holding a single node object, not an array (JSON-LD 1.1 allows both)",
+      "observation": {
+        "jsonLd": [
+          {
+            "@context": "https://schema.org",
+            "@graph": {
+              "@type": "Product",
+              "name": "Norvasc (R) Amlodipino 5mg 30 Comprimidos",
+              "sku": "2562507"
+            }
           }
         ],
         "want": "Product"

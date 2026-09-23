@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import { extractCaptured, isUsableResponse, newestUsableResponse, pickResponse, type CapturedResponse } from "../src/browser/network-capture.js";
+import { declares, declaredTypes, readDeclared, typedNodes } from "../src/declared/json.js";
+import { bank } from "../src/heuristics/index.js";
 import { injectedShapeOf } from "../src/browser/snapshot.js";
 import { RecordedChooser, RecordedOptionsMismatchError, RECORD_OPTIONS_ENV, type RecordedAnswerFile } from "../src/chooser/recorded.js";
 import { shapeOf } from "../src/scraper/extract.js";
@@ -227,7 +229,7 @@ describe("newest usable captured response: one rule, every consumer", () => {
         }
       }
     };
-    for (const dir of ["src", "tests", "scripts", "bin"]) walk(dir);
+    for (const dir of ["src", "tests", "scripts", "bin", "tools"]) walk(dir);
     expect(offenders).toEqual([]);
     // And the owner really does still carry it, so an emptied regex reads as a
     // broken guard rather than a clean repository.
@@ -383,5 +385,118 @@ describe("recorded answers are checked against the options offered today", () =>
     // And the check really is carried by a large body of recordings, so an
     // accidental strip reads as a failure rather than a clean repository.
     expect(withOptions.length).toBeGreaterThanOrEqual(171);
+  });
+});
+
+// ------------------------------------------------- reading a declared JSON block
+
+/**
+ * There were four spellings of "read a path out of a declared JSON block,
+ * optionally only off a node the site typed `Product`": `readJsonPath`/`isType`
+ * in `src/scraper/extract.ts`, `typedNodes` in `src/investigate/declared.ts`,
+ * the `json-ld-needs-product-node` gate in `src/heuristics/rules/bind.ts`, and
+ * `readPath` in `src/browser/network-capture.ts`. Two of them carried comments
+ * asserting the others agreed with them, which is the strongest form this
+ * defect takes: a second spelling with a note saying it is not one.
+ *
+ * They disagreed about `@graph`. JSON-LD 1.1 allows its value to be a node
+ * object *or* an array of node objects; replay accepted both and the other
+ * three required an array. So a block shaped `"@graph": {"@type":"Product"}`
+ * was read by replay and refused by the gate that exists to keep replay honest
+ * — the gate saying "this page declares no product" about a page replay was
+ * already binding. `docs/adr/0001-one-declared-json-reader.md` rules for
+ * replay's reading and moves the walk into `src/declared/json.ts`.
+ *
+ * Both halves are pinned here: the differential over the two `@graph` shapes,
+ * and a source guard so a fifth copy cannot grow back.
+ */
+describe("a declared JSON block: one walk, one answer", () => {
+  /** StoreA's real shape: several typed nodes in an array-valued `@graph`. */
+  const arrayGraph = {
+    "@context": "https://schema.org",
+    "@graph": [
+      { "@type": ["Organization", "OnlineStore"], name: "StoreA", url: "https://store-a.example/" },
+      { "@type": "WebSite", name: "StoreA" },
+      { "@type": "Product", name: "Norvasc (R) Amlodipino 5mg 30 Comprimidos", sku: "2562507", offers: { price: "3690" } },
+    ],
+  };
+
+  /** The same declaration with one node, which JSON-LD 1.1 §4.9 permits. */
+  const objectGraph = {
+    "@context": "https://schema.org",
+    "@graph": { "@type": "Product", name: "Norvasc (R) Amlodipino 5mg 30 Comprimidos", sku: "2562507", offers: { price: "3690" } },
+  };
+
+  it("an object-valued @graph is a graph, to the gate and the read alike", () => {
+    for (const [shape, block] of [["array", arrayGraph], ["object", objectGraph]] as const) {
+      expect(declares(block, "Product"), `${shape} @graph: declares`).toBe(true);
+      expect(typedNodes(block, "Product"), `${shape} @graph: typedNodes`).toHaveLength(1);
+      expect(readDeclared(block, "name", "Product"), `${shape} @graph: name`).toBe("Norvasc (R) Amlodipino 5mg 30 Comprimidos");
+      expect(readDeclared(block, "offers.price", "Product"), `${shape} @graph: price`).toBe("3690");
+      // The heuristic is the fourth entry point and rides the same walk, so it
+      // may not say "no declared product" about a block replay would bind.
+      expect(bank().run("json-ld-needs-product-node", { jsonLd: [block], want: "Product" }).fires, `${shape} @graph: gate`).toBe(false);
+    }
+  });
+
+  it("and a graph of either shape with no Product node is refused by all of them", () => {
+    const refusals = [
+      { "@context": "https://schema.org", "@graph": [{ "@type": "Organization", name: "StoreA" }, { "@type": "WebSite", name: "StoreA" }] },
+      { "@context": "https://schema.org", "@graph": { "@type": "Organization", name: "StoreA" } },
+    ];
+    for (const block of refusals) {
+      expect(declares(block, "Product")).toBe(false);
+      expect(typedNodes(block, "Product")).toEqual([]);
+      expect(readDeclared(block, "name", "Product")).toBeUndefined();
+      const verdict = bank().run("json-ld-needs-product-node", { jsonLd: [block], want: "Product" });
+      expect(verdict.fires).toBe(true);
+      // The gate describes the block out of the same walk, so it cannot name a
+      // type the read does not see.
+      expect(declaredTypes(block)).toContain("Organization");
+      for (const name of declaredTypes(block)) expect(verdict.because).toContain(name);
+    }
+  });
+
+  it("neither shape lets the walk leave the graph", () => {
+    // The refusal the StoreA encounter bought: a Product under a relation
+    // is a *different* product, whichever shape the graph takes.
+    const related = {
+      "@context": "https://schema.org",
+      "@graph": { "@type": "WebPage", isSimilarTo: { "@type": "Product", name: "Losartan 50mg", offers: { price: "1990" } } },
+    };
+    expect(declares(related, "Product")).toBe(false);
+    expect(readDeclared(related, "name", "Product")).toBeUndefined();
+    expect(bank().run("json-ld-needs-product-node", { jsonLd: [related], want: "Product" }).fires).toBe(true);
+  });
+
+  it("no module writes the graph walk or the @type compare out again", () => {
+    // Descending `@graph` and comparing `@type` are the two halves that drifted.
+    // Both are spelled as a bracket read off a record, and `src/declared/json.ts`
+    // is the only file allowed to write either. The patterns are assembled at
+    // run time so this file's own source is not a match — the guard has to
+    // cover the guard.
+    const bracket = (key: string): RegExp => new RegExp("\\[\\s*[\"']" + key + "[\"']\\s*\\]");
+    const rules = [bracket("@" + "graph"), bracket("@" + "type")];
+    const root = join(import.meta.dirname, "..");
+    const owner = join("src", "declared", "json.ts");
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
+        const rel = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name !== "node_modules" && entry.name !== "recorded" && entry.name !== "fixtures") walk(rel);
+        } else if (entry.name.endsWith(".ts") || entry.name.endsWith(".js")) {
+          if (rel === owner) continue;
+          const text = readFileSync(join(root, rel), "utf8");
+          if (rules.some((rule) => rule.test(text))) offenders.push(rel);
+        }
+      }
+    };
+    for (const dir of ["src", "tests", "scripts", "bin", "tools"]) walk(dir);
+    expect(offenders).toEqual([]);
+    // And the owner really does still carry both, so an emptied pattern reads
+    // as a broken guard rather than a clean repository.
+    const ownerText = readFileSync(join(root, owner), "utf8");
+    for (const rule of rules) expect(rule.test(ownerText)).toBe(true);
   });
 });

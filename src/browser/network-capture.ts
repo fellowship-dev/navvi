@@ -1,4 +1,5 @@
 import type { Page, Response } from "playwright";
+import { readDeclared } from "../declared/json.js";
 
 /**
  * Extraction from the responses a page fetches for itself.
@@ -104,19 +105,16 @@ export function captureJson(page: Page, options: CaptureOptions): Capture {
  * Reads a dotted path out of a captured body. Segments are literal keys, so a
  * key containing a dot is addressed by wrapping it in brackets --
  * `productData.prices[price-list-std]`, which Store B's payload needs.
+ *
+ * It used to spell that grammar out here, which made it the fourth copy of the
+ * declared-block reader. A captured payload is the same reader with no entity:
+ * there is no schema.org typing in an app's own API response, so nothing is
+ * searched and the top-level object is the whole contract. The name stays
+ * because `pickResponse` and `extractCaptured` are separate entry points that a
+ * differential pins (`tests/second-spelling.test.ts`).
  */
 export function readPath(body: unknown, path: string): unknown {
-  const segments = path
-    .replace(/\[([^\]]+)\]/g, ".$1")
-    .split(".")
-    .filter(Boolean);
-
-  let node: unknown = body;
-  for (const segment of segments) {
-    if (node === null || node === undefined || typeof node !== "object") return undefined;
-    node = (node as Record<string, unknown>)[segment];
-  }
-  return node;
+  return readDeclared(body, path);
 }
 
 /**
