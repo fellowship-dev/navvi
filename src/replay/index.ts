@@ -43,6 +43,28 @@ export {
   type CompileDetailResult,
 } from "./detail.js";
 export {
+  DEFAULT_REPLAYS,
+  DEFAULT_SAMPLE_URLS,
+  isUnstable,
+  judgeDeterminism,
+  measureDeterminism,
+  readingOf,
+  summarizeDeterminism,
+  unstableFields,
+  type AlternativeDisagreement,
+  type Determinism,
+  type DeterminismDriver,
+  type DeterminismForm,
+  type DeterminismOptions,
+  type FieldStability,
+  type ItemValues,
+  type Movement,
+  type PageReading,
+  type Stability,
+  type UrlReadings,
+  type UrlRecord,
+} from "./determinism.js";
+export {
   HEAL_QUESTION_PREFIX,
   HEAL_STEP_QUESTION_PREFIX,
   controlLabel,
