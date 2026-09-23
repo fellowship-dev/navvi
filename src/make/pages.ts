@@ -286,9 +286,20 @@ export async function openPages(options: PagesOptions): Promise<Pages> {
    *
    * `captured` is not optional decoration: every `network` alternative
    * `compileFromReconciliation` emits resolves against it, so a read taken
-   * without it would report every payload-bound field as absent and the
-   * determinism stage would call that `absent` rather than `moved` — a clean
-   * artifact about a scraper nobody actually ran.
+   * without it reports every payload-bound field as null — a clean artifact
+   * about a scraper nobody actually ran.
+   *
+   * That sentence used to end "and the determinism stage would call that
+   * `absent` rather than `moved`", and the second half of it was wrong in a way
+   * worth keeping the correction for. `extractPage` null-fills every compiled
+   * field on every page, so `field in item` is true whatever came back and
+   * `FieldStability.absent` is unreachable from here. A replay that reads
+   * nothing is `held` on every field, `0 fields moved`, verdict `stable`. On
+   * 2026-09-23 that printed four lines above `verify fill 0 of 3` and read as
+   * two stages disagreeing about the same three pages through this same
+   * function; they were agreeing, and only `verify` could say what about.
+   * `make.ts` counts the readings at the seam it hands `measureDeterminism`
+   * for that reason.
    *
    * A read that throws is not caught. `DeterminismDriver` says so in as many
    * words: a URL that could not be read N times has not been measured, and a

@@ -2,7 +2,7 @@ import { bulletWidth, makeArtifact, makeBullet, makeNote, makeRow, makeStage } f
 import { chooseSample, investigate, probeFrom, render as renderManuscript, type Manuscript, type RequestedField, type SampleChoice, type Stratum } from "../investigate/index.js";
 import { outputSchema, reconcile, render as renderReconcile, summarize as summarizeReconcile, type Reconciliation } from "../reconcile/index.js";
 import { NothingCompilableError, compileFromReconciliation, renderRationale, type ProvenCompile } from "../compile/index.js";
-import { DEFAULT_REPLAYS, DEFAULT_SAMPLE_URLS, loadListSources, measureDeterminism, summarizeDeterminism, unstableFields, type Determinism } from "../replay/index.js";
+import { DEFAULT_REPLAYS, DEFAULT_SAMPLE_URLS, loadListSources, measureDeterminism, summarizeDeterminism, unstableFields, type Determinism, type PageReading } from "../replay/index.js";
 import { renderMachine, type CompiledScraper } from "../scraper/index.js";
 import { groupByTemplate } from "../template/index.js";
 import { SpecSchema, blockingQuestions, requestedFields, type Rubric, type Spec } from "../spec/schema.js";
@@ -11,7 +11,7 @@ import type { Chooser } from "../chooser/chooser.js";
 import type { FieldType } from "../input/schema.js";
 import { AnswerError, applyAnswers, parseAnswer, type FieldTypes, type MatchedAnswer } from "./answers.js";
 import { ARTIFACTS, PRIMARY, STAGES, Work, type StageName } from "./work.js";
-import { measurements, renderScorecard, scorecard } from "./verify.js";
+import { fillLine, measurements, renderScorecard, scorecard } from "./verify.js";
 import type { Pages } from "./pages.js";
 
 /**
@@ -371,6 +371,40 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
 
     let determinism: Determinism | null = null;
     let determinismBecause = "";
+    /**
+     * What the determinism replays actually read, counted at the seam that
+     * takes them, because `determinism.json` cannot answer it.
+     *
+     * `FieldStability.readOn` is documented as "on how many sampled URLs it was
+     * read at all" and is computed from `field in item` — the presence of the
+     * *key*. `extractPage` null-fills every compiled field on every page, so
+     * that key is always there, `readOn` is always the full URL count, and the
+     * `absent` outcome is unreachable through this driver. A replay that read
+     * nothing therefore lands as `held` on every field, `0 fields moved`,
+     * verdict `stable`, and a determinism record that names no value at all —
+     * a held field stores no forms, so nothing in the artifact can be checked
+     * against a page.
+     *
+     * Measured on store-b.example, 2026-09-23: three payload-bound fields printed
+     * `determinism 3 replays x 3 URLs, 0 fields moved` and then, four lines
+     * later, `verify fill 0 of 3`. That reads as the two stages contradicting
+     * each other about the same pages through the same driver. They did not.
+     * They agreed that nothing came back, and only one of them was able to say
+     * so — which is the more expensive half, because `stable` was the sentence
+     * a person was going to believe.
+     */
+    let replayRead: { read: number; of: number } | null = null;
+    const count = async (reading: Promise<PageReading>): Promise<PageReading> => {
+      const into = (replayRead ??= { read: 0, of: 0 });
+      const taken = await reading;
+      for (const item of taken) {
+        for (const value of Object.values(item)) {
+          into.of += 1;
+          if (value !== null && value !== undefined) into.read += 1;
+        }
+      }
+      return taken;
+    };
     if (determinismState.current && !options.force) {
       determinism = requireJson<Determinism>(work, PRIMARY.determinism);
       say(makeStage("determinism", `reused — ${determinismState.because}`, work.path(PRIMARY.determinism)));
@@ -403,7 +437,7 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
         throw error;
       }
       const driver = await needPages();
-      determinism = await measureDeterminism(replayUrls, { read: (url) => driver.read(provisional.scraper, url) }, {
+      determinism = await measureDeterminism(replayUrls, { read: (url) => count(driver.read(provisional.scraper, url)) }, {
         site: spec.target.site,
         fields: Object.keys(provisional.scraper.fields),
         replays,
@@ -413,6 +447,11 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
       work.record("determinism", ["spec.json", "investigation.json", "reconcile.json"], determinismParams);
       say(summarizeDeterminism(determinism, work.path(PRIMARY.determinism)));
       say(makeNote("read through a scraper compiled from this reconciliation, not from scraper.json, which does not exist yet"));
+      // `measureDeterminism` always takes at least one reading, so this is a
+      // real count and not an unset one; a driver that read nothing at all
+      // leaves `{ read: 0, of: 0 }`, which `blankReplay` says differently.
+      replayRead ??= { read: 0, of: 0 };
+      if (replayRead.read === 0) say(makeBullet("read nothing", blankReplay(replayRead, determinism.verdict), "!"));
       record("determinism", "ran", determinism.because, [PRIMARY.determinism]);
     }
 
@@ -493,13 +532,16 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
       extractions,
       ...(fillBecause === "" ? {} : { fillBecause }),
       determinism,
+      // Null unless this session took the readings. A reused determinism.json
+      // carries no values to count — a held field stores no forms — and a zero
+      // invented here would be a claim about replays that never happened.
+      determinismValues: replayRead,
       ...(determinismBecause === "" ? {} : { determinismBecause }),
     });
     work.write(PRIMARY.verify, renderScorecard(card));
     work.record("verify", ["reconcile.json", "scraper.json"], { fill: extractions === null ? null : extractions.length });
 
-    const filled = card.fill === null ? "fill not measured" : `fill ${card.fill.fields.filter((field) => field.read === field.of).length} of ${card.fill.fields.length}`;
-    say(makeStage("verify", `${card.compiled} of ${card.requested} compiled, ${filled}`, work.path(PRIMARY.verify)));
+    say(makeStage("verify", `${card.compiled} of ${card.requested} compiled, ${fillLine(card)}`, work.path(PRIMARY.verify)));
     say(makeNote(measurements(card)));
     say(makeBullet("no grade", "the 100-point scorecard and its letter are U12, and its weights are undecided — these are the measurements it would be computed from", "!"));
     if (card.fill !== null) {
@@ -677,6 +719,23 @@ function bindingUrls(manuscript: Manuscript): string[] {
 function templateKeyOf(urls: readonly string[]): string {
   const groups = [...groupByTemplate(urls).entries()].sort((a, b) => b[1].length - a[1].length);
   return groups[0]?.[0] ?? "unknown";
+}
+
+/**
+ * What to say about a determinism verdict measured over readings that carried
+ * no value. See `replayRead` for why the verdict on its own cannot say it.
+ *
+ * Deliberately not a downgrade of the verdict. `judgeDeterminism` was asked
+ * whether the extraction moved and it answered correctly: it did not. The
+ * defect is that the answer is printed in words — `stable`, `held`, "says the
+ * same thing twice about a page nobody changed" — that a reader hears as "and
+ * it read something", so the run says which of the two it measured.
+ */
+function blankReplay(replayRead: { read: number; of: number }, verdict: Determinism["verdict"]): string {
+  const measured = verdict === "insufficient" ? "the verdict" : `\`${verdict}\``;
+  return replayRead.of === 0
+    ? `no replay of any URL produced a single item, so ${measured} is about pages that yielded no row to compare`
+    : `every one of the ${replayRead.of} field readings came back null, so ${measured} is the stability of a blank extraction and not evidence that anything was read`;
 }
 
 /** `5 network alternatives, 3 dom kept, 2 refused by the selector gate`. */

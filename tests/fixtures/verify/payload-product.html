@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es">
+  <head><meta charset="utf-8" /><title>Producto — Ejemplo Farmacia</title></head>
+  <body>
+    <h1 id="name">Cargando…</h1>
+    <p id="pack">Envase por unidad.</p>
+    <p id="note">
+      Los precios de esta ficha viven únicamente en la respuesta que la página
+      pide para sí misma. No hay nodo en el DOM que los muestre, a propósito.
+    </p>
+    <script>
+      // `?silent=1` is the same page that never takes delivery of its own
+      // payload: same markup, same title, nothing for a `network` alternative
+      // to resolve against.
+      const sku = new URLSearchParams(location.search).get("sku");
+      if (sku) {
+        fetch(`payload-${sku}.json`)
+          .then((response) => response.json())
+          .then((payload) => {
+            document.getElementById("name").textContent = payload.productData.name;
+          })
+          .catch(() => undefined);
+      } else {
+        document.getElementById("name").textContent = "Ficha sin respuesta";
+      }
+    </script>
+  </body>
+</html>

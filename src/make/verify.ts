@@ -79,6 +79,15 @@ export interface Scorecard {
   modelCallsAtReplay: 0;
   modelCallsBecause: string;
   determinism: { verdict: Determinism["verdict"]; rejected: string[] } | null;
+  /**
+   * How much of what the determinism replays read was a value rather than null,
+   * counted at the driver seam that took them. `null` when the stage did not
+   * run this session, because a reused `determinism.json` carries no values:
+   * a held field stores no forms, so the artifact names nothing that could be
+   * counted. See `blankReplay` in `make.ts` for why the verdict alone is not
+   * an answer to "did it read anything".
+   */
+  determinismValues: { read: number; of: number } | null;
   determinismBecause: string;
   /** Absent when no page was read. Absent is not zero. */
   fill: { urls: number; fields: FieldFill[] } | null;
@@ -97,6 +106,8 @@ export interface ScorecardOptions {
   /** Why there is no fill rate, when there is none. */
   fillBecause?: string | undefined;
   determinism?: Determinism | null | undefined;
+  /** What the determinism replays read, when this session took them. See `Scorecard.determinismValues`. */
+  determinismValues?: { read: number; of: number } | null | undefined;
   /** Why there is no determinism record, when there is none. */
   determinismBecause?: string | undefined;
 }
@@ -157,6 +168,7 @@ export function scorecard(scraper: CompiledScraper, reconciliation: Reconciliati
     modelCallsAtReplay: 0,
     modelCallsBecause: MODEL_CALLS_BECAUSE,
     determinism: options.determinism ? { verdict: options.determinism.verdict, rejected: options.determinism.fields.filter((f) => f.rejected).map((f) => f.field) } : null,
+    determinismValues: options.determinism ? (options.determinismValues ?? null) : null,
     determinismBecause: options.determinism
       ? options.determinism.because
       : (options.determinismBecause ?? "the determinism stage did not run, so nothing here says the extraction holds still"),
@@ -190,6 +202,32 @@ export function measurements(card: Scorecard): string {
   );
 }
 
+/**
+ * The fill as one line, for the stage block and the artifact both.
+ *
+ * Two fractions rather than one, and that is the whole point of this function.
+ * The block used to print `fill 0 of 5` alone, which is the count of fields
+ * read on *every* URL — so it says `fill 0 of 3` when nothing came back from
+ * anywhere, and it also says `fill 0 of 3` when all three fields came back on
+ * two of the three URLs. Those two Store B runs happened on the same day,
+ * one on the default browser and one on `--browser chromium`, and printed the
+ * same headline; the difference between "the scraper reads nothing" and "the
+ * scraper reads, and one page did not answer" was recoverable only from the
+ * bullets underneath. This repository already keeps the finding that a fill
+ * rate with one number in it can be believed either way: on the StoreC run
+ * `product_name` was 111 of 111 filled against pages that were an apology.
+ *
+ * So the second fraction is every field on every URL: `0 of 9 reads` and
+ * `6 of 9 reads` cannot be mistaken for each other.
+ */
+export function fillLine(card: Scorecard): string {
+  if (card.fill === null) return "fill not measured";
+  const everywhere = card.fill.fields.filter((field) => field.read === field.of).length;
+  const read = card.fill.fields.reduce((total, field) => total + field.read, 0);
+  const of = card.fill.fields.reduce((total, field) => total + field.of, 0);
+  return `fill ${everywhere} of ${card.fill.fields.length} fields, ${read} of ${of} reads`;
+}
+
 /** `scorecard.md`. */
 export function renderScorecard(card: Scorecard): string {
   const lines = [`# Scorecard — ${card.site}`, "", `Measured ${card.recordedAt}.`, "", measurements(card), ""];
@@ -220,6 +258,21 @@ export function renderScorecard(card: Scorecard): string {
   lines.push("## Does it hold still", "");
   lines.push(card.determinism === null ? `Not measured. ${card.determinismBecause}` : `\`${card.determinism.verdict}\` — ${card.determinismBecause}`);
   if (card.determinism && card.determinism.rejected.length > 0) lines.push("", `Rejected as unstable: ${card.determinism.rejected.join(", ")}.`);
+  // The sentence above is about movement and says nothing about values, and
+  // `determinism.json` cannot be asked: a field that held stores no forms.
+  // Printed here because this artifact outlives the transcript, and because
+  // "says the same thing twice about a page nobody changed" sitting three
+  // lines above a table of zeroes is what sent 2026-09-23 looking for a
+  // contradiction between two stages that were agreeing.
+  if (card.determinismValues && card.determinismValues.read === 0) {
+    lines.push(
+      "",
+      card.determinismValues.of === 0
+        ? "**No replay produced an item**, so the verdict above is about pages that offered no row to compare."
+        : `**Every one of the ${card.determinismValues.of} field readings the replays took came back null.** What held still was a blank extraction; ` +
+          "the verdict above is not evidence that this scraper read anything.",
+    );
+  }
   lines.push("");
 
   lines.push("## Does it actually read a page", "");

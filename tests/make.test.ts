@@ -330,6 +330,75 @@ describe("the second run: the questions answered and the list supplied", () => {
     expect(transcript()).toContain("did not hold still");
   });
 
+  /**
+   * Every field null on every reading — what a payload-bound compile looks like
+   * at replay when the page never takes delivery of the payload its `network`
+   * alternatives resolve against. Driven through `drift` rather than a second
+   * stub so the run still goes through the same driver, the same compile and
+   * the same two replay stages a real one does.
+   */
+  const BLANK: Record<string, string | null> = { productName: null, sku: null, listPrice: null, promoPrice: null, stock: null };
+  const blankOn = (pages: FixturePages, urls: readonly string[]): FixturePages => {
+    for (const url of urls) pages.drift.set(url, () => BLANK);
+    return pages;
+  };
+
+  it("a replay that read nothing is not allowed to pass as a stable one", async () => {
+    // The 2026-09-23 report: `determinism 3 replays x 3 URLs, 0 fields moved`
+    // four lines above `verify fill 0 of 3`, read as the two stages
+    // contradicting each other about the same pages through the same driver.
+    // They agreed. `judgeDeterminism` was asked whether the extraction moved
+    // and answered correctly — it did not — but `readOn` counts a field's key,
+    // `extractPage` null-fills every compiled field, and `held` on a blank
+    // reading is indistinguishable from `held` on a real one. So the verdict
+    // stands and the run says which of the two it measured.
+    const { result } = await full({}, blankOn(fixturePages(), URLS));
+    expect(result.status).toBe("delivered");
+
+    const determinism = JSON.parse(readFileSync(join(work(), "determinism.json"), "utf8")) as Determinism;
+    expect(determinism.verdict, "the verdict is not downgraded: nothing moved, and that is a true answer to the question asked").toBe("stable");
+    expect(determinism.fields.every((field) => field.outcome === "held")).toBe(true);
+    expect(determinism.fields.every((field) => field.readOn === 4), "`readOn` says 4 of 4 URLs about a replay that read nothing").toBe(true);
+
+    const text = transcript();
+    expect(text).toContain("0 fields moved");
+    // 4 bound URLs x 3 replays x 5 fields, counted at the seam that took them,
+    // because determinism.json stores no forms for a field that held.
+    expect(text).toContain("! read nothing  every one of the 60 field readings came back null");
+    expect(text).toContain("`stable` is the stability of a blank extraction");
+    expect(text).toContain("fill 0 of 5 fields, 0 of 20 reads");
+
+    // And in the artifact, which outlives the transcript and is where the
+    // sentence sits directly above the table of zeroes.
+    const card = readFileSync(join(work(), "scorecard.md"), "utf8");
+    expect(card).toContain("Every one of the 60 field readings the replays took came back null");
+    expect(card).toContain("What held still was a blank extraction");
+  });
+
+  it("a replay that read everything says nothing of the kind, and the fill says how much", async () => {
+    await full();
+    const text = transcript();
+    expect(text).not.toContain("read nothing");
+    expect(text).toContain("fill 5 of 5 fields, 20 of 20 reads");
+    expect(readFileSync(join(work(), "scorecard.md"), "utf8")).not.toContain("blank extraction");
+  });
+
+  it("the verify head tells a scraper that read nothing from one whose pages mostly answered", async () => {
+    // Both numbers in the report came from the same day: `fill 0 of 3` on the
+    // default browser and 2 of 3 per field on `--browser chromium`. Under a
+    // headline with one fraction in it those two runs printed the same line,
+    // and the difference between "this reads nothing" and "this reads, and one
+    // page did not answer" was recoverable only from the bullets underneath.
+    const { result } = await full({}, blankOn(fixturePages(), [`${SITE}/p/antiacido.html`]));
+    expect(result.status).toBe("delivered");
+
+    const text = transcript();
+    expect(text).toContain("fill 0 of 5 fields, 15 of 20 reads");
+    expect(text).toContain("! productName  read on 3 of 4 replayed URLs");
+    // Something was read, so the determinism verdict is about an extraction.
+    expect(text).not.toContain("read nothing");
+  });
+
   it("says out loud that cross-alternative disagreement was not measured", async () => {
     // U6b's finding lands in this artifact and this block; U6a never fills it.
     // `summarizeDeterminism` prints nothing when `alternatives` is absent, and
