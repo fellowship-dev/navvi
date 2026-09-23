@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Ficha</title></head>
+<body>
+<h1>Catalogo</h1>
+<div id="above"></div>
+<div id="detail"></div>
+<script>
+/*
+ * A synthetic stand-in for a single-page app that draws its shell, then stands
+ * still while it waits for its own API, then draws the part that matters.
+ *
+ * PAUSE_MS is the load-bearing number: it is longer than one settle poll and
+ * shorter than SETTLE_STABLE_POLLS of them, so a settle that calls one
+ * unchanged reading "finished" captures only the shell and a settle that waits
+ * for the quiet to hold captures the product. See the header of
+ * `src/make/pages.ts` for the live run this is a miniature of.
+ *
+ * Nothing here is copied from a real site. The product is invented.
+ */
+var PAUSE_MS = 1400;
+
+function shell() {
+  document.getElementById("above").innerHTML =
+    "<p>Farmacia de ejemplo. Envio a todo el pais. Retiro en tienda. " +
+    "Consulta la disponibilidad antes de comprar. Precios en pesos chilenos.</p>";
+  setTimeout(detail, PAUSE_MS);
+}
+
+function detail() {
+  document.getElementById("detail").innerHTML =
+    '<h2>Ejemplo Antiacido 20 mg 14 Capsulas</h2>' +
+    '<p class="sku">SKU 900103</p>' +
+    '<p class="list">Precio normal $ 7.990</p>' +
+    '<p class="promo">Precio oferta $ 6.392</p>';
+}
+
+setTimeout(shell, 150);
+</script>
+</body>
+</html>

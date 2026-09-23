@@ -35,7 +35,11 @@ import type { Capture, Obstacle, PageResponse } from "../investigate/index.js";
  *    is known. Discovery does not know it, and keeping everything is the whole
  *    point of tier 2.
  *  - **The consent click before the second settle.** On Store B it is the
- *    click that releases the product calls at all.
+ *    click that releases the product calls at all. (Re-measured 2026-09-23:
+ *    the page now reaches its full 12,069 characters and calls
+ *    `products/detail` on both engines with nothing clicked. The click stays
+ *    anyway — the banner sits over the page, and an obstacle nobody recorded
+ *    is an obstacle `reconcile.md` cannot cost.)
  *  - **Waiting for the render to stop growing rather than for a fixed three
  *    seconds.** Across nine runs of the fixed wait the verdict tracked exactly
  *    one thing: whether the page had finished rendering. 11,107 characters
@@ -43,6 +47,31 @@ import type { Capture, Obstacle, PageResponse } from "../investigate/index.js";
  *    tier 2 anchors candidate values against the rendered text and there was no
  *    text to anchor against. A gate that reports failure when the harness was
  *    impatient teaches you to ignore the gate.
+ *  - **Consent is tried twice: once after the navigation, and once after the
+ *    render settles.** `networkidle` is not the same moment on the two
+ *    engines. On `store-b.example/.../884669.html`, `goto` resolved at 7,288 ms
+ *    under Chromium — by which time the page was fully rendered and the
+ *    "Aceptar" button had been on screen for a while — and at 2,253 ms under
+ *    Camoufox, against a 2,470-byte shell with an empty `<title>` and no
+ *    consent button anywhere in the DOM; that button first appeared at
+ *    7,047 ms. So the single dismissal ran five seconds early on the default
+ *    browser, clicked nothing, recorded no obstacle, and left the banner over
+ *    the page for the whole visit, while `--browser chromium` clicked it and
+ *    looked fine. The fix is a second look once there is something to look
+ *    at, not a sleep before the first one.
+ *  - **The render has stopped when the text has stopped growing *and* the page
+ *    has stopped fetching for itself *and* both have held still for
+ *    `SETTLE_STABLE_POLLS` rounds.** Two equal samples 750 ms apart are not
+ *    evidence that a render finished; they are evidence that it paused. The
+ *    same Camoufox run sat at 3,174 characters from 7.0 s to 9.4 s while it
+ *    waited on `products/detail` and then jumped to 12,069, and the old rule
+ *    returned in the middle of that pause: the capture carried 1,410
+ *    characters of body text instead of 4,046, and tier 2 — which anchors
+ *    every candidate against that text — dropped all five fields with "no
+ *    captured leaf survived the filter". The payload counter is the part of
+ *    this that is a signal rather than a clock: through that pause the page
+ *    was still taking delivery (62 responses at 7.0 s, 104 at 9.4 s), which is
+ *    a page mid-render saying so.
  *
  * The one thing it does *not* copy is the consent selector. The script clicks
  * `Aceptar|Acepto|Entendido` by hand; this uses `prestep`'s `dismissConsent`,
@@ -51,12 +80,44 @@ import type { Capture, Obstacle, PageResponse } from "../investigate/index.js";
  * `Obstacle` the manuscript and then `reconcile.md` can cost.
  */
 
-/** Chrome on macOS. The pharmacies serve a different page to an unrecognised agent. */
+/**
+ * Chrome on macOS. The pharmacies serve a different page to an unrecognised agent.
+ *
+ * These two belong to `plainFetch` and are deliberately not handed to the
+ * browser context. A launched browser already has a coherent identity, and
+ * Camoufox's whole job is that its identity hangs together — announcing Chrome
+ * on macOS from a Firefox engine is the contradiction fingerprinting looks
+ * for. Measured 2026-09-23 on `store-b.example`: Camoufox introduced itself as
+ * Firefox 152 on Windows with `navigator.language` of `en-US` and was served
+ * the same page as Chromium, down to the character — 12,069 of rendered text,
+ * the same title, the same `products/detail` payload. The pharmacy cares what
+ * a bare HTTP client looks like, not what a real browser claims.
+ */
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36";
 const LOCALE = "es-CL";
 
-/** How long the render is given to stop growing before the run reads it anyway. */
+/** How long one visit's settling may take in total, across both passes, before the run reads the page anyway. */
 export const SETTLE_CAP_MS = 25_000;
+/** Gap between two readings of the render. */
+export const SETTLE_POLL_MS = 750;
+/**
+ * Consecutive unchanged readings that count as "finished" rather than "paused".
+ * Three of them is 2.25 s of quiet, against the 2.4 s Store B spends waiting
+ * on `products/detail` with a half-drawn page on screen. See the header.
+ */
+export const SETTLE_STABLE_POLLS = 3;
+/**
+ * The least any one settle may be given, whatever the visit has left of its cap.
+ *
+ * Enough polls to observe stability once: a settle that cannot do that is not a
+ * settle, it is a read. It matters after the late consent click, because the
+ * click is a change the run made itself and a page that has just lost its
+ * overlay re-lays-out around the hole. One Camoufox capture under load came
+ * back with 4,039 characters and its neighbour with zero — same click, same
+ * captured `products/detail`, the difference being that the first settle had
+ * eaten the whole 25 s and the second pass was allowed no polls at all.
+ */
+export const SETTLE_FLOOR_MS = SETTLE_POLL_MS * (SETTLE_STABLE_POLLS + 1);
 /** How many payloads one page may contribute. Tier 2 narrows them; it does not need all of them. */
 export const CAPTURE_LIMIT = 200;
 
@@ -108,16 +169,32 @@ export async function plainFetch(url: string, fetchImpl: typeof fetch = fetch): 
   }
 }
 
-/** Waits until the rendered text stops growing, or the cap. See the header for the nine runs behind this. */
-async function settleRender(page: Page, cap: number): Promise<number> {
-  const started = Date.now();
-  let previous = -1;
+/**
+ * Waits until the page stops changing, or until `deadline`. Returns the length
+ * of the rendered text it settled on.
+ *
+ * "Stops changing" is two readings, not one: the visible text, and how many
+ * payloads the page has taken delivery of so far. A page that is between its
+ * own API calls has a still DOM and is not finished, and telling that apart
+ * from a page that is finished is the whole job here — see the header for the
+ * run where getting it wrong cost every field on the page.
+ */
+async function settleRender(page: Page, deadline: number, payloads: () => number): Promise<number> {
+  let previousText = -1;
+  let previousPayloads = -1;
+  let unchanged = 0;
   for (;;) {
     const current = visibleText(await page.content().catch(() => "")).length;
-    if (current > 0 && current === previous) return current;
-    if (Date.now() - started > cap) return current;
-    previous = current;
-    await page.waitForTimeout(750);
+    const delivered = payloads();
+    if (current > 0 && current === previousText && delivered === previousPayloads) {
+      if (++unchanged >= SETTLE_STABLE_POLLS) return current;
+    } else {
+      unchanged = 0;
+    }
+    if (Date.now() > deadline) return current;
+    previousText = current;
+    previousPayloads = delivered;
+    await page.waitForTimeout(SETTLE_POLL_MS);
   }
 }
 
@@ -139,25 +216,43 @@ export async function openPages(options: PagesOptions): Promise<Pages> {
     return browser.context;
   };
 
+  /**
+   * One pass of the consent rules, recording every control it clicked as an
+   * `Obstacle`. Answers whether anything was clicked, because a banner that
+   * has just been dismissed is a page that is about to change again.
+   */
+  const dismiss = async (page: Page, url: string, obstacles: Obstacle[]): Promise<boolean> => {
+    const consent = await dismissConsent(page);
+    for (const click of consent.clicked) {
+      obstacles.push({
+        kind: "consent",
+        url,
+        because: `a consent dialog stood between the navigation and the page; navvi clicked ${click.role} "${click.name}"`,
+        evidence: click.name,
+        blocking: false,
+      });
+    }
+    return consent.clicked.length > 0;
+  };
+
   /** Navigate, dismiss consent, let the render settle, hand back the page and what it fetched. */
   const visit = async <T>(url: string, use: (page: Page, captured: ReturnType<typeof captureJson>, obstacles: Obstacle[]) => Promise<T>): Promise<T> => {
     const page = await (await context()).newPage();
     const obstacles: Obstacle[] = [];
     try {
       const captured = captureJson(page, { match: /./, limit: CAPTURE_LIMIT });
+      // One budget for the whole visit rather than one per settle, so a second
+      // pass cannot double what a page is allowed to cost.
+      const deadline = Date.now() + settleCap;
+      const delivered = () => captured.responses.length;
       await page.goto(url, { waitUntil: "networkidle", timeout: 60_000 }).catch(() => undefined);
-      const consent = await dismissConsent(page);
-      for (const click of consent.clicked) {
-        obstacles.push({
-          kind: "consent",
-          url,
-          because: `a consent dialog stood between the navigation and the page; navvi clicked ${click.role} "${click.name}"`,
-          evidence: click.name,
-          blocking: false,
-        });
-      }
+      await dismiss(page, url, obstacles);
       await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => undefined);
-      await settleRender(page, settleCap);
+      await settleRender(page, deadline, delivered);
+      // The banner the first pass was too early for. Under Camoufox this is
+      // the one that clicks; under Chromium it finds the page already clear
+      // and costs one evaluate. See the header.
+      if (await dismiss(page, url, obstacles)) await settleRender(page, Math.max(deadline, Date.now() + SETTLE_FLOOR_MS), delivered);
       await captured.settled();
       return await use(page, captured, obstacles);
     } finally {

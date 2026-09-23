@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Ficha</title>
+<style>
+  #shield { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 900 }
+  #shield .card { background: #fff; padding: 1.5rem; max-width: 30rem }
+</style>
+</head>
+<body>
+<h1>Catalogo</h1>
+<div id="progress"></div>
+<div id="detail"></div>
+<script>
+/*
+ * A synthetic stand-in for a single-page app that paints in stages and only
+ * puts its consent banner up once it has finished painting.
+ *
+ * The banner is inserted in the same tick the painting stops, which is what
+ * makes this deterministic rather than a race: any settle that believes the
+ * render has finished is by construction looking at a document that already
+ * has the banner in it, and any dismissal that runs before the render has
+ * finished is by construction looking at one that does not.
+ *
+ * Nothing here is copied from a real site. The product is invented.
+ */
+var STEPS = 5;
+var painted = 0;
+
+function reveal() {
+  document.getElementById("detail").innerHTML =
+    '<h2>Ejemplo Analgesico 500 mg 16 Comprimidos</h2>' +
+    '<p class="sku">SKU 900101</p>' +
+    '<p class="list">Precio normal $ 3.990</p>' +
+    '<p class="promo">Precio oferta $ 3.591</p>' +
+    '<p class="stock">Disponible en linea</p>';
+}
+
+function banner() {
+  var shield = document.createElement("div");
+  shield.id = "shield";
+  shield.innerHTML =
+    '<div class="card" role="dialog" aria-label="Cookies">' +
+    '<p>Usamos cookies para mejorar tu experiencia.</p>' +
+    '<button id="accept" type="button">Aceptar</button>' +
+    '<button id="manage" type="button">Configurar</button>' +
+    "</div>";
+  document.body.appendChild(shield);
+  document.getElementById("accept").addEventListener("click", function () {
+    shield.remove();
+    reveal();
+  });
+}
+
+function paint() {
+  if (painted < STEPS) {
+    painted += 1;
+    var line = document.createElement("p");
+    line.textContent = "Cargando la ficha del producto, paso " + painted + " de " + STEPS + ".";
+    document.getElementById("progress").appendChild(line);
+    setTimeout(paint, 250);
+    return;
+  }
+  banner();
+}
+
+setTimeout(paint, 200);
+</script>
+</body>
+</html>
