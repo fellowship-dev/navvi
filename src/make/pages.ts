@@ -73,6 +73,14 @@ import type { Capture, Obstacle, PageResponse } from "../investigate/index.js";
  *    was still taking delivery (62 responses at 7.0 s, 104 at 9.4 s), which is
  *    a page mid-render saying so.
  *
+ *  - **Every request goes out with its conditional headers removed.** The
+ *    reused context has a reused HTTP cache, and a second visit to a URL
+ *    revalidates rather than re-downloads: Store B answered `304` to the
+ *    4th, 7th and 10th visits of one session, the page rendered from the
+ *    browser's copy, and the capture — which can only see bodies that cross
+ *    the network — had nothing to bind. `refuseRevalidation` says what that
+ *    cost and why it cannot be paid in `captureJson` instead.
+ *
  * The one thing it does *not* copy is the consent selector. The script clicks
  * `Aceptar|Acepto|Entendido` by hand; this uses `prestep`'s `dismissConsent`,
  * which owns the consent rule table for the whole repository and hands back
@@ -199,6 +207,90 @@ async function settleRender(page: Page, deadline: number, payloads: () => number
 }
 
 /**
+ * The headers with which a browser asks "has this changed since I last saw
+ * it?". A request carrying one of them can be answered `304 Not Modified`,
+ * which is a header block and no body at all.
+ */
+const REVALIDATION_HEADERS = ["if-none-match", "if-modified-since"] as const;
+
+/**
+ * Takes the conditional headers off every request the page makes, so a server
+ * that would have answered `304 Not Modified` has to answer `200` with the
+ * body instead.
+ *
+ * This is the price of the reused context, and it went unpaid for a while.
+ * Measured on store-b.example, 2026-09-23, twelve visits to three product URLs
+ * through one Camoufox context:
+ *
+ * ```
+ * visit  1 884669.html  json=56  detail=200  values={"productName":"Acido Acetilsalicilico…","listPrice":"4690"}
+ * visit  4 884669.html  json=7   detail=304  values={"productName":null,"listPrice":null}
+ * visit  7 884669.html  json=8   detail=304  values={"productName":null,"listPrice":null}
+ * visit 10 884669.html  json=7   detail=304  values={"productName":null,"listPrice":null}
+ * ```
+ *
+ * The first visit to a URL got `200 application/json` and bound three fields.
+ * Every later visit to the same URL in the same context sent the ETag Cruz
+ * Verde had handed it, got `304`, and bound nothing — while the page itself
+ * rendered perfectly (11,190 characters of it), because the browser had the
+ * body in its cache and navvi did not. That is the whole of the defect that
+ * printed `determinism 3 replays x 3 URLs, 0 fields moved` over an extraction
+ * in which all 27 readings were null: the investigation visits each URL once
+ * and the replays visit it four more times, so the investigation bound from
+ * payloads the replays could no longer see.
+ *
+ * It cannot be paid at the capture instead. A 304 carries no `content-type`,
+ * so `captureJson`'s JSON filter drops it, and reading it anyway is not on
+ * offer: Playwright counts 304 among the redirect statuses and answers
+ * `response.json()` with *"Response body is unavailable for redirect
+ * responses"* on both engines. The body the page is using exists only inside
+ * the browser's cache. So the request has to be one the cache cannot satisfy.
+ *
+ * Half the work here is done by installing the route handler at all, and that
+ * half is worth naming because it is not what the code appears to say. A
+ * request Playwright is routing is a request the browser's HTTP cache does not
+ * get to answer, so a payload sent with `Cache-Control: max-age=600` — which
+ * the browser would otherwise reuse for ten minutes without asking anyone —
+ * crosses the network on every visit. Measured against
+ * `tests/repeat-visit.test.ts`'s fixture: four visits, four requests with this
+ * installed, and exactly one without it. Stripping the validators is the other
+ * half, for the endpoints that do ask: it is what makes the request they send
+ * answerable with a body rather than with a 304.
+ *
+ * The surgery is otherwise the smallest that does that. A request with no
+ * conditional header is continued untouched rather than re-sent with a header
+ * list navvi rebuilt — `route.continue({ headers })` replaces the whole block,
+ * and a rebuilt block is a different client to anything that fingerprints
+ * header order. On a Store B product page that is every request but one.
+ *
+ * What it costs the run was measured rather than argued, and it does not
+ * show. Two back-to-back passes over two store-b.example product pages, twice
+ * each, one with this installed and one without, returned the same page to
+ * the character — 3,871 and 3,555 characters of body text either way, off
+ * HTML that agreed to within 200 bytes — in 25.9 s, 9.0 s, 9.9 s and 9.4 s
+ * against 25.2 s, 9.2 s, 9.8 s and 9.6 s. A visit to a page like this waits
+ * on its settle, not on its bytes, and one interception per request — about
+ * 190 of them — does not show up against that. The pass that read nothing was
+ * not the faster one; it was the same one with less to show for it.
+ */
+async function refuseRevalidation(page: Page): Promise<void> {
+  await page.route("**/*", async (route) => {
+    try {
+      const headers = await route.request().allHeaders();
+      const conditional = REVALIDATION_HEADERS.filter((name) => name in headers);
+      if (conditional.length === 0) return await route.continue();
+      for (const name of conditional) delete headers[name];
+      return await route.continue({ headers });
+    } catch {
+      // The page navigated away or closed mid-interception. The request went
+      // with it; letting it through unmodified is the only thing left to try,
+      // and failing at that is not a fact about the site.
+      await route.continue().catch(() => undefined);
+    }
+  });
+}
+
+/**
  * Opens a browser and returns the three verbs over it.
  *
  * The context is reused across every URL, which is what makes a consent click
@@ -240,6 +332,7 @@ export async function openPages(options: PagesOptions): Promise<Pages> {
     const page = await (await context()).newPage();
     const obstacles: Obstacle[] = [];
     try {
+      await refuseRevalidation(page);
       const captured = captureJson(page, { match: /./, limit: CAPTURE_LIMIT });
       // One budget for the whole visit rather than one per settle, so a second
       // pass cannot double what a page is allowed to cost.
