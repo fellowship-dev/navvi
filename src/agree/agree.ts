@@ -7,8 +7,14 @@
  *
  *  - `investigate/leaves.ts` `narrow` — a path present on every sample.
  *  - `investigate/investigate.ts` `bindRole` — a declared role every sample declares.
- *  - `investigate/investigate.ts` tier 2 — an endpoint every sample asked for.
+ *  - `investigate/investigate.ts` tier 2 — an endpoint the samples asked for.
  *  - `compile/fields.ts` `intersectCandidates` — a selector that resolves everywhere.
+ *
+ * A fifth was found on 2026-09-23 and had never been counted: `catalogueOf` in
+ * `investigate/investigate.ts`, which builds the leaf inventory over the
+ * contributing samples. It reads the way `narrow` does — a payload a sample
+ * answered has no such fact, rather than a question it could not put — and is
+ * strict for that reason.
  *
  * Each was correct in its own encounter and contradicted the others at a seam,
  * and every unit passed its own tests. Defect 3 of that run was tier 2 deleting
@@ -31,8 +37,11 @@
  *
  *  - **unasked** — this sample never put the question. Store B's
  *    `products/recommendations` is called on two of three pages; the third page
- *    has no opinion about it because it never asked. An intersection has to
- *    keep that veto, or a page's own furniture becomes a source for everyone.
+ *    has no opinion about it because it never asked. Whether an intersection
+ *    keeps that veto is the call site's to make, and they no longer all make it
+ *    the same way: tier 2 gave it up on 2026-09-23, because a render that
+ *    missed a call and a widget only two pages carry are the same observation
+ *    here. The argument is at that call site.
  *  - **unservable** — this sample asked and could not be answered. That is a
  *    fact about *that sample*, not about the endpoint, and it must not delete
  *    the endpoint for the samples that did get an answer.
@@ -94,12 +103,16 @@ export interface AgreeOptions {
    * at a call site moves `unasked` into `silent` alongside `unservable` — the
    * comparison then rests on whoever answered, subject to `floor`.
    *
-   * It is deliberately not `false` anywhere yet. A live render that
-   * nondeterministically misses one page's `products/detail` call currently
-   * deletes that endpoint for every sample and the run binds nothing, which is
-   * an argument for tolerance; "a page's own furniture must not become a
-   * source for pages that never load it" is the argument against. That is a
-   * product decision, not a refactor, and it is Max's.
+   * **Tier 2 passes `false` since 2026-09-23**, and is the only call site that
+   * does. A live render that nondeterministically misses one page's
+   * `products/detail` call was deleting that endpoint for every sample, and
+   * `npm run smoke:live -- "Store B"` bound nothing about one run in three
+   * because of it. The argument against tolerance — "a page's own furniture
+   * must not become a source for pages that never load it" — is answered at
+   * that call site by the floor and by the four filters below it, not here.
+   * The whole argument is written there; this option only carries it out.
+   *
+   * The other call sites stay `true`, and each says why where it asks.
    */
   requireAskedByAll?: boolean;
   /**
@@ -166,13 +179,39 @@ function name(perSample: readonly Observation<unknown>[], index: number): string
   return `sample ${index + 1} (${why})`;
 }
 
+/**
+ * Who was left out, and why — in two clauses, because there are two reasons.
+ *
+ * The first version of this wrote one sentence for both, and tier 2 going
+ * tolerant on 2026-09-23 made that sentence lie: an endpoint one sample never
+ * called came out as *"1 of 3 sample(s) asked this endpoint and got no answer
+ * … — sample 3 (never asked it)"*, which asserts in its lead-in the opposite
+ * of what it names in its tail. That reads as a bug in the run rather than in
+ * the prose, and this string is committed next to a scraper and read months
+ * later by somebody deciding whether to trust a binding.
+ *
+ * So `unservable` keeps its wording, verbatim from tier 2's 2026-09-22 fix —
+ * it is the wording that had to argue a live compile, and `tests/agree.test.ts`
+ * pins it — and `unasked` gets its own, naming the trade it is making.
+ */
 function rationale(perSample: readonly Observation<unknown>[], silent: readonly number[], subject: string): string {
   if (silent.length === 0) return `all ${perSample.length} sample(s) answered ${subject}`;
-  // Verbatim from tier 2's 2026-09-22 fix, which is what made that compile
-  // arguable, plus the samples it is talking about.
-  return (
-    `${silent.length} of ${perSample.length} sample(s) asked ${subject} and got no answer, ` +
-    `and are left out of the comparison rather than deleting it` +
-    ` — ${silent.map((index) => name(perSample, index)).join("; ")}`
-  );
+  const asked = silent.filter((index) => perSample[index]?.state === "unservable");
+  const never = silent.filter((index) => perSample[index]?.state === "unasked");
+  const clauses: string[] = [];
+  if (asked.length > 0) {
+    clauses.push(
+      `${asked.length} of ${perSample.length} sample(s) asked ${subject} and got no answer, ` +
+        `and are left out of the comparison rather than deleting it` +
+        ` — ${asked.map((index) => name(perSample, index)).join("; ")}`,
+    );
+  }
+  if (never.length > 0) {
+    clauses.push(
+      `${never.length} of ${perSample.length} sample(s) never asked ${subject}, ` +
+        `and it rests on the ones that did rather than being deleted for all of them` +
+        ` — ${never.map((index) => name(perSample, index)).join("; ")}`,
+    );
+  }
+  return clauses.join("; ");
 }

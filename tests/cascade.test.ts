@@ -658,10 +658,26 @@ describe("Store B, three samples — one product the store cannot serve must not
     expect(field(manuscript, "listPrice").match).toBe("catalog-svc/products/detail");
   });
 
-  it("drops an endpoint only two of the three pages ever asked for", async () => {
-    // `products/recommendations` is on two Store B pages and not the third.
-    // Relaxing "answered by every sample" must not relax "asked by every
-    // sample" with it, or a page's own furniture becomes a source.
+  /**
+   * The endpoint two of the three pages asked for, and the trade of 2026-09-23.
+   *
+   * This test used to assert that `products/recommendations` was dropped, on
+   * the argument that relaxing "answered by every sample" must not relax
+   * "asked by every sample" with it. Tier 2 relaxed it anyway, because the
+   * same veto was deleting `products/detail` whenever a live render missed one
+   * page's call — see the argument at the `agree` call in
+   * `src/investigate/investigate.ts`, and the end-to-end case in
+   * `tests/investigate.test.ts`.
+   *
+   * So the assertion moves to where the protection actually is, which is what
+   * the 2026-09-22 run measured: ten furniture endpoints passed the veto and
+   * bound zero of five fields. Surviving the intersection is not becoming a
+   * source. `no-variation-no-field` is, here, the filter that does it — a
+   * recommendation list that answers both pages identically is not describing
+   * either product — and the manuscript says the endpoint rested on two of the
+   * three samples rather than letting it pass as though all three agreed.
+   */
+  it("keeps an endpoint only two of the three pages asked for out of the fields, and says it rested on two", async () => {
     const captures = capturesOf(detail("-3"));
     for (const url of urls.slice(0, 2)) {
       captures[url] = {
@@ -670,7 +686,15 @@ describe("Store B, three samples — one product the store cannot serve must not
       };
     }
     const manuscript = await investigate({ site: "store-b.example", fields: FIELDS, sample, sources: sourcesOf(pages, captures), now: NOW });
-    expect(tier(manuscript, 2).sources.some((source) => (source.match ?? "").includes("recommendations"))).toBe(false);
+    // No field comes out of it, which is the thing that was ever at stake.
+    expect(manuscript.fields.some((entry) => (entry.match ?? "").includes("recommendations"))).toBe(false);
+    expect(manuscript.inventory!.some((leaf) => leaf.match.includes("recommendations"))).toBe(false);
+    // And the manuscript is explicit about what it rested on, rather than
+    // silently binding over a subset of the samples.
+    expect(tier(manuscript, 2).because).toContain("catalog-svc/products/recommendations/product-to-product (sample 3 never asked it)");
+    const widget = tier(manuscript, 2).sources.filter((source) => (source.match ?? "").includes("recommendations"));
+    expect(widget).toHaveLength(2);
+    for (const source of widget) expect(source.because).toContain("sample 3 (never asked it)");
   });
 });
 

@@ -619,8 +619,9 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
     const texts = captures.map((capture) => capture.text);
     const pageText = texts.every((text) => text !== undefined && text !== "") ? (texts as string[]) : undefined;
 
-    // Group every capture by endpoint, then keep only the endpoints every
-    // sample asked: an endpoint one page called is not a source, it is a page.
+    // Group every capture by endpoint. Which of those endpoints is a source is
+    // the question the `agree` call below answers, and it is not "the ones
+    // every sample asked" any more — see the argument there.
     const perSample = captures.map((capture) => {
       const grouped = new Map<string, CapturedResponse[]>();
       for (const response of capture.responses) {
@@ -633,8 +634,8 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
     });
 
     /**
-     * *Asked* by every sample, *answered* by at least two — and the live run of
-     * 2026-09-22 is the whole of why those are two questions rather than one.
+     * *Answered* by at least two — and the live run of 2026-09-22 is the whole
+     * of why "asked" and "answered" are two questions rather than one.
      *
      * The rule this replaces demanded a usable response from every sample, so a
      * sample the store could not serve deleted the endpoint for all of them.
@@ -650,10 +651,10 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
      * up, restated: a sample with nothing in it does not merely fail to
      * contribute, it *deletes every candidate for every field*, because every
      * filter below here is an intersection. So a sample that did not answer is
-     * dropped from that endpoint's comparison rather than allowed to veto it,
-     * and the endpoint still has to have been asked everywhere, which is what
-     * keeps `products/recommendations` and `products-bundled` — called on two
-     * of the three pages — out.
+     * dropped from that endpoint's comparison rather than allowed to veto it.
+     * The rule as first written also required the endpoint to have been *asked*
+     * everywhere, and that half is the subject of the second dated section
+     * below; it no longer holds.
      *
      * Two is the floor because `narrow`'s variation check needs two samples to
      * mean anything. With a single capture, one answer is the whole comparison
@@ -661,29 +662,83 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
      *
      * On 2026-09-23 the rule stopped living here. `agree` in `agree/agree.ts`
      * owns it for the four places that intersect samples, and this call is
-     * where tier 2 states which policy it wants: asked by every sample,
-     * answered by `floor`, and a sample that asked without being answered left
-     * out rather than allowed to veto. The wording below is the wording that
-     * had to argue this compile, and it moved with the rule.
+     * where tier 2 states which policy it wants. The wording below is the
+     * wording that had to argue this compile, and it moved with the rule.
      *
-     * `requireAskedByAll: true` is the open question, and it is Max's. A live
-     * render that nondeterministically misses one page's `products/detail`
-     * call deletes the endpoint for every sample and binds nothing; the
-     * `products/recommendations` case above is the reason it is still `true`.
+     * ## And on 2026-09-23, the other half of it
+     *
+     * The paragraph above was written about *answered* and left *asked*
+     * strict, which is the 2026-09-22 lesson learned once and applied to one
+     * of the two halves of one rule. A live render misses a call
+     * nondeterministically — a fetch still in flight when the capture closed,
+     * a lazy component that did not come into view — and an endpoint nobody
+     * failed to serve is deleted for every sample because one of them never
+     * got round to asking. `npm run smoke:live -- "Store B"` returned
+     * `0 of 5 bound` instead of `3 of 5` roughly one run in three — observed
+     * three times on 2026-09-23 — and the missing call was `products/detail`
+     * every time.
+     *
+     * So `requireAskedByAll` is `false` here, and the argument it overrules —
+     * "an endpoint only two of three pages ever call may not be a per-product
+     * endpoint at all" — is answered by what is measured to be doing that job
+     * rather than by this veto:
+     *
+     *  - **The floor already refuses a one-sample endpoint.** A sample that
+     *    answered necessarily asked, so `contributors >= floor` is a floor on
+     *    *asked* too, and `floor` is `min(2, samples)`. An endpoint one page
+     *    called is still not a source, on any run with more than one capture;
+     *    writing the floor out again against `asked` would only be a second
+     *    spelling of that.
+     *  - **The veto was never what kept the furniture out.** On 2026-09-22 ten
+     *    endpoints passed `asked by every sample` — the basket, the delivery
+     *    zones, the coverage table, the CMS, the tracking beacon — and bound
+     *    **zero** of five fields between them. What rejected them is
+     *    everything below this line: the declared type, `no-variation-no-field`
+     *    over payloads that answer every page identically, the anchor against
+     *    what each page actually showed a reader, and `named` ordering, which
+     *    takes a field from the endpoint whose *key names* it before one that
+     *    merely had nothing else to offer.
+     *
+     * What is genuinely given up is the endpoint two of three pages call
+     * *because they are different pages* — `products/recommendations`,
+     * `products-bundled`. That is given up knowingly: a render that missed one
+     * call and a widget that only two pages carry are the same observation
+     * here, two of three asked, and no counting rule tells them apart. The
+     * trade is a class of endpoint the four filters above already reject
+     * against a whole run binding nothing one time in three, and the
+     * manuscript says which endpoints rested on fewer than all the samples so
+     * that a reader can see the trade being made rather than infer it.
+     *
+     * The key set is the **union** over the samples and not sample 1's call
+     * list, which was harmless while `asked` was strict — a key sample 1 never
+     * asked was rejected anyway — and is the whole fix once it is tolerant.
+     * Iterating sample 1's keys would have made the outcome depend on *which*
+     * sample dropped the call: an endpoint sample 1 never asked for is not
+     * even a key to compare, so a third of the runs that flake would still
+     * bind nothing and the flag would read as fixed. Sorted, because two runs
+     * of one investigation must produce one manuscript.
      */
     const floor = Math.min(2, perSample.length);
     const answering = new Map<string, Agreement<CapturedResponse>>();
-    for (const key of perSample[0]?.keys() ?? []) {
+    /** Which samples never called an endpoint the others did — the tier's own record, for the manuscript. */
+    const neverAsked = new Map<string, number[]>();
+    for (const key of [...new Set(perSample.flatMap((grouped) => [...grouped.keys()]))].sort()) {
+      const missing: number[] = [];
       const agreement = agree(
-        perSample.map((grouped) => {
+        perSample.map((grouped, index) => {
           const bucket = grouped.get(key);
-          if (bucket === undefined) return UNASKED;
+          if (bucket === undefined) {
+            missing.push(index);
+            return UNASKED;
+          }
           const newest = newestUsable(bucket);
           return newest === null ? unservable<CapturedResponse>(`asked ${bucket.length} time(s), never usably answered`) : answered(newest);
         }),
-        { floor, requireAskedByAll: true, subject: "this endpoint" },
+        { floor, requireAskedByAll: false, subject: "this endpoint" },
       );
-      if (agreement !== null) answering.set(key, agreement);
+      if (agreement === null) continue;
+      answering.set(key, agreement);
+      if (missing.length > 0) neverAsked.set(key, missing);
     }
     const keys = [...answering.keys()].sort();
 
@@ -812,9 +867,27 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
           ` from the ${boundKeys.size} bound endpoint(s), requested or not and unfiltered by type` +
           (pageText === undefined ? ", with the anchor question unasked" : "");
 
+    /**
+     * Which endpoints rested on fewer than all the samples, and who did not ask.
+     *
+     * Every one of these would have been deleted before 2026-09-23, so a
+     * manuscript that did not say so would be silent about the change that
+     * produced it — and about the one risk tolerating `asked` takes, which is
+     * an endpoint some pages carry and others do not. Each endpoint's
+     * `SourceRecord` carries `agree`'s own sentence about the same samples;
+     * this is the tier-level index of them, because a reader asking "what did
+     * this run rest on" should not have to read every source to find out.
+     */
+    const partial = keys.filter((key) => neverAsked.has(key));
+    const askedBecause =
+      partial.length === 0
+        ? ""
+        : `; ${partial.length} endpoint(s) were not called by every sample and were compared over the ones that did, rather than deleted for all of them: ` +
+          partial.map((key) => `${endpointMatch(key)} (${neverAsked.get(key)!.map((index) => `sample ${index + 1}`).join(", ")} never asked it)`).join("; ");
+
     tier2 = {
       outcome: "ran",
-      because: `${keys.length} endpoint(s) the page fetched for itself, over ${captures.length} rendered sample(s)${pageText === undefined ? "; unanchored, because no rendered text was supplied" : ""}${inventoryBecause}`,
+      because: `${keys.length} endpoint(s) the page fetched for itself, over ${captures.length} rendered sample(s)${pageText === undefined ? "; unanchored, because no rendered text was supplied" : ""}${askedBecause}${inventoryBecause}`,
     };
   }
 

@@ -3,7 +3,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { bank } from "../src/heuristics/index.js";
 import { bindField } from "../src/investigate/bind.js";
+import { investigate, type Capture, type Sources } from "../src/investigate/investigate.js";
 import { anchors, flatten, narrow, typeMatches, type Leaf } from "../src/investigate/leaves.js";
+import type { Manuscript, RequestedField } from "../src/investigate/manuscript.js";
+import { chooseSample, type UrlProbe } from "../src/investigate/sample.js";
 
 /**
  * U2b: the payload a page fetches for itself, flattened into candidates, and
@@ -16,7 +19,7 @@ import { anchors, flatten, narrow, typeMatches, type Leaf } from "../src/investi
  */
 
 const DIR = join(import.meta.dirname, "fixtures", "investigate");
-const detail = (n: "" | "-2" = ""): unknown => JSON.parse(readFileSync(join(DIR, `storeb-detail${n}.json`), "utf8"));
+const detail = (n: "" | "-2" | "-3" = ""): unknown => JSON.parse(readFileSync(join(DIR, `storeb-detail${n}.json`), "utf8"));
 
 /** What each sample page showed a reader, near enough to anchor against. */
 const PAGE_TEXT = [
@@ -159,5 +162,167 @@ describe("bindField — the bank's first consumer", () => {
     const binding = bindField("listPrice", samples(), { type: "money", pageText: PAGE_TEXT, view });
     expect(binding.askModel).toBe(true);
     expect(binding.verdicts[0]!.verdict.because).toContain("disabled for this case");
+  });
+});
+
+// ------------------------------- tier 2, end to end: the call one render missed
+
+/**
+ * The third defect of 2026-09-22, in the half of the rule it was not applied to.
+ *
+ * That fix taught tier 2 that a sample which *could not answer* must be left
+ * out of the endpoint's comparison rather than allowed to delete it for
+ * everyone. It left "asked by every sample" strict, and a live render does not
+ * only fail to answer — sometimes it never gets round to asking. A fetch still
+ * in flight when the capture closed, a lazy component that never came into
+ * view, and `catalog-svc/products/detail` is missing from one capture
+ * while the page that produced it rendered perfectly well. Before 2026-09-23
+ * that deleted the endpoint for all three samples and the run bound nothing:
+ * `npm run smoke:live -- "Store B"` returned `0 of 5 bound` instead of
+ * `3 of 5` three times on 2026-09-23.
+ *
+ * The fixture is that run and not the 2026-09-22 one, and the difference is
+ * the point: there is no 401-then-500 here and no chrome-only page. Every
+ * sample rendered its own product and showed a reader its own prices. One of
+ * them simply has no detail response in its capture at all.
+ *
+ * It runs through `investigate` rather than through `agree`, because what
+ * failed in the live run was the *wiring* — which samples tier 2 offers the
+ * comparison, and which endpoint keys it even considers. `tests/agree.test.ts`
+ * pins the rule; this pins tier 2 asking for it.
+ */
+describe("tier 2 — an endpoint one render never asked for", () => {
+  const ids = ["100001", "100002", "100003"] as const;
+  const urls = ids.map((id) => `https://example.test/p/${id}`);
+  const sample = chooseSample(
+    urls.map((url) => ({ url, status: 200, hasDeclaredProduct: undefined, priceCount: 2, inStock: true }) satisfies UrlProbe),
+    { size: 3 },
+  );
+  const pages = Object.fromEntries(urls.map((url) => [url, readFileSync(join(DIR, "storeb-shell.html"), "utf8")]));
+
+  const FIELDS: RequestedField[] = [
+    { name: "productName", type: "text" },
+    { name: "listPrice", type: "money" },
+    { name: "promoPrice", type: "money" },
+  ];
+
+  const API = "https://api.example.test";
+  const DETAIL = "catalog-svc/products/detail";
+
+  /** What every Store B page loads for itself, answering the same bytes each time. */
+  const shared = (): Capture["responses"] => [
+    { url: `${API}/shopping-basket-svc/basket`, status: 200, body: { total: 0, currency: "CLP", lines: 0 } },
+    { url: `${API}/settings-svc/coverage`, status: 200, body: { coverage: [{ comuna: "Centro", despacho: true }] } },
+  ];
+
+  /** The product endpoint, with the 401 the page always gets before its anonymous session exists. */
+  const detailCalls = (id: string, body: unknown): Capture["responses"] => [
+    { url: `${API}/catalog-svc/products/detail/${id}`, status: 401, body: { error: "La sesion ha expirado", errorCode: "INVALID_SESSION" } },
+    { url: `${API}/catalog-svc/products/detail/${id}?inventoryId=Zona0001`, status: 200, body },
+  ];
+
+  /** What each page showed a reader. All three rendered their own product: nothing here is a shell. */
+  const TEXT = [
+    "Ejemplo Comprimidos 100 mg 30 Comprimidos $ 4.990 $ 4.491 Club Store B $ 3.992 Laboratorio Ejemplo",
+    "Otro Jarabe 120 ml $ 12.990 $ 11.691 Laboratorio Otro",
+    "Tercero Capsulas 500 mg 16 Capsulas $ 7.490 $ 6.741 Laboratorio Tercero",
+  ];
+  const BODIES = [detail(), detail("-2"), detail("-3")];
+  const LIST = [4990, 12990, 7490];
+  const PROMO = [4491, 11691, 6741];
+  const NAMES = ["Ejemplo Comprimidos 100 mg 30 Comprimidos", "Otro Jarabe 120 ml", "Tercero Capsulas 500 mg 16 Capsulas"];
+
+  /**
+   * `missed` is the sample whose capture holds no `products/detail` response
+   * at all — not a refusal, not an empty body: the call is absent.
+   *
+   * The first sample also carries a recommendations widget nobody else loads.
+   * It is the case the strict rule was protecting — an endpoint that is a
+   * page's own furniture rather than a source — and the floor, not the veto,
+   * is what has to keep it out now.
+   */
+  function capturesOf(missed: number | undefined): Record<string, Capture> {
+    return Object.fromEntries(
+      urls.map((url, index) => [
+        url,
+        {
+          responses: [
+            ...shared(),
+            ...(index === 0 ? [{ url: `${API}/catalog-svc/products/recommendations/${ids[0]}`, status: 200, body: { products: [{ name: "Sugerido Gotas 10 ml", price: 1990 }] } }] : []),
+            ...(index === missed ? [] : detailCalls(ids[index]!, BODIES[index])),
+          ],
+          text: TEXT[index]!,
+        } satisfies Capture,
+      ]),
+    );
+  }
+
+  async function runMissing(missed: number | undefined): Promise<Manuscript> {
+    const captures = capturesOf(missed);
+    const sources: Sources = {
+      fetch: (url: string) => Promise.resolve({ url, status: 200, body: pages[url] ?? "" }),
+      capture: (url: string) => Promise.resolve(captures[url] ?? { responses: [] }),
+    };
+    return investigate({ site: "store-b.example", fields: FIELDS, sample, sources, now: new Date("2026-09-23T18:00:00.000Z") });
+  }
+
+  const tier2 = (manuscript: Manuscript): Manuscript["tiers"][number] => manuscript.tiers.find((entry) => entry.tier === 2)!;
+  const field = (manuscript: Manuscript, name: string): Manuscript["fields"][number] => manuscript.fields.find((entry) => entry.field === name)!;
+  const kept = <T>(values: readonly T[], missed: number): T[] => values.filter((_, index) => index !== missed);
+
+  for (const missed of [0, 1, 2]) {
+    it(`binds from the two samples that asked when sample ${missed + 1}'s render never called the endpoint`, async () => {
+      const manuscript = await runMissing(missed);
+
+      // The endpoint survives: asked by two, answered by two, floor of two met.
+      const payloads = tier2(manuscript).sources.filter((source) => source.match === DETAIL);
+      expect(payloads).toHaveLength(2);
+      for (const source of payloads) expect(source.status).toBe(200);
+
+      // And it is bound, over exactly the samples that have it — which is the
+      // `0 of 5` that made this a bug rather than a preference.
+      for (const name of ["productName", "listPrice", "promoPrice"]) {
+        expect(field(manuscript, name).tier, name).toBe(2);
+        expect(field(manuscript, name).match, name).toBe(DETAIL);
+      }
+      expect(field(manuscript, "listPrice").path).toBe("productData.prices[price-list-std]");
+      expect(field(manuscript, "listPrice").values).toEqual(kept(LIST, missed));
+      expect(field(manuscript, "promoPrice").values).toEqual(kept(PROMO, missed));
+      expect(field(manuscript, "productName").values).toEqual(kept(NAMES, missed));
+      expect(manuscript.uncovered).toEqual([]);
+    });
+
+    it(`says which sample never asked, at the tier and at the source, for sample ${missed + 1}`, async () => {
+      const manuscript = await runMissing(missed);
+
+      // The tier-level index: which endpoints rested on fewer than all the
+      // samples, and who was not there. A run that quietly bound over two of
+      // three would be the same silence the 2026-09-22 fix was written to end.
+      expect(tier2(manuscript).because).toContain(`${DETAIL} (sample ${missed + 1} never asked it)`);
+      expect(tier2(manuscript).because).toContain("were not called by every sample");
+
+      // And `agree`'s own sentence, on the endpoint's sources, naming the same sample.
+      const payloads = tier2(manuscript).sources.filter((source) => source.match === DETAIL);
+      for (const source of payloads) expect(source.because).toContain(`sample ${missed + 1} (never asked it)`);
+    });
+  }
+
+  it("still refuses the endpoint only one sample ever called", async () => {
+    // Tolerating `asked` does not mean tolerating a comparison of one. The
+    // floor is `min(2, samples)` and a sample that answered necessarily asked,
+    // so a widget one page carries is still not a source — which is the case
+    // `requireAskedByAll: true` used to be carrying.
+    const manuscript = await runMissing(1);
+    expect(tier2(manuscript).sources.some((source) => (source.match ?? "").includes("recommendations"))).toBe(false);
+    expect(manuscript.fields.some((entry) => entry.match?.includes("recommendations"))).toBe(false);
+  });
+
+  it("says nothing about missing calls when every sample made all of them", async () => {
+    const manuscript = await runMissing(undefined);
+    const payloads = tier2(manuscript).sources.filter((source) => source.match === DETAIL);
+    expect(payloads).toHaveLength(3);
+    expect(field(manuscript, "listPrice").values).toEqual(LIST);
+    expect(tier2(manuscript).because).not.toContain("never asked it");
+    for (const source of payloads) expect(source.because).not.toContain("got no answer");
   });
 });

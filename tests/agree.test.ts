@@ -72,16 +72,37 @@ describe("agree — the policy each call site states", () => {
   });
 
   /**
-   * The tolerant policy: not used anywhere on 2026-09-23, and deliberately so
-   * — whether tier 2's "asked by ALL samples" should become tolerant is an
-   * open product question. This test pins what the one-line change would *do*,
-   * so the decision is about the policy rather than about the mechanism.
+   * The tolerant policy, which tier 2 has passed since 2026-09-23: a live
+   * render that nondeterministically misses one page's `products/detail` call
+   * must not delete the endpoint for the two pages that have it. The argument
+   * and what replaces the veto live at the call site in
+   * `src/investigate/investigate.ts`; what this pins is the mechanism it asks
+   * for, and `tests/investigate.test.ts` pins tier 2 asking for it.
    */
   it("without requireAskedByAll, an unasked sample is silent rather than fatal", () => {
     const result = agree([answered("a"), answered("b"), UNASKED], { requireAskedByAll: false, floor: 2 });
     expect(result?.values).toEqual(["a", "b"]);
     expect(result?.silent).toEqual([2]);
     expect(result?.because).toContain("never asked it");
+  });
+
+  /**
+   * The half of the tolerant policy that does the refusing.
+   *
+   * Tier 2 stopped letting an unasked sample veto an endpoint and did **not**
+   * stop refusing an endpoint one page called: a sample that answered
+   * necessarily asked, so the floor on answers is a floor on askers too. That
+   * is the whole of what keeps a page's own furniture from becoming a source
+   * once the veto is gone, so it is worth one line here saying which option
+   * carries it.
+   */
+  it("without requireAskedByAll, the floor still refuses a comparison of one", () => {
+    const floor = 2;
+    expect(agree([answered("a"), UNASKED, UNASKED], { requireAskedByAll: false, floor })).toBeNull();
+    // Asked by one and answered by one is the same refusal as asked by three
+    // and answered by one: the floor never counts anything but answers.
+    expect(agree([answered("a"), unservable<string>("no usable response"), UNASKED], { requireAskedByAll: false, floor })).toBeNull();
+    expect(agree([answered("a"), answered("b"), UNASKED], { requireAskedByAll: false, floor })?.contributors).toEqual([0, 1]);
   });
 
   it("an empty sample set is an empty agreement, not a null", () => {
@@ -106,6 +127,38 @@ describe("agree — the rationale is data", () => {
   it("names which sample was left out and why", () => {
     const result = agree([answered("a"), unservable<string>("401, then 500 twice"), answered("c")], { floor: 2, subject: "this endpoint" });
     expect(result?.because).toContain("sample 2 (401, then 500 twice)");
+  });
+
+  it("does not say a sample got no answer when it never asked the question", () => {
+    /**
+     * The lead-in and the tail used to contradict each other. One sentence
+     * covered both reasons a sample can be silent, so the moment tier 2 went
+     * tolerant on 2026-09-23 an endpoint one page never called came out as
+     * "1 of 3 sample(s) asked this endpoint and got no answer … — sample 3
+     * (never asked it)": an assertion in the lead-in that its own tail denies.
+     * This string is committed beside a scraper and read months later by
+     * somebody deciding whether to trust a binding, so it may not lie about
+     * which of the two things happened.
+     */
+    const result = agree([answered("a"), answered("b"), UNASKED], { floor: 2, requireAskedByAll: false, subject: "this endpoint" });
+    expect(result?.because).toBe(
+      "1 of 3 sample(s) never asked this endpoint, and it rests on the ones that did rather than being deleted for all of them — sample 3 (never asked it)",
+    );
+    expect(result?.because).not.toContain("got no answer");
+  });
+
+  it("gives a sample that could not answer and a sample that never asked their own clause", () => {
+    // Both reasons at once is the case that proves they are two sentences and
+    // not one with a substitution in it.
+    const result = agree([answered("a"), unservable<string>("401, then 500 twice"), UNASKED], {
+      floor: 1,
+      requireAskedByAll: false,
+      subject: "this endpoint",
+    });
+    expect(result?.because).toContain("1 of 3 sample(s) asked this endpoint and got no answer");
+    expect(result?.because).toContain("1 of 3 sample(s) never asked this endpoint");
+    expect(result?.because).toContain("sample 2 (401, then 500 twice)");
+    expect(result?.because).toContain("sample 3 (never asked it)");
   });
 
   it("says so plainly when nobody was left out", () => {
