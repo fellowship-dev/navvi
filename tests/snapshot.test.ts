@@ -416,6 +416,46 @@ describe("controls (R24, R38)", () => {
   it("the deny list in snapshot.inject.js equals DENY_LIST from policy.ts", () => {
     expect([...SNAPSHOT_DENY_LIST]).toEqual([...DENY_LIST]);
   });
+
+  /**
+   * Crawlee's fingerprint injection gives every launch a different viewport —
+   * 1366x768 to 3440x1440 over twenty measured launches — so anything the
+   * control table reads off the viewport is a per-run coin flip. Measured
+   * 2026-09-23 against the code before this sweep existed: of the 651 heights
+   * from 600 to 1250, 106 offered a shorter list than the other 545, in bands
+   * of about 14 heights, one band every 102px — one per job row. 1112-1125
+   * dropped `jobs/109`. The cause was the single centre-point hit test: a 28px
+   * anchor straddling the fold has its centre below `innerHeight`, so the one
+   * hit test it got refused it. In a replay that fails loudly, because a
+   * recorded answer is an index into the offered list; in a real run the model
+   * simply never sees the candidate and every "did it extract?" check still
+   * passes.
+   *
+   * The sweep is the regression: a rendered, uncovered anchor is clickable at
+   * every viewport height, so the offered list must be identical at all of
+   * them — same controls, same order, same ids.
+   */
+  it("offers the same controls at every viewport height between 600 and 1250", async () => {
+    await withPage("/fixtures/python-jobs.html", async (page) => {
+      const offeredAt = async (height: number): Promise<string[]> => {
+        await page.setViewportSize({ width: 1280, height });
+        const controls = await getControls(page, { profile: "store" });
+        return controls.filter((c) => c.clickable).map((c) => `${c.id} ${c.role} ${c.name} -> ${c.href ?? ""}`);
+      };
+      const baseline = await offeredAt(600);
+      expect(baseline.length).toBe(33);
+      const differing: string[] = [];
+      for (let height = 601; height <= 1250; height++) {
+        const offered = await offeredAt(height);
+        if (offered.join("\n") === baseline.join("\n")) continue;
+        const dropped = baseline.filter((c) => !offered.includes(c));
+        differing.push(`height ${height}: ${offered.length} offered, ${dropped.length ? `dropped ${dropped.join(", ")}` : "same controls in a different order"}`);
+      }
+      // Reported as a count plus a sample: a regression differs at a hundred
+      // heights at once, and a hundred-entry diff says less than three do.
+      expect({ heights: differing.length, sample: differing.slice(0, 3) }).toEqual({ heights: 0, sample: [] });
+    });
+  }, 120_000);
 });
 
 describe("chooser budget", () => {

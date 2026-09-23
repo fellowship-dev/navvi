@@ -99,7 +99,14 @@ export interface SnapshotControl {
   checked?: boolean | undefined;
   disabled: boolean;
   visible: boolean;
-  /** Center hit test resolves to the element or a descendant (not occluded, in or scrolled into the viewport). */
+  /**
+   * A click would reach this control: some whole pixel of its visible area hit
+   * tests to it or a descendant, or — for a control with no hit-testable pixel
+   * in the viewport — nothing is pinned over the viewport it would scroll into.
+   * Deliberately independent of the viewport size, which the browser
+   * fingerprint randomizes per launch; see the clickability block in
+   * `snapshot.inject.js` for the measurement that forced that.
+   */
   clickable: boolean;
   /** Nearest form/dialog/row context text, at most 120 chars. */
   scope: string;

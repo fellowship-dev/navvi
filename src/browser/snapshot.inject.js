@@ -615,19 +615,108 @@
     var scope = e.closest("form,dialog,[role=\"dialog\"],article,li,tr,[role=\"row\"]") || e.parentElement;
     return scope ? fullText(scope, 120) : "";
   }
-  function hitTest(e, scroll) {
+  // ------------------------------------------------------------ clickability (R38)
+  /*
+   * A control is clickable because it is a rendered, uncovered control, not
+   * because one sampled point happened to land on it. The previous rule hit
+   * tested the centre of the element and scrolled offscreen elements into view
+   * to do it, which made the answer a function of the viewport height — and
+   * Crawlee's fingerprint injection gives every launch a different viewport
+   * (1366x768 to 3440x1440 over twenty measured launches), so the control list
+   * was a per-run coin flip. Measured on tests/fixtures/python-jobs.html on
+   * 2026-09-23: of the 651 viewport heights from 600 to 1250, 106 offered a
+   * shorter list than the other 545, in two families.
+   *
+   * 1. A 28px-tall job-title anchor straddling the fold is in the viewport, so
+   *    it was ranked as on-screen and never re-tested with a scroll, but its
+   *    centre was below `innerHeight`, so the one hit test it got refused it.
+   *    That is a 14px band per row, one band every 102px: 1112-1125 dropped
+   *    `jobs/109`.
+   * 2. During the scroll pass a centre point can land in the last sub-pixel row
+   *    of the viewport — y = 822.71875 with a height of 823 — which passes
+   *    `y < innerHeight` but makes `elementFromPoint` return null, because it
+   *    rounds the coordinate to a pixel row that is outside. Height 823 lost
+   *    `jobs/111`, `jobs/116` and `jobs/121` that way, one every five rows,
+   *    the period at which the walk had to scroll again.
+   *
+   * Both are one point sample at a viewport edge, so the fix is to hit test the
+   * pixel rows the element actually owns, and to stop scrolling.
+   */
+
+  /** The hit-testable viewport: `clientWidth/Height` exclude a classic scrollbar, which `innerWidth/Height` do not. */
+  function viewportBox() {
+    var d = document.documentElement;
+    return { w: d.clientWidth || innerWidth, h: d.clientHeight || innerHeight };
+  }
+
+  /**
+   * The whole-pixel coordinates inside `[lo, hi)` that are also inside the
+   * viewport extent `size`, as `[first, last]`, or null when there are none.
+   * `elementFromPoint` rounds to a pixel, so a fractional sliver narrower than
+   * one pixel — which is exactly what an element straddling the fold leaves —
+   * cannot be hit tested at all, and asking anyway is what returned null.
+   */
+  function pixelSpan(lo, hi, size) {
+    var first = Math.max(0, Math.ceil(lo));
+    var last = Math.min(size - 1, Math.ceil(hi) - 1);
+    return first > last ? null : [first, last];
+  }
+
+  /**
+   * The element pinned over the whole viewport — a modal backdrop, a cookie
+   * shield, a full-screen overlay — or null. This is what an offscreen control
+   * is judged against: a fixed overlay covers the viewport at every scroll
+   * position, so a control that has to be scrolled to is under it wherever it
+   * ends up, while ordinary page content above or below the fold is not in the
+   * way of anything. Reading it here is what lets the snapshot answer for
+   * offscreen controls without moving the page.
+   */
+  function viewportShield() {
+    var v = viewportBox();
+    if (v.w <= 0 || v.h <= 0) return null;
+    var hit = document.elementFromPoint(Math.floor(v.w / 2), Math.floor(v.h / 2));
+    // Walk the whole chain rather than stopping at the first pinned ancestor:
+    // a dialog is routinely a fixed card inside a fixed backdrop, and the card
+    // is the one the centre point lands on while the backdrop is the shield.
+    while (hit && hit !== document.body && hit !== document.documentElement) {
+      var position = getComputedStyle(hit).position;
+      if (position === "fixed" || position === "sticky") {
+        var r = hit.getBoundingClientRect();
+        if (r.left <= 0 && r.top <= 0 && r.right >= v.w && r.bottom >= v.h) return hit;
+      }
+      hit = hit.parentElement;
+    }
+    return null;
+  }
+
+  /**
+   * Is a click on `e` going to reach `e`? True when some whole pixel of the
+   * element's visible area hit tests to the element or one of its descendants,
+   * and, for an element with no hit-testable pixels in the viewport, when no
+   * overlay is pinned over the viewport it would be scrolled into.
+   *
+   * The hit is accepted only for the element itself or something inside it. An
+   * *ancestor* on top is a real occlusion — a parent `::after` scrim over its
+   * own children is a common disabled-state pattern — so it is not accepted,
+   * and the sub-pixel case it would otherwise have covered is handled by
+   * `pixelSpan` returning null instead.
+   */
+  function hitTest(e, shield) {
     var r = e.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) return false;
-    var x = r.left + r.width / 2, y = r.top + r.height / 2;
-    if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) {
-      if (!scroll) return false;
-      e.scrollIntoView({ block: "center", inline: "center" });
-      r = e.getBoundingClientRect();
-      x = r.left + r.width / 2; y = r.top + r.height / 2;
-      if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return false;
+    var v = viewportBox();
+    var xs = pixelSpan(Math.max(r.left, 0), Math.min(r.right, v.w), v.w);
+    var ys = pixelSpan(Math.max(r.top, 0), Math.min(r.bottom, v.h), v.h);
+    if (!xs || !ys) return !shield || shield.contains(e);
+    var midX = (xs[0] + xs[1]) >> 1, midY = (ys[0] + ys[1]) >> 1;
+    // A cross through the visible area: a banner clipping one edge, or a badge
+    // sitting on the middle, must not decide the whole element on its own.
+    var points = [[midX, midY], [xs[0], midY], [xs[1], midY], [midX, ys[0]], [midX, ys[1]]];
+    for (var p of points) {
+      var hit = document.elementFromPoint(p[0], p[1]);
+      if (hit && (hit === e || e.contains(hit))) return true;
     }
-    var hit = document.elementFromPoint(x, y);
-    return !!hit && (hit === e || e.contains(hit));
+    return false;
   }
   function controls(input) {
     var opts = input || {};
@@ -635,10 +724,11 @@
     var allowMutations = Array.isArray(opts.allowMutations) ? opts.allowMutations : [];
     var out = [];
     var forms = new Map();
-    // Rank against the original viewport before any offscreen hit test scrolls.
-    // DOM order alone lets long lists consume the cap before a fixed popup.
+    // Rank against the viewport: DOM order alone lets long lists consume the
+    // cap before a fixed popup. The snapshot never scrolls, so this is the one
+    // viewport there is and the ranking is taken from it directly.
     var ranked = [];
-    var scrollX0 = window.scrollX, scrollY0 = window.scrollY;
+    var shield = viewportShield();
     var elements = Array.from(document.querySelectorAll(CONTROL_SELECTOR));
     var customElements = new Set();
     // Some sites implement autocomplete options with plain divs with a pointer or cell cursor.
@@ -674,7 +764,7 @@
         checked: inputType === "checkbox" || inputType === "radio" ? !!e.checked : (e.getAttribute("aria-checked") === "true" ? true : undefined),
         disabled: disabled,
         visible: true,
-        clickable: !disabled && hitTest(e, false),
+        clickable: !disabled && hitTest(e, shield),
         scope: scopeText(e),
         form: formInfo(e.form || e.closest("form"), forms),
         autocomplete: e.getAttribute("autocomplete") || undefined,
@@ -688,18 +778,17 @@
       if (!decision.allowed && decision.reason !== "password") continue;
       var rect = e.getBoundingClientRect();
       var inViewport = rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight;
-      // Keep native form controls, then custom options, ahead of link-heavy lists.
+      // Keep native form controls, then custom options, ahead of link-heavy
+      // lists. Offscreen controls stay behind everything on screen even when
+      // they are clickable, which since the scroll went away is most of them:
+      // what the cap should spend itself on is what the page is showing.
       var rank = inViewport ? 3 : 4;
-      if (control.clickable) rank = !nativeRole ? 1 : role === "link" ? 2 : 0;
+      if (control.clickable && inViewport) rank = !nativeRole ? 1 : role === "link" ? 2 : 0;
       ranked.push({ element: e, control: control, rank: rank });
     }
     ranked.sort((a, b) => a.rank - b.rank);
     var max = opts.maxControls || DEFAULT_CAPS.maxControls;
-    for (var entry of ranked.slice(0, max)) {
-      if (entry.rank === 4 && !entry.control.disabled) entry.control.clickable = hitTest(entry.element, true);
-      out.push(entry.control);
-    }
-    if (window.scrollX !== scrollX0 || window.scrollY !== scrollY0) window.scrollTo(scrollX0, scrollY0);
+    for (var entry of ranked.slice(0, max)) out.push(entry.control);
     return out;
   }
 

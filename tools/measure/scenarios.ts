@@ -103,10 +103,20 @@ const isHealBatch = (batch: Question[]): boolean => batch.some((q) => q.id.start
  * never flaked, because it drives raw Playwright, whose default viewport is
  * this one. Fixing it here says out loud what that file gets by accident.
  *
- * This makes the replay reproducible. It does not make the hit test right: a
- * link a person can click is a link the chooser should be offered, whatever
- * the window size, and that is a defect in `controls()` that a real run hits
- * too -- silently, by dropping a candidate the model then cannot choose.
+ * This makes the replay reproducible, and on 2026-09-23 that was all it did --
+ * the hit test itself was still wrong, and a real run hit it too, silently, by
+ * dropping a candidate the model then could not choose. `controls()` was fixed
+ * the same day: clickability is read off the pixel rows an element owns rather
+ * than off one sampled centre point, and the snapshot no longer scrolls. The
+ * sweep that measured 106 of 651 heights offering a shorter list now finds one
+ * list at all 651.
+ *
+ * The pin stays anyway, and not out of superstition. A recorded answer is an
+ * index into the options a question offered, so a recording replayed against a
+ * randomly sized window is only reproducible for as long as nothing else about
+ * the page is viewport-dependent -- and the candidate *enumeration* still is,
+ * in the custom pointer-target scan. Pinning the viewport is how a measurement
+ * stays a measurement; it was never the fix and is still not one.
  */
 const MEASURE_VIEWPORT = { width: 1280, height: 720 };
 
