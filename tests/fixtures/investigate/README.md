@@ -43,6 +43,13 @@ promotion. The nesting that matters is `prices` keyed by dashed currency codes
 (`price-list-std`), `appliedPromotions` keyed the same way, and a `promotions`
 array whose entries carry `isClubPromotion`.
 
+`storeb-detail-3.json` is the third sample, and it exists for the live run
+of 2026-09-22 rather than for variation: three samples are the smallest set in
+which one page can fail while the other two answer, which is the shape that
+broke tier 2's grouping. It is the *healthy* third — the tests pair it with a
+third sample whose detail call answers 401 and then 500, to prove the endpoint
+survives either way.
+
 `storeb-shell.html` is what one plain fetch against that store actually
 returns: almost no visible text, no declaration of a product, and four script
 bundles that will fetch the content later. It is what makes

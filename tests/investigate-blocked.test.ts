@@ -10,6 +10,7 @@ import {
   detectBlocking,
   mayHeal,
   recordCanary,
+  settleDeferred,
   statusSignal,
   type PageResponse,
 } from "../src/investigate/blocked.js";
@@ -38,6 +39,8 @@ const PRODUCT = html("product");
 const PRODUCT_REDESIGN = html("product-redesign");
 const RENDERED = html("rendered-product");
 const RENDERED_2 = html("rendered-product-2");
+/** The shape the first live run met: `storeb-shell.html` plus Imperva's always-on resource. */
+const SHELL_WAF = html("storeb-shell-waf");
 
 /** The StoreC run's fill counts, exactly as the harness printed them. */
 const STORE_C_FIELDS = {
@@ -330,6 +333,86 @@ describe("classifyRun — blocked, drift, healthy", () => {
     const verdict = classifyRun({});
     expect(verdict.state).toBe("healthy");
     expect(verdict.because).toContain("nothing was observed");
+  });
+
+  it("defers rather than blocks when every page that looks refused is a shell", () => {
+    // The first live run of the cascade, 2026-09-22. Three Store B URLs,
+    // three JS shells with Imperva's always-on resource in the head, and
+    // `blocked` — on a store that renders 86 payloads to a browser on the same
+    // machine. The corroboration rule's definition of an interstitial and
+    // `shell-skips-tier-1`'s definition of a shell are the same sentence.
+    const verdict = classifyRun({ pages: pages(SHELL_WAF, "https://example.cl/p/1", "https://example.cl/p/2", "https://example.cl/p/3") });
+    expect(verdict.state).toBe("deferred");
+    if (verdict.state !== "deferred") return;
+    expect(mayHeal(verdict)).toBe(false);
+    expect(verdict).not.toHaveProperty("heal");
+    // Nothing may bind against a deferred run either: there is no remedy to
+    // read off it and no heal, only the question and what would answer it.
+    expect(verdict).not.toHaveProperty("remedy");
+    expect(verdict.deferred.every((signal) => signal.corroborated)).toBe(true);
+    expect(verdict.because).toContain("shell-skips-tier-1");
+    // The rule is asked here rather than trusted from the caller, so "blocked"
+    // is unreachable from a shell for every caller and not only for the cascade.
+    expect(verdict.verdicts.some((entry) => entry.id === "shell-skips-tier-1" && entry.verdict.fires)).toBe(true);
+  });
+
+  it("keeps the transport decisive for everything a render would not change", () => {
+    // A 403 on a shell is still a 403: the status says something about the
+    // response, not about how little of it there is.
+    const refused = classifyRun({
+      pages: [
+        { url: "https://example.cl/p/1", status: 403, body: SHELL_WAF },
+        { url: "https://example.cl/p/2", status: 403, body: SHELL_WAF },
+      ],
+    });
+    expect(refused.state).toBe("blocked");
+
+    // A decisive marker — Imperva's resource carrying an incident_id — is not
+    // corroboration and is not held back either.
+    expect(classifyRun({ pages: pages(CHALLENGE, "https://example.cl/p/1", "https://example.cl/p/2") }).state).toBe("blocked");
+
+    // And an interstitial that is not a shell: no declared product, almost no
+    // text, a captcha widget, and no bundle that would ever fill it.
+    const interstitial = '<html><body><h1>Verificando</h1><div class="g-recaptcha"></div></body></html>';
+    expect(classifyRun({ pages: pages(interstitial, "https://example.cl/p/1", "https://example.cl/p/2") }).state).toBe("blocked");
+  });
+
+  it("settles a deferred run on what the render produced, either way", () => {
+    const deferred = classifyRun({ pages: pages(SHELL_WAF, "https://example.cl/p/1", "https://example.cl/p/2") });
+    expect(deferred.state).toBe("deferred");
+    if (deferred.state !== "deferred") return;
+
+    // A refused page has no payload to hand over; a shell's whole answer is one.
+    const filled = settleDeferred(deferred, { pages: [], payloadLeaves: 41 });
+    expect(filled.state).toBe("healthy");
+    expect(filled.because).toContain("the render disproved it");
+
+    // Nothing came back at all. The markers stand, and so does the remedy.
+    const empty = settleDeferred(deferred, { pages: [], payloadLeaves: 0 });
+    expect(empty.state).toBe("blocked");
+    if (empty.state !== "blocked") return;
+    expect(empty.remedy.action).toBe("enable-proxy");
+    expect(mayHeal(empty)).toBe(false);
+
+    // The shell filled — with the store's apology. The StoreC shape arriving
+    // one tier later, and `apologySignals` has it.
+    const apology = settleDeferred(deferred, { pages: pages(APOLOGY, "https://example.cl/p/1", "https://example.cl/p/2"), payloadLeaves: 0 });
+    expect(apology.state).toBe("blocked");
+    expect(apology.because).toContain("the render confirmed it");
+
+    // The render produced a real page. Whatever else is wrong, it is not a refusal.
+    const served = settleDeferred(deferred, { pages: [{ url: "https://example.cl/p/1", status: 200, body: PRODUCT }], payloadLeaves: 0 });
+    expect(served.state).not.toBe("blocked");
+  });
+
+  it("does not defer forever when the render hands back the same shell", () => {
+    // A WAF that blocks the page's own XHRs leaves a shell that never fills.
+    // The second pass declares `shells: []` for exactly this: a page still empty
+    // after a browser has had it is the refusal, not the excuse for it.
+    const deferred = classifyRun({ pages: pages(SHELL_WAF, "https://example.cl/p/1", "https://example.cl/p/2") });
+    if (deferred.state !== "deferred") throw new Error("expected deferred");
+    const settled = settleDeferred(deferred, { pages: pages(SHELL_WAF, "https://example.cl/p/1", "https://example.cl/p/2"), payloadLeaves: 0 });
+    expect(settled.state).toBe("blocked");
   });
 
   it("honours a case override, and records which rule was not allowed to speak", () => {

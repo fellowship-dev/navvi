@@ -26,7 +26,7 @@ import { chooseSample, type UrlProbe } from "../src/investigate/sample.js";
 
 const DIR = join(import.meta.dirname, "fixtures", "investigate");
 const page = (name: string): string => readFileSync(join(DIR, `${name}.html`), "utf8");
-const detail = (n: "" | "-2" = ""): unknown => JSON.parse(readFileSync(join(DIR, `storeb-detail${n}.json`), "utf8"));
+const detail = (n: "" | "-2" | "-3" = ""): unknown => JSON.parse(readFileSync(join(DIR, `storeb-detail${n}.json`), "utf8"));
 
 /** The clock, injected: a manuscript that moves between two identical runs is not diffable. */
 const NOW = new Date("2026-09-22T18:00:00.000Z");
@@ -326,6 +326,293 @@ describe("Store B — tier 1 is skipped as a shell and the payload answers", () 
     expect(rejected.length).toBeGreaterThan(0);
     expect(rejected.every((entry) => entry.path.startsWith("catalog-svc/products/detail:"))).toBe(true);
     expect(rejected.some((entry) => entry.path.includes("price-sale-std"))).toBe(true);
+  });
+});
+
+// ------------------- shape 2a: one sample the store cannot serve, and 92 payloads of noise
+
+/**
+ * The second live run of the cascade, 2026-09-22, and the defect *it* found.
+ *
+ * Three Store B URLs rendered 92, 86 and 50 payloads. The third,
+ * `paracetamol-500-mg-16-comprimidos/881926.html`, is a product the store
+ * itself cannot serve: `catalog-svc/products/detail/881926` answered 401
+ * and then 500 twice, and the page rendered nothing but its own chrome. Tier 2
+ * demanded a usable response from *every* sample before an endpoint was a
+ * source, so that one broken product deleted `products/detail` — the endpoint
+ * Store B's entire answer lives in — for all three. The manuscript reported
+ * ten endpoints, every one of them basket, zones, coverage and Contentful
+ * noise that every page loads identically, and bound 0 of 5 fields.
+ *
+ * It is the same defect `bindingUrls` already names one layer up: a sample with
+ * nothing in it does not fail to contribute, it deletes every candidate for
+ * every field, because every filter below tier 2 is an intersection.
+ *
+ * So the fixture is shaped like the run: three samples, a 401 before every
+ * detail call because the anonymous session does not exist yet, a dozen shared
+ * endpoints whose payloads are identical on every page, and one sample whose
+ * detail call never gets past the 500.
+ */
+describe("Store B, three samples — one product the store cannot serve must not delete the endpoint", () => {
+  const ids = ["100001", "100002", "100003"] as const;
+  const urls = ids.map((id) => `https://example.test/p/${id}`);
+  const sample = chooseSample(
+    urls.map((url) => live(url, { hasDeclaredProduct: undefined, priceCount: 2, inStock: true })),
+    { size: 3 },
+  );
+  const pages = Object.fromEntries(urls.map((url) => [url, page("storeb-shell")]));
+
+  /**
+   * The dozen endpoints every Store B page loads for itself, answering the
+   * same bytes each time — the basket, the delivery zones, the coverage table,
+   * the CMS. They are the ones that survived the broken grouping, so they are
+   * the ones the product endpoint has to be found among.
+   */
+  function noise(basketId: string): Capture["responses"] {
+    const api = "https://api.example.test";
+    return [
+      { url: `${api}/customer-svc/login`, status: 200, body: { authType: "guest", locale: "es-CL" } },
+      { url: "https://profiles.example.test/identity/v1/client/auth", status: 200, body: { granted: true, scope: "anonymous" } },
+      { url: `${api}/catalog-svc/categories/category-tree`, status: 200, body: { categories: [{ id: "medicamentos", name: "Medicamentos" }] } },
+      { url: `${api}/catalog-svc/zones`, status: 200, body: { zones: [{ id: "Zona0001", name: "Centro" }] } },
+      { url: `${api}/settings-svc/coverage`, status: 200, body: { coverage: [{ comuna: "Centro", despacho: true }] } },
+      { url: `${api}/shopping-basket-svc/basket`, status: 200, body: { total: 0, currency: "CLP", lines: 0 } },
+      { url: `${api}/shopping-basket-svc/basket/detail/${basketId}`, status: 200, body: { id: basketId, total: 0, savings: 0 } },
+      { url: `${api}/shopping-basket-svc/config/preferences`, status: 200, body: { pickup: true } },
+      { url: "https://cdn.example.test/spaces/abc123/environments/master/entries", status: 200, body: { items: [{ headline: "Club" }] } },
+      { url: "https://connect.example.test/app_config/json/244320463907739/", status: 200, body: { enabled: true } },
+      { url: `${api}/catalog-svc/products/breadcrumbs/${ids[0]}`, status: 200, body: { crumbs: ["Medicamentos"] } },
+      { url: `${api}/tracking/events`, status: 204, body: { ok: true } },
+    ];
+  }
+
+  /** The detail endpoint, with the 401 the page always gets first. */
+  function detailCalls(id: string, answer: unknown | undefined): Capture["responses"] {
+    const url = `https://api.example.test/catalog-svc/products/detail/${id}`;
+    return [
+      { url, status: 401, body: { error: "La sesion ha expirado", errorCode: "INVALID_SESSION" } },
+      answer === undefined
+        ? { url, status: 500, body: { error: "Ocurrio un error en el servidor", errorCode: "INTERNAL_ERROR" } }
+        : { url: `${url}?inventoryId=Zona0001`, status: 200, body: answer },
+    ];
+  }
+
+  /** What each page showed a reader. The third is the site chrome and nothing else, as the broken product rendered. */
+  const TEXT = [
+    "Ejemplo Comprimidos 100 mg 30 Comprimidos $ 4.990 $ 4.491 Club Store B $ 3.992 Precio por Unidad Fraccionada: $ 166 por Comprimido Laboratorio Ejemplo",
+    "Otro Jarabe 120 ml $ 12.990 $ 11.691 Precio por Unidad Fraccionada: $ 108 por ml Laboratorio Otro",
+    "Tercero Capsulas 500 mg 16 Capsulas $ 7.490 $ 6.741 Precio por Unidad Fraccionada: $ 468 por Capsula Laboratorio Tercero",
+  ];
+  const CHROME = "Menu de Categorias Centro Bienvenid@ Iniciar sesion Bolsa de compras Ahorro $ 0 Total Productos (0) $ 0 Sub Total $ 0 Volver Continuar Club Store B Inscribete Preguntas frecuentes";
+  const basketIds = ["0b5e1f00a00000000000000001", "0b5e1f00a00000000000000002", "0b5e1f00a00000000000000003"];
+
+  /** `third` undefined is the live encounter: the store answered 401 then 500 and the page rendered chrome. */
+  function capturesOf(third: unknown | undefined): Record<string, Capture> {
+    const bodies = [detail(), detail("-2"), third];
+    return Object.fromEntries(
+      urls.map((url, index) => [
+        url,
+        {
+          responses: [...noise(basketIds[index]!), ...detailCalls(ids[index]!, bodies[index])],
+          text: bodies[index] === undefined ? CHROME : TEXT[index]!,
+        } satisfies Capture,
+      ]),
+    );
+  }
+
+  const runWith = async (third: unknown | undefined): Promise<Manuscript> =>
+    investigate({ site: "store-b.example", fields: FIELDS, sample, sources: sourcesOf(pages, capturesOf(third)), now: NOW });
+
+  it("keeps the detail endpoint the third sample never got an answer from, and binds over the two that did", async () => {
+    const manuscript = await runWith(undefined);
+
+    // The endpoint survives grouping: it was asked by all three and answered by two.
+    const payloads = tier(manuscript, 2).sources.filter((source) => source.match === "catalog-svc/products/detail");
+    expect(payloads).toHaveLength(2);
+    for (const source of payloads) expect(source.status).toBe(200);
+    expect(payloads[0]!.because).toContain("got no answer");
+    // And the 500 is nowhere in the manuscript as a source, because it is not one.
+    expect(tier(manuscript, 2).sources.some((source) => (source.status ?? 0) >= 400)).toBe(false);
+
+    // Which is the whole point: the three fields the payload names bind from it.
+    for (const name of ["productName", "listPrice", "promoPrice"]) {
+      expect(field(manuscript, name).source, name).toBe("network");
+      expect(field(manuscript, name).match, name).toBe("catalog-svc/products/detail");
+      expect(field(manuscript, name).tier, name).toBe(2);
+    }
+    expect(field(manuscript, "listPrice").path).toBe("productData.prices[price-list-std]");
+    expect(field(manuscript, "listPrice").values).toEqual([4990, 12990]);
+    expect(field(manuscript, "promoPrice").path).toBe("productData.prices[price-sale-std]");
+    expect(field(manuscript, "productName").path).toBe("productData.name");
+    expect(tier(manuscript, 2).covered.sort()).toEqual(["listPrice", "productName", "promoPrice"]);
+    expect(manuscript.verdict).toBe("partial");
+
+    // None of the twelve shared endpoints is a source of a field: they answer
+    // every page identically, which is `no-variation-no-field` word for word.
+    expect(manuscript.fields.every((entry) => entry.match === undefined || entry.match === "catalog-svc/products/detail")).toBe(true);
+  });
+
+  it("anchors each endpoint against the pages that answered it, not against a page that did not", async () => {
+    // The third page showed a reader nothing but chrome. Anchoring the detail
+    // payload against it deletes every price in the other two, which is the
+    // second half of the same defect: the comparison has to be like with like.
+    const manuscript = await runWith(undefined);
+    const because = field(manuscript, "listPrice").because;
+    expect(because).toContain("price-list-std");
+    expect(field(manuscript, "listPrice").values).not.toContain(null);
+  });
+
+  it("still binds over all three when the third product is one the store can serve", async () => {
+    const manuscript = await runWith(detail("-3"));
+    const payloads = tier(manuscript, 2).sources.filter((source) => source.match === "catalog-svc/products/detail");
+    expect(payloads).toHaveLength(3);
+    expect(payloads.every((source) => !source.because.includes("got no answer"))).toBe(true);
+    expect(field(manuscript, "listPrice").values).toEqual([4990, 12990, 7490]);
+    expect(field(manuscript, "promoPrice").values).toEqual([4491, 11691, 6741]);
+    expect(field(manuscript, "productName").values).toEqual([
+      "Ejemplo Comprimidos 100 mg 30 Comprimidos",
+      "Otro Jarabe 120 ml",
+      "Tercero Capsulas 500 mg 16 Capsulas",
+    ]);
+  });
+
+  it("drops an endpoint only two of the three pages ever asked for", async () => {
+    // `products/recommendations` is on two Store B pages and not the third.
+    // Relaxing "answered by every sample" must not relax "asked by every
+    // sample" with it, or a page's own furniture becomes a source.
+    const captures = capturesOf(detail("-3"));
+    for (const url of urls.slice(0, 2)) {
+      captures[url] = {
+        ...captures[url]!,
+        responses: [...captures[url]!.responses, { url: "https://api.example.test/catalog-svc/products/recommendations/product-to-product", status: 200, body: { recommended: [1, 2, 3] } }],
+      };
+    }
+    const manuscript = await investigate({ site: "store-b.example", fields: FIELDS, sample, sources: sourcesOf(pages, captures), now: NOW });
+    expect(tier(manuscript, 2).sources.some((source) => (source.match ?? "").includes("recommendations"))).toBe(false);
+  });
+});
+
+// -------------------------- shape 2b: a shell behind a WAF, which is not a refusal
+
+/**
+ * The first live run of the cascade, 2026-09-22, and the defect it found.
+ *
+ * Three Store B product URLs, driven from a Mac the store answers perfectly.
+ * Each plain fetch came back ~2,800 characters of JS shell with Imperva's
+ * always-on resource in the head — no declared product, ~0 characters of visible
+ * text — and `blocked.ts`'s corroboration rule reads that, word for word, as a
+ * challenge interstitial. The cascade reported:
+ *
+ *   verdict: blocked — 3 of 3 URLs answered with a refusal (challenge):
+ *   a page with no declared product and 0 characters of text loads
+ *   _Incapsula_Resource; the remedy is enable-proxy
+ *
+ * Every field unbound, every tier skipped, no canary, on a store that renders
+ * 86 JSON payloads to a browser on the same machine. A shell and an interstitial
+ * are the same bytes to a plain fetch. The render is what tells them apart, and
+ * the point of these three tests is that it now gets to.
+ */
+describe("Store B behind Imperva — the plain fetch looks refused and the render disproves it", () => {
+  const URLS = ["https://example.test/p/100001", "https://example.test/p/100002", "https://example.test/p/100003"];
+  const sample = chooseSample(
+    URLS.map((url, index) => ({ url, status: 200, priceCount: index === 1 ? 1 : 2, inStock: index !== 2 })),
+    { size: 3 },
+  );
+  /** Every binding URL answers the same shell, marker and all. 3 of 3, as the live run did. */
+  const pages = Object.fromEntries(URLS.map((url) => [url, page("storeb-shell-waf")]));
+
+  /** A third payload, by substitution: what is under test is the cascade, not a third JSON file. */
+  const THIRD: unknown = JSON.parse(
+    readFileSync(join(DIR, "storeb-detail.json"), "utf8")
+      .replace(/100001/g, "100003")
+      .replace(/Ejemplo Comprimidos 100 mg 30 Comprimidos/g, "Tercero Comprimidos 50 mg 10 Comprimidos")
+      .replace(/4990/g, "8990")
+      .replace(/4491/g, "8091"),
+  );
+  const TEXT = [
+    "Ejemplo Comprimidos 100 mg 30 Comprimidos $ 4.990 $ 4.491 Club Store B $ 3.992 Laboratorio Ejemplo",
+    "Otro Jarabe 120 ml $ 12.990 $ 11.691 Laboratorio Otro",
+    "Tercero Comprimidos 50 mg 10 Comprimidos $ 8.990 $ 8.091 Laboratorio Ejemplo",
+  ];
+  const payloads = [detail(), detail("-2"), THIRD];
+  const answered: Record<string, Capture> = Object.fromEntries(
+    URLS.map((url, index) => [
+      url,
+      {
+        responses: [
+          { url: `https://api.example.test/catalog-svc/products/detail/10000${index + 1}`, status: 200, body: payloads[index] },
+          { url: "https://api.example.test/tracking/events", status: 204, body: { ok: true } },
+        ],
+        text: TEXT[index]!,
+      } satisfies Capture,
+    ]),
+  );
+
+  it("is not blocked, and binds the payload's fields at tier 2", async () => {
+    const sources = sourcesOf(pages, answered);
+    const manuscript = await investigate({ site: "store-b.example", fields: FIELDS, sample, sources, now: NOW });
+
+    expect(manuscript.verdict).not.toBe("blocked");
+    expect(tier(manuscript, 2).outcome).toBe("ran");
+    expect(field(manuscript, "productName").tier).toBe(2);
+    expect(field(manuscript, "productName").path).toBe("productData.name");
+    expect(field(manuscript, "listPrice").tier).toBe(2);
+    expect(field(manuscript, "listPrice").path).toBe("productData.prices[price-list-std]");
+    expect(field(manuscript, "promoPrice").path).toBe("productData.prices[price-sale-std]");
+    // One render per binding URL, and not one per question: the capture taken
+    // to settle the refusal is the capture tier 2 binds from.
+    expect([...sources.captured].sort()).toEqual([...URLS].sort());
+  });
+
+  it("writes down that the plain fetch looked like a refusal and the render disproved it", async () => {
+    const manuscript = await investigate({ site: "store-b.example", fields: FIELDS, sample, sources: sourcesOf(pages, answered), now: NOW });
+    const deferred = manuscript.obstacles.find((obstacle) => obstacle.kind === "deferred")!;
+    expect(deferred.blocking).toBe(false);
+    expect(deferred.because).toContain("look refused");
+    expect(deferred.because).toContain("_Incapsula_Resource");
+    expect(deferred.because).toContain("the render disproved it");
+    // Sitting behind a WAF is still a fact worth committing — it is the cost
+    // line in "can we run this daily from a datacenter" — but it stopped nothing.
+    expect(manuscript.obstacles.some((obstacle) => obstacle.kind === "challenge" && !obstacle.blocking)).toBe(true);
+    expect(manuscript.obstacles.every((obstacle) => !obstacle.blocking)).toBe(true);
+    expect(render(manuscript)).toContain("the render disproved it");
+  });
+
+  it("still reports blocked when the render produces nothing, and binds nothing", async () => {
+    // The same three shells, and this time the site really is refusing: the
+    // browser gets past no further than the plain fetch did.
+    const sources = sourcesOf(pages, Object.fromEntries(URLS.map((url) => [url, { responses: [] } satisfies Capture])));
+    const manuscript = await investigate({ site: "store-b.example", fields: FIELDS, sample, sources, now: NOW });
+
+    expect(manuscript.verdict).toBe("blocked");
+    expect(manuscript.because).toContain("enable-proxy");
+    expect(manuscript.because).toContain("neither a page nor a payload");
+    expect(manuscript.fields.every((entry) => entry.path === undefined)).toBe(true);
+    expect(manuscript.uncovered).toEqual(FIELDS.map((entry) => entry.name));
+    for (const n of [1, 2, 3] as const) expect(tier(manuscript, n).outcome).toBe("skipped");
+    expect(tier(manuscript, 2).because).toContain("destroyed by its own repair");
+    expect(manuscript.obstacles.some((obstacle) => obstacle.kind === "deferred" && obstacle.blocking)).toBe(true);
+    expect(manuscript.canary).toBeUndefined();
+  });
+
+  it("still reports blocked when the render produces an apology, and binds nothing", async () => {
+    // The StoreC shape arriving one tier later: the shell fills, with the
+    // store's error page. Substantial text, no declared product, the same
+    // document on every URL — and `apologySignals` has it.
+    const apology = page("apology");
+    const sources = sourcesOf(
+      pages,
+      Object.fromEntries(URLS.map((url) => [url, { responses: [], html: apology, text: visibleText(apology) } satisfies Capture])),
+    );
+    const manuscript = await investigate({ site: "store-b.example", fields: FIELDS, sample, sources, now: NOW });
+
+    expect(manuscript.verdict).toBe("blocked");
+    expect(manuscript.because).toContain("the render confirmed it");
+    expect(manuscript.because).toContain("enable-proxy");
+    expect(manuscript.fields.every((entry) => entry.path === undefined)).toBe(true);
+    expect(manuscript.obstacles.some((obstacle) => obstacle.kind === "apology" && obstacle.blocking)).toBe(true);
+    // A fingerprint of the page a blocked site serves is a fingerprint of the refusal.
+    expect(manuscript.canary).toBeUndefined();
   });
 });
 

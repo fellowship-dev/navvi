@@ -31,6 +31,16 @@ import { normalize } from "../util/text.js";
  * apology was 111/111 filled and would have been learned as the product name.
  * `RunVerdict` makes that structurally impossible: only the drift branch
  * carries `heal`, so there is no way to read a "heal" answer off a blocked one.
+ *
+ * The first live run of the cascade, later the same day, found the other edge
+ * of that rule. Protecting healing this hard makes a false `blocked` the cheap
+ * mistake to make, and it was made: three Store B shells read as three
+ * Imperva interstitials, every tier skipped, nothing bound, on a store that was
+ * answering. So there is now a fourth state — `DeferredVerdict` — for the one
+ * thing this module could not previously say, which is *not from here*. A plain
+ * fetch cannot tell a shell from a refusal; a render can, and `settleDeferred`
+ * is where the second look is taken. Nothing binds against a deferred run
+ * either, so the guarantee above is untouched.
  */
 
 // ---------------------------------------------------------------- observations
@@ -56,6 +66,23 @@ export interface BlockingSignal {
   because: string;
   /** The status, marker or fingerprint that fired it. */
   evidence: string;
+  /**
+   * **This signal assumed the page was not a shell.**
+   *
+   * Set by every rule whose reading depends on the page being empty of its own
+   * accord — the widget markers and the text lexicon below, which fire only on
+   * "no declared product and almost no text", and the apology shape, whose
+   * first conjunct is literally *it renders substantial text, it is not a
+   * shell*. A shell satisfies those readings by construction, so on a URL
+   * `shell-skips-tier-1` claims, the two rules contradict each other and this
+   * one is the weaker: see `classifyRun`, which holds such a signal back as
+   * corroboration and lets the render break the tie.
+   *
+   * Never set on a status, a challenge header, a challenge title or a decisive
+   * `CHALLENGE_MARKERS` hit: those say something about the response rather than
+   * about how little of it there is, and they stay decisive on their own.
+   */
+  corroborated?: true;
 }
 
 /**
@@ -98,6 +125,16 @@ export const CHALLENGE_MARKERS: readonly RegExp[] = [
  * being *refused by* one, and a false `blocked` is the expensive direction —
  * it stops healing. So these fire only on a page that is also an interstitial:
  * no declared product, and almost no text.
+ *
+ * That corroboration is necessary and it is **not sufficient**, which the first
+ * live run of the cascade proved on 2026-09-22: Store B's plain fetch is
+ * 2,863 characters of JS shell with no declared product, ~0 characters of text
+ * and Imperva's always-on resource in the head — the definition above, exactly
+ * — while a browser renders the same three URLs into 86 payloads with every
+ * requested field in them. The store was refusing nothing. A shell and an
+ * interstitial are the same bytes to a plain fetch; what separates them is what
+ * a *render* produces, so a hit here is marked `corroborated` and `classifyRun`
+ * refuses to settle on it alone.
  */
 const WIDGET_MARKERS: readonly RegExp[] = [
   /_Incapsula_Resource/i,
@@ -189,13 +226,13 @@ export function challengeSignal(page: PageResponse): BlockingSignal | null {
   for (const marker of WIDGET_MARKERS) {
     const hit = marker.exec(body);
     if (hit) {
-      return { kind: "challenge", url: page.url, because: `a page with no declared product and ${text.length} characters of text loads ${hit[0]}`, evidence: hit[0] };
+      return { kind: "challenge", url: page.url, because: `a page with no declared product and ${text.length} characters of text loads ${hit[0]}`, evidence: hit[0], corroborated: true };
     }
   }
   for (const pattern of BOT_CHALLENGE_TEXT) {
     const hit = pattern.exec(text);
     if (hit) {
-      return { kind: "challenge", url: page.url, because: `the page reads as a challenge interstitial (${JSON.stringify(hit[0])})`, evidence: hit[0] };
+      return { kind: "challenge", url: page.url, because: `the page reads as a challenge interstitial (${JSON.stringify(hit[0])})`, evidence: hit[0], corroborated: true };
     }
   }
   return null;
@@ -292,6 +329,15 @@ export function apologySignals(pages: readonly PageResponse[], options: ApologyO
       url: candidate.page.url,
       because: `${candidate.text.length} characters of text, no declared product, and the same document on ${distinct} different URLs: one page is being served for every address`,
       evidence: `${distinct} identical pages`,
+      // Conjunct (1) is an assumption about the page, not an observation of the
+      // site, and `minTextChars` is where it is asserted: 120 characters. A
+      // shell with a cookie banner and an "enable JavaScript" line clears that
+      // bar, and every shell in a catalogue is the same document on every URL
+      // by construction — conjunct (3) for free. So an apology read off a page
+      // `shell-skips-tier-1` claims is the same contradiction the challenge
+      // markers produced on 2026-09-22, wearing a different coat, and it is
+      // held back the same way rather than waiting to be found in the field.
+      corroborated: true,
     });
   }
   return out;
@@ -525,11 +571,119 @@ export interface HealthyVerdict extends VerdictBase {
   state: "healthy";
 }
 
-export type RunVerdict = BlockedVerdict | DriftVerdict | HealthyVerdict;
+/**
+ * **Not yet decidable**, and the reason the first live run of the cascade was
+ * wrong on 2026-09-22.
+ *
+ * Every blocking signal this run carries is `corroborated` — it read the page's
+ * emptiness — and every page it read it off is one `shell-skips-tier-1` already
+ * explains. A JS shell and a challenge interstitial are the same bytes to a
+ * plain fetch: no declared product, no text, a script tag. Store B's is the
+ * first, and the cascade called it the second, skipped every tier and bound
+ * nothing on a store that was answering perfectly.
+ *
+ * There is no more evidence to be had at this level, so this verdict does not
+ * guess. It says what it is holding and what would settle it: a render. A shell
+ * fills; a refusal does not. `settleDeferred` is the second pass.
+ *
+ * It is deliberately *not* a `blocked` with a softer word — nothing may bind
+ * against a deferred run either, because it may yet turn out to be one — nor a
+ * `healthy`, which would let a genuine refusal through. It is the one state the
+ * module had no way to say.
+ */
+export interface DeferredVerdict extends VerdictBase {
+  state: "deferred";
+  /** The signals being held back, and the ones a render has to disprove. */
+  deferred: BlockingSignal[];
+}
 
-/** The gate a healer asks. There is no other way to get a heal out of a verdict. */
+export type RunVerdict = BlockedVerdict | DriftVerdict | HealthyVerdict | DeferredVerdict;
+
+/**
+ * The gate a healer asks. There is no other way to get a heal out of a verdict,
+ * and `deferred` is not a way either: an undecided run has nothing to heal
+ * against for the same reason a blocked one has nothing.
+ */
 export function mayHeal(verdict: RunVerdict): verdict is DriftVerdict {
   return verdict.state === "drift";
+}
+
+// ------------------------------------------------------------ the second pass
+
+/** What the render produced, which is the only thing that tells a shell from a refusal. */
+export interface RenderEvidence {
+  /** The pages as the browser rendered them. Empty when the render kept no HTML. */
+  pages: readonly PageResponse[];
+  /**
+   * How much the pages fetched for themselves, counted in leaves. A refusal has
+   * no payload to hand over; a shell's whole answer is one. Zero here is a
+   * render that produced nothing, which is not the same as a render never taken
+   * — that case reaches this function with no evidence at all and is refused.
+   */
+  payloadLeaves: number;
+}
+
+/**
+ * Re-decide a `deferred` verdict against what a render produced.
+ *
+ * The ordering `investigate.ts` protects — blocked before bound — is preserved
+ * rather than relaxed: this still runs before anything binds, and it still has
+ * only two answers that let the cascade continue. What changed is *what it gets
+ * to look at*. On 2026-09-22 the plain fetch was the whole record, and the plain
+ * fetch of a shell is indistinguishable from the plain fetch of a challenge
+ * page. A render is one call, it was going to be made anyway on a shell site,
+ * and it separates them completely.
+ *
+ * Nothing is deferred twice: the second pass declares `shells: []`, so the
+ * corroboration rules run at full strength over the rendered pages. That is not
+ * a technicality — a page that is *still* a shell after a browser has had it is
+ * a page whose content never arrived, which is the refusal, not the excuse for
+ * it. Leaving the shell rule to re-derive itself here would let a WAF that
+ * blocks the XHRs defer forever.
+ */
+export function settleDeferred(deferred: DeferredVerdict, evidence: RenderEvidence, input: Omit<RunInput, "pages" | "shells"> = {}): RunVerdict {
+  const canary = deferred.canary;
+  if (evidence.payloadLeaves > 0) {
+    return {
+      state: "healthy",
+      because: `${deferred.because} — and the render disproved it: the page fetched ${evidence.payloadLeaves} leaves of payload for itself, which a refused page has none of`,
+      signals: deferred.signals,
+      canary,
+      verdicts: deferred.verdicts,
+    };
+  }
+
+  if (evidence.pages.length > 0) {
+    const second = classifyRun({ ...input, pages: evidence.pages, shells: [] });
+    const signals = [...deferred.signals, ...second.signals];
+    const verdicts = [...deferred.verdicts, ...second.verdicts];
+    if (second.state !== "blocked") {
+      return {
+        state: "healthy",
+        because: `${deferred.because} — and the render disproved it: ${second.because}`,
+        signals,
+        canary,
+        verdicts,
+      };
+    }
+    return {
+      state: "blocked",
+      because: `${deferred.because} — and the render confirmed it: ${second.because}`,
+      signals,
+      canary,
+      verdicts,
+      remedy: { ...DEFAULT_REMEDY, ...input.remedy },
+    };
+  }
+
+  return {
+    state: "blocked",
+    because: `${deferred.because} — and the render produced neither a page nor a payload to disprove it`,
+    signals: deferred.signals,
+    canary,
+    verdicts: deferred.verdicts,
+    remedy: { ...DEFAULT_REMEDY, ...input.remedy },
+  };
 }
 
 export interface FieldFill {
@@ -557,6 +711,18 @@ export interface RunInput {
   remedy?: Partial<Remedy>;
   /** A case's heuristic overrides; the default bank when omitted. */
   view?: Bank;
+  /**
+   * URLs whose plain fetch came back a JS shell — `shell-skips-tier-1`'s own
+   * answer, carried rather than re-derived, the way `constant` carries a
+   * variation check the caller already ran.
+   *
+   * Omit it and this module asks the rule itself, for the pages that need it.
+   * That is not a convenience: "blocked" must be unreachable from a shell *for
+   * every caller*, not only for the one that remembered to pass the set. The
+   * cascade passes it because it has already paid for the verdicts and wants
+   * them in the manuscript once.
+   */
+  shells?: readonly string[];
   apology?: ApologyOptions;
   /**
    * Fraction of the run's URLs that must carry a blocking signal before the
@@ -578,13 +744,18 @@ function canaryOf(input: RunInput["canary"]): CanaryReading {
 }
 
 /**
- * The run's verdict: blocked, drift or healthy.
+ * The run's verdict: blocked, drift, healthy — or `deferred`, which is the run
+ * saying it has read everything a plain fetch can hold and it is not enough.
  *
  * Two independent authorities, in this order:
  *
  *  1. **The transport.** Refusals and challenges on a large enough share of the
  *     run's URLs settle it on their own — there is nothing to heal against a
  *     403, and the canary is irrelevant when the catalogue itself is refused.
+ *     With one exception, and it is the whole of the 2026-09-22 live-run fix: a
+ *     signal that read the page's *emptiness* (`corroborated`) off a page the
+ *     shell rule claims is not evidence of anything, because a shell is empty
+ *     by construction. Those are held back and the run comes out `deferred`.
  *  2. **The bank.** `every-field-collapsed-is-blocking` owns the collapse call
  *     and the canary distinction. It is run, never re-derived: this function
  *     assembles the observation (fill counts, constants, canary state) and
@@ -618,15 +789,57 @@ export function classifyRun(input: RunInput): RunVerdict {
   const blockedUrls = new Set(signals.map((signal) => normalize(signal.url)));
   const urls = new Set(pages.map((page) => normalize(page.url)));
   const share = urls.size === 0 ? 0 : blockedUrls.size / urls.size;
-  if (urls.size > 0 && share >= (input.blockedShare ?? DEFAULT_BLOCKED_SHARE)) {
-    const kinds = [...new Set(signals.map((signal) => signal.kind))].join(", ");
+  const threshold = input.blockedShare ?? DEFAULT_BLOCKED_SHARE;
+
+  /**
+   * Which of these signals is only as strong as the page not being a shell, on
+   * a page that is one. The caller's own answer wins when it gave one; when it
+   * did not, the rule is asked here — and only about the pages a `corroborated`
+   * signal named, so a healthy run pays nothing and gains no verdict noise.
+   */
+  const declaredShells = input.shells === undefined ? undefined : new Set(input.shells.map(normalize));
+  const bodies = new Map(pages.map((page) => [normalize(page.url), page.body ?? ""]));
+  const shellCache = new Map<string, boolean>();
+  const isShell = (url: string): boolean => {
+    const key = normalize(url);
+    if (declaredShells !== undefined) return declaredShells.has(key);
+    const known = shellCache.get(key);
+    if (known !== undefined) return known;
+    const verdict = view.run("shell-skips-tier-1", { html: bodies.get(key) ?? "" });
+    verdicts.push({ id: "shell-skips-tier-1", verdict });
+    shellCache.set(key, verdict.fires);
+    return verdict.fires;
+  };
+
+  const held = new Set(signals.filter((signal) => signal.corroborated === true && isShell(signal.url)));
+  const decisive = signals.filter((signal) => !held.has(signal));
+  const decisiveUrls = new Set(decisive.map((signal) => normalize(signal.url)));
+
+  if (urls.size > 0 && decisiveUrls.size / urls.size >= threshold) {
+    const kinds = [...new Set(decisive.map((signal) => signal.kind))].join(", ");
     return {
       state: "blocked",
-      because: `${blockedUrls.size} of ${urls.size} URLs answered with a refusal (${kinds}): ${signals[0]?.because ?? ""}`,
+      because: `${decisiveUrls.size} of ${urls.size} URLs answered with a refusal (${kinds}): ${decisive[0]?.because ?? ""}`,
       signals,
       canary: reading.state,
       verdicts,
       remedy,
+    };
+  }
+
+  // The transport would have settled it, and only the held signals get it over
+  // the line. That is the 2026-09-22 shape exactly — three Store B shells,
+  // three Incapsula resources, "blocked" — and it is not a verdict, it is a
+  // question for a browser.
+  if (urls.size > 0 && held.size > 0 && share >= threshold) {
+    const first = [...held][0]!;
+    return {
+      state: "deferred",
+      because: `${blockedUrls.size} of ${urls.size} URLs look refused (${first.because}), but every page that says so is one shell-skips-tier-1 already explains, and a shell and an interstitial are the same bytes to a plain fetch`,
+      signals,
+      deferred: [...held],
+      canary: reading.state,
+      verdicts,
     };
   }
 

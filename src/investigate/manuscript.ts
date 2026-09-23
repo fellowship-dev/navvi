@@ -142,7 +142,16 @@ export interface FieldRecord {
  * daily from a datacenter". `blocking` says which ones ended the investigation.
  */
 export interface Obstacle {
-  kind: "consent" | "challenge" | "status" | "apology" | "shell" | "excluded";
+  /**
+   * `deferred` is the record of a question the plain fetch could not answer:
+   * the page looked refused, and a render was taken to find out. It carries the
+   * answer in its `because` either way, because "the plain fetch looked like a
+   * refusal and the render disproved it" is a fact about this site that the
+   * next person to read the manuscript needs and that no other line states.
+   * (2026-09-22, the first live run: three Store B shells read as three
+   * Imperva interstitials and the whole investigation stopped.)
+   */
+  kind: "consent" | "challenge" | "status" | "apology" | "shell" | "excluded" | "deferred";
   url?: string;
   because: string;
   evidence?: string;

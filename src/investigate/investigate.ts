@@ -2,7 +2,7 @@ import { bank, type Bank } from "../heuristics/index.js";
 import { declaresProduct } from "../heuristics/rules/investigate.js";
 import type { TypedValue } from "../scraper/extract.js";
 import { bindField } from "./bind.js";
-import { classifyRun, recordCanary, type ApologyOptions, type CanaryFingerprint, type PageResponse } from "./blocked.js";
+import { classifyRun, recordCanary, settleDeferred, type ApologyOptions, type CanaryFingerprint, type PageResponse, type RunVerdict } from "./blocked.js";
 import { coversSpec, readDeclared, type DeclaredSource } from "./declared.js";
 import { safeUrl, type CapturedResponse } from "./har.js";
 import { flatten, type Leaf } from "./leaves.js";
@@ -136,6 +136,30 @@ function endpointMatch(key: string): string {
   return head.join("/");
 }
 
+/**
+ * How much a render produced, counted in leaves — the same unit tier 2 binds
+ * from, so "the render produced nothing" means the same thing here and there.
+ *
+ * This is the evidence that settles a `deferred` run. A refused page has no
+ * payload to hand over; a JS shell's entire answer is one. On 2026-09-22 the
+ * three Store B URLs the cascade called blocked returned 86 payloads between
+ * them, `catalog-svc/products/detail` among them, with every requested
+ * field in it — one browser call away from the plain fetch that looked refused.
+ */
+function payloadLeaves(captures: readonly Capture[]): number {
+  let total = 0;
+  for (const capture of captures) {
+    for (const response of capture.responses) {
+      // A 401 before the anonymous session exists is not the page failing to
+      // answer, and it is not evidence that it did either: `newestUsable` skips
+      // it below and so does this.
+      if (response.status >= 400) continue;
+      total += flatten(response.body).length;
+    }
+  }
+  return total;
+}
+
 /** The newest answer this endpoint gave that was an answer. */
 function newestUsable(responses: readonly CapturedResponse[]): CapturedResponse | undefined {
   // Newest-first, skipping refusals: Store B's detail endpoint answers 401
@@ -232,6 +256,70 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
     }
   }
 
+  const fetchSources: SourceRecord[] = fetched.map((page) => ({
+    url: safeUrl(page.url),
+    kind: "plain-fetch" as const,
+    ...(page.status === undefined ? {} : { status: page.status }),
+    found: 0,
+    because: `one plain HTTP request, no browser`,
+  }));
+
+  /**
+   * Is tier 1 worth attempting on this site at all?
+   *
+   * `shell-skips-tier-1` reads one plain fetch and says whether the content
+   * arrives later — Store B, 25 of 25 fetches returning a JS shell whose
+   * answer was in its own `products/detail` call. It is asked of every binding
+   * URL and tier 1 is skipped only when it fires on all of them: a site that
+   * serves a real page sometimes is still worth the cheapest request.
+   *
+   * It is asked **before** the blocking question, which is new on 2026-09-22
+   * and is half the fix from the first live run. The other half is that the
+   * answer is handed to `classifyRun`, because a challenge marker in a page
+   * this rule already explains is corroboration rather than a verdict.
+   */
+  const tier1Verdicts: VerdictLog = [];
+  const shellUrls = new Set<string>();
+  let shells = 0;
+  for (const [index, page] of fetched.entries()) {
+    const verdict = view.run("shell-skips-tier-1", { html: page.body ?? "" });
+    tier1Verdicts.push({ id: "shell-skips-tier-1", verdict });
+    if (!verdict.fires) continue;
+    shells += 1;
+    shellUrls.add(page.url);
+    obstacles.push({ kind: "shell", url: safeUrl(page.url), because: verdict.because, evidence: "shell-skips-tier-1", blocking: false });
+    const source = fetchSources[index];
+    if (source) source.because = verdict.because;
+  }
+  const allShells = fetched.length > 0 && shells === fetched.length;
+
+  /**
+   * The render, taken once and shared.
+   *
+   * Tier 2 is still the only thing that *binds* from a capture, and the
+   * StoreA run still never reaches for one. What changed is that a run the
+   * transport could not settle may now ask for the same render early, to find
+   * out whether the shell it fetched fills or refuses — and it must not then
+   * pay for a second one.
+   */
+  const captures: Capture[] = [];
+  let capturesTaken = false;
+  const takeCaptures = async (): Promise<Capture[]> => {
+    if (capturesTaken) return captures;
+    capturesTaken = true;
+    const capture = options.sources.capture;
+    if (capture === undefined) return captures;
+    for (const url of bindingUrls) {
+      const taken = await capture(url);
+      captures.push(taken);
+      for (const obstacle of taken.obstacles ?? []) obstacles.push(obstacle);
+      // A rendered page is the better canary when the plain fetch was a shell:
+      // the fingerprint has to be of a page that was actually served.
+      if (taken.html !== undefined && taken.html !== "") rendered.push({ url, status: 200, body: taken.html });
+    }
+    return captures;
+  };
+
   /**
    * Blocked before bound, and this order is the whole of U3a.
    *
@@ -240,13 +328,36 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
    * Binding against that page learns the apology as the product name, which is
    * why nothing below this line runs when the transport says the site refused
    * us. `classifyRun` is the authority; this module does not re-derive it.
+   *
+   * What the first live run added, 2026-09-22: the authority is allowed to say
+   * *not yet*. Three Store B URLs came back 2,863 characters of shell with
+   * Imperva's always-on resource in the head — no declared product, ~0
+   * characters of text, which is the corroboration rule's definition of an
+   * interstitial word for word — and the cascade reported `blocked`, skipped
+   * every tier, bound nothing and recorded no canary, on a store that renders
+   * 86 payloads to a browser on the same machine. So a run whose only refusal
+   * evidence is the emptiness of a page `shell-skips-tier-1` already explains
+   * comes back `deferred`, and the render it was going to take anyway decides
+   * it. The ordering is untouched: this still happens before anything binds,
+   * and a confirmed refusal still returns without a single field bound.
    */
-  const run = classifyRun({
-    pages: fetched,
+  const classifyOptions = {
     view,
     ...(options.apology === undefined ? {} : { apology: options.apology }),
     ...(options.blockedShare === undefined ? {} : { blockedShare: options.blockedShare }),
-  });
+  };
+  let run: RunVerdict = classifyRun({ pages: fetched, shells: [...shellUrls], ...classifyOptions });
+
+  let deferred = false;
+  if (run.state === "deferred") {
+    deferred = true;
+    const taken = await takeCaptures();
+    run = settleDeferred(run, { pages: rendered, payloadLeaves: payloadLeaves(taken) }, classifyOptions);
+    // The one line this artifact exists for: the plain fetch looked like a
+    // refusal, and here is what the render said about it.
+    obstacles.push({ kind: "deferred", because: run.because, evidence: "shell-skips-tier-1", blocking: run.state === "blocked" });
+  }
+
   for (const signal of run.signals) {
     obstacles.push({ kind: signal.kind, url: signal.url, because: signal.because, evidence: signal.evidence, blocking: run.state === "blocked" });
   }
@@ -257,14 +368,6 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
     records.set(field.name, { field: field.name, ...(field.type === undefined ? {} : { type: field.type }), aliases: [], because: "nothing has looked yet", askModel: false, rejected: [], verdicts: [] });
   }
 
-  const fetchSources: SourceRecord[] = fetched.map((page) => ({
-    url: safeUrl(page.url),
-    kind: "plain-fetch" as const,
-    ...(page.status === undefined ? {} : { status: page.status }),
-    found: 0,
-    because: `one plain HTTP request, no browser`,
-  }));
-
   if (run.state === "blocked") {
     tiers.push({
       tier: 1,
@@ -274,14 +377,17 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
       asked: fields.map((field) => field.name),
       covered: [],
       sources: fetchSources,
-      verdicts: run.verdicts,
+      verdicts: [...tier1Verdicts, ...run.verdicts],
     });
     for (const tier of [2, 3] as const) {
       tiers.push({
         tier,
         name: tier === 2 ? "payload" : "dom",
         outcome: "skipped",
-        because: "a blocked run is not compiled from: binding against an error page is how a good scraper is destroyed by its own repair",
+        because:
+          tier === 2 && deferred
+            ? "the render that would have answered this tier was already taken, to find out whether the plain fetch was a shell or a refusal, and it confirmed the refusal; a blocked run is not compiled from: binding against an error page is how a good scraper is destroyed by its own repair"
+            : "a blocked run is not compiled from: binding against an error page is how a good scraper is destroyed by its own repair",
         asked: [],
         covered: [],
         sources: [],
@@ -306,30 +412,6 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
       canaryBecause: "no canary was recorded: a fingerprint of the page a blocked site serves is a fingerprint of the refusal",
     });
   }
-
-  /**
-   * Is tier 1 worth attempting on this site at all?
-   *
-   * `shell-skips-tier-1` reads one plain fetch and says whether the content
-   * arrives later — Store B, 25 of 25 fetches returning a JS shell whose
-   * answer was in its own `products/detail` call. It is asked of every binding
-   * URL and tier 1 is skipped only when it fires on all of them: a site that
-   * serves a real page sometimes is still worth the cheapest request.
-   */
-  const tier1Verdicts: VerdictLog = [];
-  const shellUrls = new Set<string>();
-  let shells = 0;
-  for (const [index, page] of fetched.entries()) {
-    const verdict = view.run("shell-skips-tier-1", { html: page.body ?? "" });
-    tier1Verdicts.push({ id: "shell-skips-tier-1", verdict });
-    if (!verdict.fires) continue;
-    shells += 1;
-    shellUrls.add(page.url);
-    obstacles.push({ kind: "shell", url: safeUrl(page.url), because: verdict.because, evidence: "shell-skips-tier-1", blocking: false });
-    const source = fetchSources[index];
-    if (source) source.because = verdict.because;
-  }
-  const allShells = fetched.length > 0 && shells === fetched.length;
 
   const declaredSamples: DeclaredSample[] = [];
   if (!allShells) {
@@ -396,16 +478,10 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
   } else if (options.sources.capture === undefined) {
     tier2 = { outcome: "skipped", because: `no capture was supplied, so the payloads the page fetches for itself were never seen; ${uncovered1.map((field) => field.name).join(", ")} stay uncovered` };
   } else {
-    const captures: Capture[] = [];
-    for (const url of bindingUrls) {
-      captures.push(await options.sources.capture(url));
-    }
-    for (const [index, capture] of captures.entries()) {
-      for (const obstacle of capture.obstacles ?? []) obstacles.push(obstacle);
-      // A rendered page is the better canary when the plain fetch was a shell:
-      // the fingerprint has to be of a page that was actually served.
-      if (capture.html !== undefined && capture.html !== "") rendered.push({ url: bindingUrls[index] ?? "", status: 200, body: capture.html });
-    }
+    // Taken here, or already taken above to settle a `deferred` verdict. Either
+    // way it is one render per sample and the obstacles it met are recorded
+    // once, by `takeCaptures`.
+    const captures = await takeCaptures();
 
     /**
      * Anchoring is tier 2's sharpest filter and it needs the rendered text of
@@ -428,21 +504,64 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
       }
       return grouped;
     });
-    const keys = [...(perSample[0]?.keys() ?? [])].filter((key) => perSample.every((grouped) => newestUsable(grouped.get(key) ?? []) !== undefined)).sort();
+
+    /**
+     * *Asked* by every sample, *answered* by at least two — and the live run of
+     * 2026-09-22 is the whole of why those are two questions rather than one.
+     *
+     * The rule this replaces demanded a usable response from every sample, so a
+     * sample the store could not serve deleted the endpoint for all of them.
+     * Three Store B URLs rendered 70/86/51 payloads; the third,
+     * `paracetamol-500-mg-16-comprimidos/881926.html`, got 401 then 500 then
+     * 500 from `catalog-svc/products/detail/*` and rendered nothing but
+     * site chrome. That one broken product took `products/detail` — the single
+     * endpoint Store B's whole answer lives in — out of the run, and tier 2
+     * reported ten endpoints, every one of them basket, zones and Contentful
+     * noise, and bound 0 of 5 fields.
+     *
+     * This is the same defect `bindingUrls` already guards against one layer
+     * up, restated: a sample with nothing in it does not merely fail to
+     * contribute, it *deletes every candidate for every field*, because every
+     * filter below here is an intersection. So a sample that did not answer is
+     * dropped from that endpoint's comparison rather than allowed to veto it,
+     * and the endpoint still has to have been asked everywhere, which is what
+     * keeps `products/recommendations` and `products-bundled` — called on two
+     * of the three pages — out.
+     *
+     * Two is the floor because `narrow`'s variation check needs two samples to
+     * mean anything. With a single capture, one answer is the whole comparison
+     * and the floor is one.
+     */
+    const floor = Math.min(2, perSample.length);
+    const answering = new Map<string, number[]>();
+    for (const key of perSample[0]?.keys() ?? []) {
+      if (!perSample.every((grouped) => grouped.has(key))) continue;
+      const indexes = perSample.flatMap((grouped, index) => (newestUsable(grouped.get(key)!) === undefined ? [] : [index]));
+      if (indexes.length >= floor) answering.set(key, indexes);
+    }
+    const keys = [...answering.keys()].sort();
 
     const leavesByKey = new Map<string, Leaf[][]>();
+    /** The rendered text of *this endpoint's* samples, in its own order — anchoring compares like with like. */
+    const textByKey = new Map<string, string[] | undefined>();
     for (const key of keys) {
-      const leaves = perSample.map((grouped) => flatten(newestUsable(grouped.get(key) ?? [])!.body));
+      const indexes = answering.get(key)!;
+      const responses = indexes.map((index) => newestUsable(perSample[index]!.get(key)!)!);
+      const leaves = responses.map((response) => flatten(response.body));
       leavesByKey.set(key, leaves);
-      for (const [index, grouped] of perSample.entries()) {
-        const response = newestUsable(grouped.get(key) ?? [])!;
+      textByKey.set(key, pageText === undefined ? undefined : indexes.map((index) => pageText[index]!));
+      const silent = perSample.length - indexes.length;
+      for (const [position, response] of responses.entries()) {
         tier2Sources.push({
           url: safeUrl(response.url),
           kind: "payload",
           status: response.status,
           match: endpointMatch(key),
-          found: leaves[index]!.length,
-          because: `the page fetched this for itself; ${leaves[index]!.length} leaves flattened${pageText === undefined ? ", unanchored (no rendered text was supplied)" : ", anchored against what the page showed"}`,
+          found: leaves[position]!.length,
+          because:
+            `the page fetched this for itself; ${leaves[position]!.length} leaves flattened` +
+            `${pageText === undefined ? ", unanchored (no rendered text was supplied)" : ", anchored against what the page showed"}` +
+            `${silent === 0 ? "" : `; ${silent} of ${perSample.length} sample(s) asked this endpoint and got no answer, and are left out of the comparison rather than deleting it`}`,
         });
       }
     }
@@ -462,7 +581,7 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
     const bindings = new Map<string, Map<string, ReturnType<typeof bindField>>>();
     for (const key of keys) {
       const perField = new Map<string, ReturnType<typeof bindField>>();
-      for (const field of uncovered1) perField.set(field.name, bindField(field.name, leavesByKey.get(key)!, { type: field.type, pageText, view }));
+      for (const field of uncovered1) perField.set(field.name, bindField(field.name, leavesByKey.get(key)!, { type: field.type, pageText: textByKey.get(key), view }));
       bindings.set(key, perField);
     }
     const named = (binding: ReturnType<typeof bindField> | undefined): boolean =>
