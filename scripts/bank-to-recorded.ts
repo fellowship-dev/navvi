@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadBank } from "../src/measure/bank.js";
+import { loadBank } from "../tools/measure/bank.js";
 import type { RecordedAnswerFile } from "../src/chooser/recorded.js";
 
 /**

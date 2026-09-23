@@ -1,11 +1,11 @@
 import type { Actor } from "apify";
-import type { Answer, Chooser, ChooserUsage, Question } from "../chooser/chooser.js";
-import { RecordedChooser } from "../chooser/recorded.js";
-import { run, type RunSummary } from "../main.js";
-import type { CrawlDeps } from "../replay/crawler.js";
-import { SCRAPER_VERSION, cacheKey, type CompiledScraper, type TraceStep } from "../scraper/schema.js";
-import { ScraperStore } from "../scraper/store.js";
-import { groupByTemplate } from "../template/index.js";
+import type { Answer, Chooser, ChooserUsage, Question } from "../../src/chooser/chooser.js";
+import { RecordedChooser } from "../../src/chooser/recorded.js";
+import { run, type RunSummary } from "../../src/main.js";
+import type { CrawlDeps } from "../../src/replay/crawler.js";
+import { SCRAPER_VERSION, cacheKey, type CompiledScraper, type TraceStep } from "../../src/scraper/schema.js";
+import { ScraperStore } from "../../src/scraper/store.js";
+import { groupByTemplate } from "../../src/template/index.js";
 import type { FixtureServer } from "../../tests/server.js";
 
 /**
@@ -460,12 +460,16 @@ export function grade(scenario: Scenario, outcome: ScenarioOutcome, baseUrl: str
 export class RoutedRecordedChooser implements Chooser {
   readonly name = "recorded" as const;
   private readonly inner = new Map<string, RecordedChooser>();
-  constructor(private readonly route: (batch: Question[]) => string) {}
+  /** `dir` is the recording root (`--record-dir`); the default is `tests/recorded`. */
+  constructor(
+    private readonly route: (batch: Question[]) => string,
+    private readonly dir?: string,
+  ) {}
 
   async ask(batch: Question[]): Promise<Answer[]> {
     const fixture = this.route(batch);
     let chooser = this.inner.get(fixture);
-    if (!chooser) this.inner.set(fixture, (chooser = new RecordedChooser({ fixture })));
+    if (!chooser) this.inner.set(fixture, (chooser = new RecordedChooser(this.dir === undefined ? { fixture } : { fixture, dir: this.dir })));
     return chooser.ask(batch);
   }
 

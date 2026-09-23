@@ -1,6 +1,6 @@
 {
   "extends": "./tsconfig.json",
-  "comment": "The test lane. The base config excludes tests/, so `npm run typecheck` never read a line of them and vitest only strips their types -- a type error in a test was invisible to both commands until this file existed (found while building U2d, with five errors already sitting in tests/). Same strictness as the base, deliberately: loosening it here would restore exactly the blind spot it was written to close. src/ and bin/ come along because every test imports across that boundary.",
-  "include": ["tests/**/*.ts", "src/**/*.ts", "bin/**/*.ts"],
+  "comment": "The test lane. The base config excludes tests/, so `npm run typecheck` never read a line of them and vitest only strips their types -- a type error in a test was invisible to both commands until this file existed (found while building U2d, with five errors already sitting in tests/). Same strictness as the base, deliberately: loosening it here would restore exactly the blind spot it was written to close. src/ and bin/ come along because every test imports across that boundary, tools/ and scripts/ come along because the base config cannot compile them without shipping them: this is the only lane that typechecks the repo tooling.",
+  "include": ["tests/**/*.ts", "src/**/*.ts", "bin/**/*.ts", "tools/**/*.ts", "scripts/**/*.ts"],
   "exclude": ["node_modules", "dist", "storage", "demo"]
 }

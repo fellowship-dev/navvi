@@ -77,7 +77,7 @@ export function createChooser(options: CreateChooserOptions = {}): Chooser {
  * source" — the decider answers its own text, as it always has. Unset is the
  * old derivation: every backend but Jev writes for itself, and Jev gets the
  * ordered chain below. `options.jev.textFallback` stays an escape hatch for
- * callers that build the writer themselves (tests, `src/measure`).
+ * callers that build the writer themselves (tests, `tools/measure`).
  */
 function writerFor(options: CreateChooserOptions, env: NodeJS.ProcessEnv, budget: Budget, decider: Decider): Chooser | undefined {
   if (options.writer) return options.writer === decider ? undefined : buildWriter(options.writer, options, env, budget);

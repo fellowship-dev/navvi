@@ -4,7 +4,7 @@ import type { Experimental_EvaluationModelV4CallOptions } from "@ai-sdk/provider
 import { gateId, JevChooser, toEvaluationQuestion, toEvaluationState } from "../src/chooser/jev.js";
 import { jevFraming, premises } from "../src/chooser/questions.js";
 import type { Question } from "../src/chooser/chooser.js";
-import { familyOf } from "../src/measure/bank.js";
+import { familyOf } from "../tools/measure/bank.js";
 
 /**
  * The Jev framing of docs/jev-hillclimb.md: structured state from the batch's

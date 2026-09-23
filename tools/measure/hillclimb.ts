@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
-import { JevChooser } from "../chooser/jev.js";
-import type { Answer, Chooser, Question } from "../chooser/chooser.js";
+import { JevChooser } from "../../src/chooser/jev.js";
+import type { Answer, Chooser, Question } from "../../src/chooser/chooser.js";
 import { familyOf, loadBank, type BankBatch } from "./bank.js";
 
 /**

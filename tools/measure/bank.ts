@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { Answer, Chooser, ChooserUsage, Question } from "../chooser/chooser.js";
+import type { Answer, Chooser, ChooserUsage, Question } from "../../src/chooser/chooser.js";
 
 /**
  * The question bank behind the Jev hillclimb (docs/jev-hillclimb.md): every

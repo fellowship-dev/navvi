@@ -2,7 +2,7 @@
 
 The same scenarios, once per chooser, in one table. The README's "with and
 without Jev" comparison is generated from this table by
-`renderReadmeSection` in `src/measure/report.ts`; nothing in it is typed by
+`renderReadmeSection` in `tools/measure/report.ts`; nothing in it is typed by
 hand.
 
 ## Reproduce
@@ -15,7 +15,7 @@ npm run measure -- --choosers agent --offline --bank                 # also writ
 npm run measure -- --scenarios F1-search,F2-login --choosers jev     # a subset
 ```
 
-The harness (`src/measure/run.ts`) runs each scenario sequentially with a
+The harness (`tools/measure/run.ts`) runs each scenario sequentially with a
 fresh temporary store and Chromium, then rewrites only the block between
 the two `measurements:start` / `measurements:end` HTML-comment markers
 at the end of this file (each on a line of its own). Prose
@@ -207,7 +207,9 @@ first place the recipe runs:
    the manifests at that point, so the script was missing.
 3. `tsc` compiled `src/measure` and `scripts/`, which import the test fixture
    server, and `tests/` is excluded from the build context.
-   `tsconfig.actor.json` now compiles `src` and `bin` only.
+   `tsconfig.actor.json` now compiles `src` and `bin` only. The actor build was
+   the only one fixed then: `tsconfig.json` kept compiling the harness, so
+   `dist/tests/server.js` shipped to npm until the harness moved to `tools/`.
 4. The base images set `NODE_ENV=production`, so a bare `npm ci` omitted
    devDependencies and `tsc` was absent. `--include=dev` says it outright.
 5. The Camoufox image pruned `--omit=optional` after the build and so deleted

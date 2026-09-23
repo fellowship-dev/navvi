@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Actor } from "apify";
 import { MemoryStorage } from "crawlee";
-import { CHOOSERS, isChooserId, type Chooser as ChooserId } from "../input/schema.js";
-import { createChooser, estimateTokens, findOnPath, RecordingChooser, type Answer, type Chooser, type ChooserUsage, type Question } from "../chooser/index.js";
+import { CHOOSERS, isChooserId, type Chooser as ChooserId } from "../../src/input/schema.js";
+import { createChooser, estimateTokens, findOnPath, RecordingChooser, type Answer, type Chooser, type ChooserUsage, type Question } from "../../src/chooser/index.js";
 import { BankingChooser } from "./bank.js";
 import { renderTable, replaceSection, type MeasurementRow } from "./report.js";
 import { grade, isLiveSite, liveScenario, LIVE_SITES, RoutedRecordedChooser, SCENARIOS, type LiveSite, type Scenario } from "./scenarios.js";
@@ -51,6 +51,17 @@ export interface MeasureOptions {
   bankChooser?: ChooserId;
   /** Only these scenario ids (default: all). */
   scenarios?: string[];
+  /**
+   * The scenarios to measure (default: the fixture set `SCENARIOS`).
+   *
+   * A seam for `measure.test.ts`: the harness's own behaviour -- a row per
+   * scenario per chooser, a named skip reason, the graded cells, a failure
+   * that still produces a row -- is checked against stub scenarios, so the
+   * test does not re-run nine real browser scenarios whose per-scenario
+   * acceptance is owned by `crawler.test.ts` and `heal.test.ts`. The real
+   * nine are what `npm run measure` runs.
+   */
+  scenarioSet?: readonly Scenario[];
 }
 
 const USAGE = `usage: npm run measure -- [--choosers agent,jev,model] [--scenarios AE1,F1-search] [--live <site>] [--offline] [--agent-live] [--bank] [--out docs/measurements.md]`;
@@ -148,7 +159,7 @@ function buildChooser(name: ChooserId, scenario: Scenario, options: MeasureOptio
     case "agent":
       if (options.agentLive) return { chooser: record(createChooser({ chooser: "agent", env })) };
       if (!scenario.recordedFixture) return { skipped: "agent column is a recorded replay; pass --agent-live to measure a host agent on a live site" };
-      return { chooser: new MeteredChooser(bank(new RoutedRecordedChooser(scenario.recordedFixture))) };
+      return { chooser: new MeteredChooser(bank(new RoutedRecordedChooser(scenario.recordedFixture, dir))) };
     case "jev":
       if (!env.AI_GATEWAY_API_KEY && !env.TYPESAFE_API_KEY) return { skipped: "no key (set AI_GATEWAY_API_KEY or TYPESAFE_API_KEY)" };
       return { chooser: record(createChooser({ chooser: "jev", env })) };
@@ -201,7 +212,7 @@ async function probeNetwork(site: LiveSite): Promise<string | null> {
 export async function runMeasurements(options: MeasureOptions): Promise<MeasurementRow[]> {
   const log = options.log ?? ((line: string) => void process.stderr.write(`${line}\n`));
   const rows: MeasurementRow[] = [];
-  const scenarios: Scenario[] = SCENARIOS.filter((s) => !options.scenarios || options.scenarios.includes(s.id));
+  const scenarios: Scenario[] = (options.scenarioSet ?? SCENARIOS).filter((s) => !options.scenarios || options.scenarios.includes(s.id));
   const liveSkips = new Map<string, string | null>();
   for (const site of options.live ?? []) {
     const scenario = liveScenario(site);

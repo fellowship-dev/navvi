@@ -15,6 +15,7 @@
     "sourceMap": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "bin/**/*.ts", "scripts/**/*.ts"],
-  "exclude": ["node_modules", "dist", "tests", "storage", "demo"]
+  "comment": "The published build: src/ and bin/, nothing else. `files` ships all of dist, so anything compiled here is on npm -- and a single reach into tests/ put the fixture server there (dist/tests/server.js shipped until 2026-09-23). Three files made that edge: the measurement harness, which now lives in tools/, and `scripts/demo.ts` and `scripts/record-race.ts`, which are developer tools run through tsx and had no reason to be compiled at all (nothing has ever read dist/scripts). Repo tooling is typechecked by tsconfig.test.json instead, which is what keeps it honest now that the build does not look at it.\n",
+  "include": ["src/**/*.ts", "bin/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tests", "tools", "scripts", "storage", "demo"]
 }
