@@ -8,7 +8,7 @@ import { buildCrawleeLaunchContext, restoreProfileCookies, saveProfileCookies } 
 import { createLaunchCounter, formatLaunchFailure, isLaunchFailure, launchFailureReport, resolveRelaunchKnobs, type RelaunchKnobs } from "../browser/relaunch.js";
 import { captureJson, type CapturedResponse } from "../browser/network-capture.js";
 import { hostOf, isAllowedRequestUrl, registrableDomain } from "../browser/policy.js";
-import { createChooser, NavviError, NeedsHumanError, type Chooser } from "../chooser/index.js";
+import { ConfigurationError, createChooser, NavviError, NeedsHumanError, type Chooser } from "../chooser/index.js";
 import { compile, type CompileResult } from "../compile/index.js";
 import { LIMITS, isAllowedUrl, resolveSources, type FieldType, type Profile, type ProxyInput, type RunInput } from "../input/schema.js";
 import type { RunSummary } from "../main.js";
@@ -154,6 +154,13 @@ export interface CrawlDeps {
   /** Requests running from the start (Crawlee scales up from one otherwise); never above `maxConcurrency`. */
   minConcurrency?: number | undefined;
   fetchText?: ((url: string) => Promise<{ contentType: string; body: string }>) | undefined;
+  /**
+   * Where the crawler's diagnostic sentences go — a skipped list, a healing
+   * that found nothing, a launch failure. Defaults to stderr. A caller that
+   * collects its own output must pass this, or it will be diagnosing from
+   * symptoms while the cause goes somewhere it cannot read.
+   */
+  log?: ((message: string) => void) | undefined;
 }
 
 // ---------------------------------------------------------------- policy
@@ -269,6 +276,7 @@ export async function loadListSources(
   urlLists: readonly string[],
   allowPrivateHosts: readonly string[],
   fetchText: (url: string) => Promise<{ contentType: string; body: string }> = defaultFetchText,
+  log: (message: string) => void = defaultCtxLog,
 ): Promise<string[]> {
   const out: string[] = [];
   const push = (url: string) => {
@@ -296,11 +304,11 @@ export async function loadListSources(
       const { contentType, body } = await fetchText(url);
       listed = parseListSource(contentType, body, true);
     } catch (error) {
-      ctxLog(`list ${url} skipped: ${error instanceof Error ? error.message : String(error)}`);
+      log(`list ${url} skipped: ${error instanceof Error ? error.message : String(error)}`);
       continue;
     }
     if (listed === null || listed.length === 0) {
-      ctxLog(`list ${url} skipped: no URLs in the answer`);
+      log(`list ${url} skipped: no URLs in the answer`);
       continue;
     }
     for (const entry of listed) push(entry);
@@ -505,6 +513,7 @@ function maskProxyUrlsIn(text: string, urls: readonly string[]): string {
 export async function resolveProxy(
   proxy: ProxyInput | undefined,
   actor: Pick<CrawlActor, "createProxyConfiguration">,
+  log: (message: string) => void = defaultCtxLog,
 ): Promise<{ proxyConfiguration?: ProxyConfiguration | undefined; launchProxyUrl?: string | undefined }> {
   const options = proxyOptionsFor(proxy);
   if (!options) return {};
@@ -529,13 +538,16 @@ export async function resolveProxy(
   // The SDK declines to build one rather than throwing when Apify Proxy is
   // asked for off the platform (no proxy password): say so instead of crawling
   // from the local IP without a word.
-  if (options.useApifyProxy) ctxLog(`Apify Proxy was requested (${asked}) but no configuration was created; the run continues with no proxy`);
+  if (options.useApifyProxy) log(`Apify Proxy was requested (${asked}) but no configuration was created; the run continues with no proxy`);
   return fallback ? { launchProxyUrl: fallback } : {};
 }
 
 // ---------------------------------------------------------------- the run
 
 export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<RunSummary> {
+  // Shadows the module default for the whole run, so every sentence below
+  // reaches whoever is collecting this run's output rather than only stderr.
+  const ctxLog = deps.log ?? defaultCtxLog;
   const env = deps.env ?? process.env;
   const actor: CrawlActor = deps.actor ?? Actor;
   const chooser = deps.chooser ?? createChooser({ ...resolveSources(input, env), env });
@@ -578,7 +590,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   if (started.limitReached && started.charged === 0) return fail("charge_limit", "charge limit reached before actor-start");
 
   // R34: list sources, then the policy on every URL.
-  const urls = await loadListSources(input.startUrls ?? [], input.urlLists, input.allowPrivateHosts, deps.fetchText);
+  const urls = await loadListSources(input.startUrls ?? [], input.urlLists, input.allowPrivateHosts, deps.fetchText, ctxLog);
   if (urls.length === 0) return fail("no_items_found", "no allowed start URL");
   const guard = makeRequestGuard(input.allowPrivateHosts, urls);
 
@@ -908,6 +920,30 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     } catch (error) {
       // R19: a chooser failure skips healing; the page counts as unhealed and the crawl goes on.
       if (error instanceof NeedsHumanError) throw error;
+      /**
+       * A `ConfigurationError` is not a chooser failure and R19 was never about
+       * it. `RecordedOptionsMismatchError` says so in its own header — the
+       * fixture is stale, retrying cannot help, and the message has to reach
+       * whoever re-records it — and `BaseChooser` deliberately lets a
+       * `NavviError` through its retry loop unwrapped so that it does.
+       *
+       * Swallowing it here undid all of that one layer further out, and the
+       * cost was measured on 2026-09-23. `tests/acceptance.test.ts` failed
+       * about one full-suite run in three with four null fields on one page
+       * and no cause anywhere in what the test could see. The recording was
+       * answering a question about a different page: `rankHealCandidates`
+       * scores a candidate whose value matches an earlier sample, so the order
+       * of the options is value-dependent and therefore page-dependent, and
+       * the demo rested on an unwritten invariant about which page takes the
+       * heal first. `RecordedChooser` refused the stale index exactly as
+       * designed, this line muted it, and `summaryOf` still reported
+       * `succeeded` because twelve items came back — one of them empty.
+       *
+       * Two nights went into a different flake this week for the same reason:
+       * a failure whose cause was computed and then discarded before anyone
+       * could read it.
+       */
+      if (error instanceof ConfigurationError) throw error;
       ctxLog(`healing skipped on ${ctx.page.url()}: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
@@ -1225,6 +1261,18 @@ async function readApifySecret(actor: CrawlActor, name: string): Promise<string 
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function ctxLog(message: string): void {
+/**
+ * Where the crawler's own sentences go when nobody asked for them.
+ *
+ * `CrawlDeps.log` overrides this per run. That seam exists because on
+ * 2026-09-23 `tests/acceptance.test.ts` failed with four null fields on one
+ * page and no cause anywhere the test could reach: the sentence naming the
+ * cause was written here, to stderr, while `runDemo` collects its lines
+ * through its own sink. The same week, `tools/measure/scenarios.ts` was found
+ * to have been discarding this stream through `log: () => undefined`, and
+ * restoring it was what finally named a flake that had been misdiagnosed for
+ * weeks. A diagnostic only counts if it reaches whoever is diagnosing.
+ */
+function defaultCtxLog(message: string): void {
   process.stderr.write(`navvi: ${message}\n`);
 }

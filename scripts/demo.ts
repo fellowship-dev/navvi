@@ -172,7 +172,25 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
   };
 
   const crawl = async (index: 1 | 2 | 3, chooser: Chooser): Promise<{ summary: RunSummary; rows: DemoRow[]; elapsedMs: number }> => {
-    const deps: CrawlDeps = { actor, chooser, env, storageDir: mkdtempSync(join(dir, "st-")), attended: false, maxConcurrency: 2 };
+    /**
+     * The crawler's own sentences go into this run's lines, not to stderr.
+     *
+     * Without it the demo can print "name null on atorvastatina-20-mg" while
+     * the sentence explaining *why* — a stale recording, a healing that found
+     * nothing, a page that never loaded — goes somewhere `runDemo`'s caller
+     * cannot read. `tests/acceptance.test.ts` asserts against `lines`, so a
+     * cause outside them does not exist as far as the proof is concerned, and
+     * on 2026-09-23 that cost a session of diagnosing five symptoms.
+     */
+    const deps: CrawlDeps = {
+      actor,
+      chooser,
+      env,
+      storageDir: mkdtempSync(join(dir, "st-")),
+      attended: false,
+      maxConcurrency: 2,
+      log: (message) => say(`  navvi: ${message}`),
+    };
     const t0 = performance.now();
     const summary = await runCrawl(input, deps);
     const elapsedMs = performance.now() - t0;
@@ -221,6 +239,27 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
     check(second.summary.healingEvents.length >= 1, "run 2: expected at least one healing event");
     check(nullPrice.length === 2 && nullPrice.every((row) => OUT_OF_STOCK.includes(slugOf(row))), `run 2: expected price null on exactly ${OUT_OF_STOCK.join(", ")}, got ${nullPrice.map(slugOf).join(", ") || "none"}`);
     for (const text of EXPECTED_UNMAPPED) check(unmapped.includes(text), `run 2: expected unmapped candidate "${text}"`);
+    /**
+     * The only pages run 2 may leave unhealed are the two that have no price
+     * to find. Run 3 has asserted `unhealed` since it was written and run 2
+     * never did, and on 2026-09-23 that asymmetry cost a session.
+     *
+     * `tests/acceptance.test.ts` failed about one full-suite run in three with
+     * four null fields on one page. Every string it could print was a symptom
+     * — `name null on <slug>`, `price missing on <slug>` — identical whether
+     * the recording was stale, the chooser genuinely picked none, or the page
+     * rendered nothing. The one number that names the cause class was already
+     * computed and already in the summary, and nothing looked at it.
+     *
+     * So this is not a tighter assertion for its own sake: it is the line that
+     * turns five symptoms into "a page was left unhealed", and `ctxLog` now
+     * reaches `lines` so the sentence saying which page and why arrives with
+     * it.
+     */
+    check(
+      second.summary.unhealed === OUT_OF_STOCK.length,
+      `run 2: expected exactly ${OUT_OF_STOCK.length} unhealed page(s) — the ones with no price to find — got ${second.summary.unhealed}`,
+    );
     for (const row of second.rows) {
       for (const name of ["name", "laboratory", "stock"]) check(row[name] !== null, `run 2: ${name} null on ${slugOf(row)}`);
       if (!OUT_OF_STOCK.includes(slugOf(row))) check(typeof row.price === "string" && /^\$ [\d.]+$/.test(row.price), `run 2: price missing on ${slugOf(row)}`);
