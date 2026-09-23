@@ -1,3 +1,4 @@
+import { isUsableResponse, newestUsableResponse } from "../browser/network-capture.js";
 import { bank, type Bank } from "../heuristics/index.js";
 import { declaresProduct } from "../heuristics/rules/investigate.js";
 import type { TypedValue } from "../scraper/extract.js";
@@ -151,26 +152,21 @@ function payloadLeaves(captures: readonly Capture[]): number {
   for (const capture of captures) {
     for (const response of capture.responses) {
       // A 401 before the anonymous session exists is not the page failing to
-      // answer, and it is not evidence that it did either: `newestUsable` skips
-      // it below and so does this.
-      if (response.status >= 400) continue;
+      // answer, and it is not evidence that it did either. `isUsableResponse`
+      // is the one place that test is written; `newestUsable` below uses it too.
+      if (!isUsableResponse(response)) continue;
       total += flatten(response.body).length;
     }
   }
   return total;
 }
 
-/** The newest answer this endpoint gave that was an answer. */
-function newestUsable(responses: readonly CapturedResponse[]): CapturedResponse | undefined {
-  // Newest-first, skipping refusals: Store B's detail endpoint answers 401
-  // before its anonymous session exists and 200 after, and the 401 is the older
-  // call, not the wrong one to have kept.
-  for (let index = responses.length - 1; index >= 0; index -= 1) {
-    const response = responses[index]!;
-    if (response.status < 400) return response;
-  }
-  return undefined;
-}
+/**
+ * The newest answer this endpoint gave that was an answer — the shared walk,
+ * with no URL or payload constraint, because the caller has already grouped
+ * the captures by endpoint key.
+ */
+const newestUsable = (responses: readonly CapturedResponse[]): CapturedResponse | null => newestUsableResponse(responses);
 
 // ------------------------------------------------------------------- tier 1
 
@@ -536,7 +532,7 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
     const answering = new Map<string, number[]>();
     for (const key of perSample[0]?.keys() ?? []) {
       if (!perSample.every((grouped) => grouped.has(key))) continue;
-      const indexes = perSample.flatMap((grouped, index) => (newestUsable(grouped.get(key)!) === undefined ? [] : [index]));
+      const indexes = perSample.flatMap((grouped, index) => (newestUsable(grouped.get(key)!) === null ? [] : [index]));
       if (indexes.length >= floor) answering.set(key, indexes);
     }
     const keys = [...answering.keys()].sort();

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Page } from "playwright";
 import { launch, type LaunchedBrowser } from "../src/browser/launch.js";
 import { getControls } from "../src/browser/snapshot.js";
-import { BOT_CHALLENGE_SELECTORS, BOT_CHALLENGE_TEXT, LOGIN_HINTS, classifyBlocked } from "../src/prestep/blocked.js";
+import { classifyBlocked } from "../src/prestep/blocked.js";
 import { CONSENT_NAME_PATTERN, CONSENT_RULES, dismissConsent } from "../src/prestep/consent.js";
 import { handoffToHuman } from "../src/prestep/human.js";
 import { runPreSteps, type PreStepOutcome } from "../src/prestep/index.js";
@@ -129,11 +129,8 @@ describe("turnstile pre-step (R9)", () => {
 });
 
 describe("blocked classification (R9, R13)", () => {
-  it("exports the marker lists", () => {
-    expect(BOT_CHALLENGE_TEXT.length).toBeGreaterThan(5);
-    expect(BOT_CHALLENGE_SELECTORS).toContain("#px-captcha");
-    expect(LOGIN_HINTS.length).toBeGreaterThan(3);
-  });
+  // The marker lists are not asserted as literals; the classification tests below
+  // are what prove they fire.
 
   it("the challenge fixture (503) is bot detection", async () => {
     await withPage("/fixtures/challenge.html", async (page, status) => {

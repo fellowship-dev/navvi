@@ -90,6 +90,28 @@ products off one template with nothing declared: the case the apology rule must
 not call one document. Measured on these fixtures they overlap 0.38 against a
 0.92 threshold, while two reads of `apology.html` overlap 1.00.
 
+`product-recaptcha-login.html` is `product.html` with the one thing that made
+the two blocked detectors disagree: the store puts reCAPTCHA on its account
+form, so `https://www.google.com/recaptcha/api.js` is in the head and a
+`.g-recaptcha` container is in the DOM of every product page in the catalogue —
+inside a `display:none` login modal that `querySelector` finds anyway. Served
+with a 403 it satisfies prestep's old rule (`status ∈ {403,429,503} && any
+captcha container`) word for word, while still declaring its product and
+rendering its price. `tests/blocked-differential.test.ts` is where it is used.
+
+`login-wall-recaptcha.html` is the third corner of the same triangle: a login
+form with a visible password field and a `.g-recaptcha` beside it, and no
+bundle, so the shell rule does not claim it. Prestep must answer
+`blocked_login_required` here and not `blocked_bot_detection` — a `local` run
+with secrets walks through the first and stops on the second — which is why the
+login check is asked before the corroborated half of the challenge reading.
+
+`captcha-interstitial.html` is the converse and the reason the corroboration
+rule is not simply "ignore captcha widgets": a page with no declared product,
+eleven characters of text, a captcha container and **no script bundle that
+would ever fill it**. That last clause is what keeps `shell-skips-tier-1` from
+claiming it, so the widget reading stands and both detectors call it blocked.
+
 `challenge-incapsula.html` renders almost nothing — a challenge page has not run
 its JavaScript yet — so it is caught by `_Incapsula_Resource` in the source
 rather than by anything a reader would see. `forbidden.html` is a bare nginx 403,

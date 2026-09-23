@@ -1,9 +1,10 @@
 /**
- * The investigation phase: one public surface over eight modules.
+ * The investigation phase: one public surface over nine modules.
  *
  * Read in cascade order, which is also cost order:
  *
  * - `sample.ts`    — which URLs a compile is built from, and why each one.
+ * - `probe.ts`     — what turns one real response into the probe `sample.ts` reads.
  * - `declared.ts`  — tier 1: what a page states about itself, one HTTP request.
  * - `leaves.ts`    — tier 2's deterministic filter: flatten, anchor, type, vary.
  * - `bind.ts`      — tier 2's answer: a narrowed table to one binding.
@@ -63,6 +64,7 @@ export {
   type TierRecord,
   type VerdictLog,
 } from "./manuscript.js";
+export { probeFrom, type ProbeOptions } from "./probe.js";
 export { KIND_PRECEDENCE, acceptedRoles, fieldTokens, resolutionOrder, roleOfDeclared, roleOfField, type DeclaredRole } from "./roles.js";
 export {
   STRATA,

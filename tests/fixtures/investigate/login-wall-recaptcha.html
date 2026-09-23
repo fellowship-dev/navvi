@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Inicia sesion</title>
+  </head>
+  <body>
+    <h1>Inicia sesion</h1>
+    <form method="post" action="/cuenta/login">
+      <label for="correo">Correo</label><input id="correo" name="correo" type="email" />
+      <label for="clave">Clave</label><input id="clave" name="clave" type="password" />
+      <div class="g-recaptcha" data-sitekey="0000000000000000000000000000000000000000"></div>
+      <button type="submit">Ingresar</button>
+    </form>
+  </body>
+</html>

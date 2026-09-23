@@ -21,7 +21,9 @@
  *
  * Two halves, deliberately separate:
  *   - the **probe** is what is cheaply knowable about a URL (`UrlProbe`), and
- *     is not produced here — nothing in this file fetches anything;
+ *     is not produced here — nothing in this file fetches anything. `probe.ts`
+ *     reads one into being from a response the caller already has, and asks
+ *     `shell-skips-tier-1` for `isShell` rather than spelling it a second time;
  *   - the **choice** is `chooseSample`, which is pure, offline and
  *     deterministic: the same probes always yield the same sample, so a compile
  *     input is reproducible and every pick can say why it is in the sample.

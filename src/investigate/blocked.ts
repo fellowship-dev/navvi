@@ -1,6 +1,6 @@
+import { challengeHeader, decisiveSourceMarker, readChallenge, titleOf, widgetSourceMarker } from "../blocked/challenge.js";
 import { bank, type Bank, type Verdict } from "../heuristics/index.js";
 import { declaresProduct, visibleText } from "../heuristics/rules/investigate.js";
-import { BOT_CHALLENGE_TEXT } from "../prestep/blocked.js";
 import { normalize } from "../util/text.js";
 
 /**
@@ -21,9 +21,14 @@ import { normalize } from "../util/text.js";
  * — many responses, fill counts, and a canary — offline, from text and numbers,
  * with no browser anywhere. A `--har` compile and a post-mortem over a stored
  * run both need the second and cannot have the first. What the two *do* share
- * is the challenge lexicon, so `BOT_CHALLENGE_TEXT` is imported rather than
- * restated; the markers below are only the ones a DOM query cannot see —
- * script srcs, headers and cookies.
+ * is the challenge lexicon **and the decisive/corroboration split**, and both
+ * now live in `src/blocked/challenge.ts` and are imported rather than restated
+ * on either side. That module's note carries the encounter: prestep used to
+ * fire on `status ∈ {403,429,503} && any captcha container`, so a store with
+ * reCAPTCHA in its login modal and one rate-limited 403 was blocked there and
+ * healthy here, on the same bytes. What is left below is only what a stored
+ * response can say and a live page cannot — the apology shape over a corpus,
+ * the canary, and the run's verdict.
  *
  * The one rule the whole module exists to protect: **healing must never fire on
  * a blocked page.** Recompiling against an error page is how a good scraper is
@@ -100,86 +105,12 @@ export interface BlockingSignal {
 export const BLOCKING_STATUSES: ReadonlySet<number> = new Set([403, 429]);
 
 /**
- * Markers in the raw source, not the rendered text. A challenge page that has
- * not run its JavaScript — which is every challenge page in a stored response
- * body — renders almost nothing, so the visible-text lexicon prestep owns
- * cannot reach it. What a DOM query and a reader never see, this does.
- *
- * **Decisive**: these appear when, and only when, something was mitigated.
- * Cloudflare's challenge platform and its `cf-chl` token bundle, Incapsula's
- * resource carrying an `incident_id`, DataDome's and PerimeterX's block frames.
+ * Re-exported so `investigate`'s own callers keep their one import. The list
+ * and the decisive/corroboration split it belongs to live in
+ * `src/blocked/challenge.ts`, which prestep reads too.
  */
-export const CHALLENGE_MARKERS: readonly RegExp[] = [
-  /\/cdn-cgi\/challenge-platform\//i,
-  /\bcf[-_]chl[-_a-z]*/i,
-  /_Incapsula_Resource[^\s"'<>]*incident_id/i,
-  /captcha-delivery\.com/i,
-  /\bpx-captcha\b/i,
-];
+export { CHALLENGE_MARKERS } from "../blocked/challenge.js";
 
-/**
- * **Corroboration required**: a widget any page may embed, or a WAF's always-on
- * injection. A store that puts reCAPTCHA on its login modal ships it in the
- * header of every product page; Imperva injects `_Incapsula_Resource` into
- * every page of a site it fronts, blocked or not. Being *behind* a WAF is not
- * being *refused by* one, and a false `blocked` is the expensive direction —
- * it stops healing. So these fire only on a page that is also an interstitial:
- * no declared product, and almost no text.
- *
- * That corroboration is necessary and it is **not sufficient**, which the first
- * live run of the cascade proved on 2026-09-22: Store B's plain fetch is
- * 2,863 characters of JS shell with no declared product, ~0 characters of text
- * and Imperva's always-on resource in the head — the definition above, exactly
- * — while a browser renders the same three URLs into 86 payloads with every
- * requested field in them. The store was refusing nothing. A shell and an
- * interstitial are the same bytes to a plain fetch; what separates them is what
- * a *render* produces, so a hit here is marked `corroborated` and `classifyRun`
- * refuses to settle on it alone.
- */
-const WIDGET_MARKERS: readonly RegExp[] = [
-  /_Incapsula_Resource/i,
-  /\bcf[-_]turnstile\b/i,
-  /challenges\.cloudflare\.com/i,
-  /google\.com\/recaptcha\/api(?:\.js|2)/i,
-  /\bg-recaptcha\b|\bgrecaptcha\b/i,
-  /\bh-?captcha\b|hcaptcha\.com/i,
-];
-
-/**
- * Headers that announce a *block*, with the same discipline: `x-iinfo` and the
- * `visid_incap` cookie are stamped on every response Imperva proxies, and
- * `server: sucuri` on every response Sucuri serves, so none of them is here.
- * `cf-mitigated`, `x-sucuri-block` and the `__cf_chl` cookie are set only when
- * the request was actually stopped.
- */
-const CHALLENGE_HEADERS: ReadonlyArray<{ name: string; value?: RegExp }> = [
-  { name: "cf-mitigated" },
-  { name: "x-sucuri-block" },
-  { name: "set-cookie", value: /__cf_chl/i },
-];
-
-/**
- * Above this much visible text a page is showing someone something, and a
- * captcha widget in it is furniture rather than the point. Mirrors prestep's
- * own "an interstitial carries little text" reading of a live page.
- */
-const INTERSTITIAL_TEXT_CHARS = 1_500;
-
-/** The document title, for the one check prestep treats as decisive on its own. */
-function titleOf(html: string): string {
-  return /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1]?.replace(/\s+/g, " ").trim() ?? "";
-}
-
-function headerSignal(headers: Readonly<Record<string, string>> | undefined): string | null {
-  if (!headers) return null;
-  const lower = new Map(Object.entries(headers).map(([name, value]) => [name.toLowerCase(), value]));
-  for (const { name, value } of CHALLENGE_HEADERS) {
-    const found = lower.get(name);
-    if (found === undefined) continue;
-    if (value === undefined || value.test(found)) return `${name}: ${found}`;
-  }
-  return null;
-}
 
 /** HTTP 403/429 — the site answering "no" rather than failing to answer. */
 export function statusSignal(page: PageResponse): BlockingSignal | null {
@@ -192,50 +123,31 @@ export function statusSignal(page: PageResponse): BlockingSignal | null {
   };
 }
 
-/** A challenge interstitial: a marker in the source, a header, or challenge wording in what little text there is. */
+/**
+ * A challenge interstitial: a marker in the source, a header, or challenge
+ * wording in what little text there is.
+ *
+ * The order and the corroboration gate are not decided here — `readChallenge`
+ * owns both, and prestep asks it the same question about a live page, so the
+ * same bytes cannot be a challenge to one and furniture to the other. This
+ * function's whole job is to say what a *stored response* can see: the headers
+ * and the raw source, which is where a challenge page that never ran its
+ * JavaScript keeps everything it has.
+ */
 export function challengeSignal(page: PageResponse): BlockingSignal | null {
-  const header = headerSignal(page.headers);
-  if (header !== null) {
-    return { kind: "challenge", url: page.url, because: `the response carries a challenge header (${header})`, evidence: header };
-  }
   const body = page.body ?? "";
-  if (body === "") return null;
+  const header = challengeHeader(page.headers);
+  if (header === null && body === "") return null;
 
-  for (const marker of CHALLENGE_MARKERS) {
-    const hit = marker.exec(body);
-    if (hit) {
-      return { kind: "challenge", url: page.url, because: `the response body loads a challenge (${hit[0]})`, evidence: hit[0] };
-    }
-  }
-
-  // Reuse prestep's lexicon rather than keeping a second copy of it in this
-  // repo. Prestep treats a title hit as decisive on its own; so does this.
-  const title = titleOf(body);
-  for (const pattern of BOT_CHALLENGE_TEXT) {
-    const hit = pattern.exec(title);
-    if (hit) {
-      return { kind: "challenge", url: page.url, because: `the page is titled ${JSON.stringify(title)}`, evidence: hit[0] };
-    }
-  }
-
-  // Everything below needs the page to be an interstitial as well as to carry
-  // the marker — see `WIDGET_MARKERS`.
-  const text = visibleText(body);
-  if (declaresProduct(body) || text.length >= INTERSTITIAL_TEXT_CHARS) return null;
-
-  for (const marker of WIDGET_MARKERS) {
-    const hit = marker.exec(body);
-    if (hit) {
-      return { kind: "challenge", url: page.url, because: `a page with no declared product and ${text.length} characters of text loads ${hit[0]}`, evidence: hit[0], corroborated: true };
-    }
-  }
-  for (const pattern of BOT_CHALLENGE_TEXT) {
-    const hit = pattern.exec(text);
-    if (hit) {
-      return { kind: "challenge", url: page.url, because: `the page reads as a challenge interstitial (${JSON.stringify(hit[0])})`, evidence: hit[0], corroborated: true };
-    }
-  }
-  return null;
+  const reading = readChallenge({
+    title: titleOf(body),
+    text: visibleText(body),
+    declaresProduct: declaresProduct(body),
+    decisive: header ?? decisiveSourceMarker(body),
+    widget: widgetSourceMarker(body),
+  });
+  if (reading === null) return null;
+  return { kind: "challenge", url: page.url, ...reading };
 }
 
 // ------------------------------------------------------------- apology shape
