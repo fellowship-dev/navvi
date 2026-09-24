@@ -94,7 +94,7 @@ export async function askChunked(chooser: Chooser, questions: readonly Question[
   return out;
 }
 
-async function resolveSpecs(page: Page, specs: readonly LeafSpec[], scope: { within?: string; itemIndex?: number; span?: number }): Promise<Array<string | null>> {
+async function resolveSpecs(page: Page, specs: readonly LeafSpec[], scope: { within?: string; itemIndex?: number; span?: number; unique?: boolean }): Promise<Array<string | null>> {
   await ensureSnapshotScript(page);
   const list = specs.map((s) => ({ selector: s.selector, attr: s.attr }));
   return page.evaluate(
@@ -123,11 +123,18 @@ function listResolver(page: Page, item: ItemSpec, indices: readonly number[]): S
   };
 }
 
+/**
+ * Record mode: a single-value selector must match exactly one element on every
+ * sample. The snapshot minimizes each selector against the page it came from;
+ * on another sample the same short selector can also match a related
+ * product's price ahead of the record's own, and first-match would offer that
+ * value as this record's.
+ */
 function recordResolver(pages: readonly Page[]): SampleResolver {
   return {
     count: pages.length,
     baseUrl: (i) => pages[i]?.url() ?? "",
-    resolve: (i, specs) => resolveSpecs(pages[i]!, specs, {}),
+    resolve: (i, specs) => resolveSpecs(pages[i]!, specs, { unique: true }),
     resolveAll: (i, specs) => resolveAllSpecs(pages[i]!, specs, {}),
   };
 }

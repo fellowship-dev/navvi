@@ -49,7 +49,7 @@
     "comments": {
       "alternatives": [
         {
-          "selector": ":scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)",
+          "selector": "span.subline > a:nth-of-type(3)",
           "fingerprint": {
             "samples": [
               "3 comments",

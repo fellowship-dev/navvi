@@ -181,6 +181,8 @@ export interface CandidateOptions {
 export interface ResolveLeafOptions {
   selector: string;
   attr?: string | undefined;
+  /** Null when the selector matches more than one element across the rows (record mode: exactly one per sample). */
+  unique?: boolean | undefined;
   within?: string | undefined;
   itemIndex?: number | undefined;
   span?: number | undefined;

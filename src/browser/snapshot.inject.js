@@ -126,11 +126,110 @@
   function isStableId(id) {
     return id && /^[A-Za-z][\w-]*$/.test(id) && !/\d{3,}/.test(id) && isStableClass(id);
   }
+  /** Nearest ancestors (below `root`) that carry a stable id or a stable class, nearest first. */
+  var MAX_HOOKS = 8;
+  function hooksOf(el, root) {
+    var hooks = [];
+    for (var a = el.parentElement; a && a !== root && hooks.length < MAX_HOOKS; a = a.parentElement) {
+      var ctx = isStableId(a.id) ? "#" + esc(a.id) : segment(a);
+      if (ctx !== a.localName) hooks.push({ el: a, sel: ctx });
+    }
+    return hooks;
+  }
+  function nthOfType(el) {
+    var parent = el.parentElement;
+    if (!parent) return "";
+    var sameTag = [];
+    for (var k of parent.children) if (k.localName === el.localName) sameTag.push(k);
+    return sameTag.length > 1 ? ":nth-of-type(" + (sameTag.indexOf(el) + 1) + ")" : "";
+  }
+  /**
+   * Uniqueness tester for one element: `only(sel, used)` is `unique(root, sel,
+   * el)` plus "the root itself does not match" (replay tries `row.matches`
+   * first), answered without re-querying the document. Every selector tried
+   * ends in the element's own compound, so its matches are a subset of
+   * `pool`; an element in the pool can only match a combination of hooks when
+   * it has an ancestor matching each of them, which is computed once per
+   * pool element and filters the pool before the exact `matches` check.
+   */
+  function uniqueness(el, root, own, hooks) {
+    var pool;
+    try { pool = Array.from(root.querySelectorAll(own)); } catch (e) { pool = null; }
+    var others = pool ? pool.filter((c) => c !== el) : [];
+    var masks = null;
+    function hasHooks(c, used) {
+      if (!masks) {
+        masks = new Map();
+        for (var o of others) {
+          var m = [];
+          for (var h of hooks) {
+            var up = o.parentElement;
+            var hit = false;
+            try { hit = !!(up && up.closest(h.sel)); } catch (e) { hit = true; }
+            m.push(hit);
+          }
+          masks.set(o, m);
+        }
+      }
+      var mask = masks.get(c);
+      for (var i of used) if (!mask[i]) return false;
+      return true;
+    }
+    return function only(sel, used) {
+      if (!pool) return false;
+      try {
+        if (!el.matches(sel)) return false;
+        if (root.matches && root.matches(sel)) return false;
+        for (var c of others) {
+          if (used.length && !hasHooks(c, used)) continue;
+          if (c.matches(sel)) return false;
+        }
+      } catch (e) { return false; }
+      return true;
+    };
+  }
+  /**
+   * `own` qualified by the fewest hooks that make it unique: none, then one
+   * (the direct parent as a child combinator first), then two, then three,
+   * nearest hooks first. Descendant combinators, so a wrapper inserted between
+   * a hook and the element does not break the selector.
+   */
+  function withFewestHooks(el, own, hooks, only) {
+    if (only(own, [])) return own;
+    var n = hooks.length;
+    for (var i = 0; i < n; i++) {
+      if (hooks[i].el === el.parentElement && only(hooks[i].sel + " > " + own, [i])) return hooks[i].sel + " > " + own;
+      if (only(hooks[i].sel + " " + own, [i])) return hooks[i].sel + " " + own;
+    }
+    for (var i = 0; i < n; i++) {
+      for (var j = i + 1; j < n; j++) {
+        var two = hooks[j].sel + " " + hooks[i].sel + " " + own;
+        if (only(two, [i, j])) return two;
+      }
+    }
+    for (var i = 0; i < n; i++) {
+      for (var j = i + 1; j < n; j++) {
+        for (var k = j + 1; k < n; k++) {
+          var three = hooks[k].sel + " " + hooks[j].sel + " " + hooks[i].sel + " " + own;
+          if (only(three, [i, j, k])) return three;
+        }
+      }
+    }
+    return null;
+  }
   /**
    * Shortest selector, relative to `root`, that resolves to `el` and only `el`
-   * (`root.querySelectorAll`). Order: stable id, data-testid, own tag+classes,
-   * a stable ancestor + own segment, then the full `:scope >` path with
-   * `:nth-of-type` only where siblings are ambiguous.
+   * (`root.querySelectorAll`, and never the root itself). Order: stable id,
+   * data-testid, own tag+classes qualified by the fewest distinctive ancestors
+   * (up to three, descendant combinators), the same with `:nth-of-type` on the
+   * element itself when its siblings are alike, then -- only when nothing
+   * shorter is unique -- the full `:scope >` path with `:nth-of-type` where
+   * siblings are ambiguous.
+   *
+   * 2026-09-24: this used to try one ancestor and then fall back to the full
+   * path, so a list price whose nearest classed ancestor was shared with a
+   * recently-viewed strip compiled to a fourteen-step root-anchored path the
+   * selector gate refused, although the chooser had picked the right node.
    */
   function selectorFor(el, root) {
     if (el === root) return ":scope";
@@ -138,29 +237,28 @@
       var byId = "#" + esc(el.id);
       if (unique(root, byId, el)) return byId;
     }
-    var own = segment(el);
-    var tries = [];
     var testId = el.getAttribute("data-testid");
-    if (testId) tries.push(el.localName + "[data-testid=\"" + testId.replace(/"/g, "\\\"") + "\"]");
-    tries.push(own);
-    for (var a = el.parentElement; a && a !== root; a = a.parentElement) {
-      var ctx = isStableId(a.id) ? "#" + esc(a.id) : segment(a);
-      if (ctx !== a.localName) {
-        tries.push(ctx + " > " + own);
-        tries.push(ctx + " " + own);
-        break;
-      }
+    if (testId) {
+      var byTestId = el.localName + "[data-testid=\"" + testId.replace(/"/g, "\\\"") + "\"]";
+      if (unique(root, byTestId, el)) return byTestId;
     }
-    for (var t of tries) if (unique(root, t, el)) return t;
+    var own = segment(el);
+    var hooks = hooksOf(el, root);
+    var only = uniqueness(el, root, own, hooks);
+    var found = withFewestHooks(el, own, hooks, only);
+    if (found) return found;
+    var nth = nthOfType(el);
+    if (nth) {
+      // A bare `tag:nth-of-type(k)` names nothing: with no class of its own, the position needs a hook beside it.
+      var bare = own === el.localName;
+      found = withFewestHooks(el, own + nth, hooks, bare ? (sel, used) => used.length > 0 && only(sel, used) : only);
+      if (found) return found;
+    }
     var parts = [];
     for (var e = el; e && e !== root; e = e.parentElement) {
       var s = segment(e);
       var parent = e.parentElement;
-      if (parent) {
-        var sameTag = [];
-        for (var k of parent.children) if (k.localName === e.localName) sameTag.push(k);
-        if (sameTag.length > 1) s += ":nth-of-type(" + (sameTag.indexOf(e) + 1) + ")";
-      }
+      if (parent) s += nthOfType(e);
       parts.unshift(s);
       if (!parent) break;
     }
@@ -288,7 +386,6 @@
           found.push({
             id: keyId("g", identity(parent) + "|" + itemSelector),
             parent: parent,
-            selector: selectorFor(parent, root),
             itemSelector: itemSelector,
             itemCount: items.length,
             sampleTexts: texts,
@@ -304,16 +401,14 @@
           var fullSamples = anchors.slice(0, 3).map((a) => itemText(rowsFor(a, period.span), 400));
           var samples = fullSamples.map((t) => t.slice(0, SAMPLE_TEXT_CHARS));
           if (anchors.length >= min && samples.join("").length >= 30 && !identicalTexts(samples) && visible(anchors[0])) {
-            var parentSel = selectorFor(parent, root);
             var anchorSeg = segment(anchors[0]);
             found.push({
               id: keyId("g", identity(parent) + "|rows|" + period.anchorSig + "|" + period.span),
               parent: parent,
-              selector: parentSel,
               itemSelector: anchorSeg,
               itemCount: anchors.length,
               sampleTexts: samples,
-              anchorPlusRows: { anchorSelector: parentSel + " > " + anchorSeg, span: period.span },
+              span: period.span,
               sig: "rows:" + period.anchorSig + ":" + period.span,
               score: groupScore(anchors.length, fullSamples),
             });
@@ -327,6 +422,9 @@
       var key = g.sig + "|" + g.itemCount;
       if (seen.has(key)) continue;
       seen.add(key);
+      // Selected after the cap, like leaves: most found groups are never returned.
+      g.selector = selectorFor(g.parent, root);
+      if (g.span) g.anchorPlusRows = { anchorSelector: g.selector + " > " + g.itemSelector, span: g.span };
       out.push(g);
       if (out.length >= opts.maxGroups) break;
     }
@@ -381,17 +479,37 @@
     if (!text || text.length > FRAGMENT_TEXT_CHARS) return "";
     return text;
   }
+  /**
+   * The selector is filled in by `selectLeaves` after the cap, not here: a page
+   * can have thousands of own-text elements, and minimizing a selector costs
+   * more than enumerating one.
+   */
   function leaf(el, attr, text, path, selectorRoot) {
     var out = {
       id: "l" + identity(el) + (attr ? "@" + attr : ""),
       path: path,
-      selector: selectorFor(el, selectorRoot),
+      selector: "",
       text: text,
       label: labelFor(el),
       shape: shapeOf(text, attr),
     };
     if (attr) out.attr = attr;
+    selectorRoots.set(out, { el: el, root: selectorRoot });
     return out;
+  }
+  var selectorRoots = new WeakMap();
+  /** Leaves as returned: each one's selector, relative to the root it was collected under. */
+  function selectLeaves(leaves) {
+    var memo = new Map();
+    for (var l of leaves) {
+      var at = selectorRoots.get(l);
+      if (!at) continue;
+      var byRoot = memo.get(at.root);
+      if (!byRoot) memo.set(at.root, (byRoot = new Map()));
+      if (!byRoot.has(at.el)) byRoot.set(at.el, selectorFor(at.el, at.root));
+      l.selector = byRoot.get(at.el);
+    }
+    return leaves;
   }
   /** Document leaves: main content first, header/nav/footer/aside noise after, then the cap. */
   function documentLeaves(max) {
@@ -399,7 +517,7 @@
     collectLeaves(document.body, document.documentElement, document.body, "", all);
     var main = [], noise = [];
     for (var entry of all) (entry.el.closest(NOISE_SELECTOR) ? noise : main).push(entry.leaf);
-    return main.concat(noise).slice(0, max);
+    return selectLeaves(main.concat(noise).slice(0, max));
   }
 
   // ------------------------------------------------------------ links
@@ -476,7 +594,7 @@
       rows.forEach((row, r) => collectLeaves(row, row, row, r ? "+" + r + "/" : "", entries));
       var links = [];
       for (var row of rows) links = links.concat(linkCandidates(row, null, opts.maxLinks));
-      return { groups: [], leaves: entries.map((e) => e.leaf).slice(0, opts.maxLeaves), links: links.slice(0, opts.maxLinks) };
+      return { groups: [], leaves: selectLeaves(entries.map((e) => e.leaf).slice(0, opts.maxLeaves)), links: links.slice(0, opts.maxLinks) };
     }
     var groups = groupCandidates(opts);
     var top = groups[0] || null;
@@ -491,7 +609,13 @@
     };
   }
 
-  /** Resolves one leaf selector the way replay does: `:scope` is the row itself; rows are tried in order. */
+  /**
+   * Resolves one leaf selector the way replay does: `:scope` is the row itself;
+   * rows are tried in order. With `unique`, a selector matching more than one
+   * element across the rows resolves to null: replay would read the first
+   * match, and on a sample where that is not the element the selector was
+   * minimized for, the value it shows is some other node's.
+   */
   function resolveLeaf(input) {
     var rows;
     if (input.within) {
@@ -500,6 +624,16 @@
       rows = rowsFor(anchor, input.span || 1);
     } else {
       rows = [document.documentElement];
+    }
+    if (input.unique) {
+      var matched = new Set();
+      try {
+        for (var r of rows) {
+          if (r.matches(input.selector)) matched.add(r);
+          for (var m of r.querySelectorAll(input.selector)) matched.add(m);
+        }
+      } catch (e) { return null; }
+      if (matched.size > 1) return null;
     }
     for (var row of rows) {
       var el = null;
