@@ -10,7 +10,7 @@ import { briefToSpec } from "../spec/spec.js";
 import { summarizeUsage, type Chooser } from "../chooser/chooser.js";
 import { NavviError, NeedsHumanError } from "../chooser/index.js";
 import type { FieldType } from "../input/schema.js";
-import { AnswerError, applyAnswers, parseAnswer, type FieldTypes, type MatchedAnswer } from "./answers.js";
+import { AnswerError, answersFromUrls, applyAnswers, parseAnswer, type FieldTypes, type MatchedAnswer } from "./answers.js";
 import { ARTIFACTS, PRIMARY, STAGES, Work, type StageName } from "./work.js";
 import { fillLine, measurements, renderScorecard, scorecard } from "./verify.js";
 import type { Pages } from "./pages.js";
@@ -952,7 +952,7 @@ async function runSpec(work: Work, options: MakeOptions, deps: MakeDeps, answers
     spec = { ...spec, rubrics: [...options.rubrics] };
   }
 
-  const applied = applyAnswers(spec, answers);
+  const applied = applyAnswers(spec, [...answers, ...answersFromUrls(spec, options.urls, options.fromUrls, answers)]);
   return { spec: applied.spec, matched: applied.matched, types: applied.types };
 }
 

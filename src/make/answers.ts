@@ -96,6 +96,37 @@ export function parseAnswer(raw: string): Answer {
   return { key: raw.slice(0, eq).trim(), value: raw.slice(eq + 1).trim() };
 }
 
+/**
+ * The answers the command line already gave without being asked.
+ *
+ * Found by a fresh-eyes run, 2026-09-23: `navvi make "<brief>" <url> <url>`
+ * stopped at spec to ask what the input was, and on the next run which site,
+ * about URLs on one host sitting right there in argv. Start URLs or a
+ * `--from-url` list are a URL list; start URLs on a single host name the site.
+ * Only a question the spec still has open is answered, and never one the
+ * client answered explicitly: this fills silence, it does not overrule.
+ */
+export function answersFromUrls(spec: Spec, urls: readonly string[], fromUrls: readonly string[], explicit: readonly Answer[]): Answer[] {
+  const said = new Set(explicit.map((answer) => key(answer.key).split(".")[0]!));
+  for (const answer of explicit) {
+    const question = spec.openQuestions.find((open) => key(open.id) === key(answer.key));
+    if (question) said.add(key(question.about));
+  }
+  const open = (subject: OpenQuestionSubject): boolean => !said.has(subject) && spec.openQuestions.filter((question) => key(question.about) === subject).length === 1;
+  const out: Answer[] = [];
+  if (open("inputs") && urls.length + fromUrls.length > 0) out.push({ key: "inputs", value: "url_list" });
+  const hosts = new Set<string>();
+  for (const url of urls) {
+    try {
+      hosts.add(new URL(url).hostname.replace(/^www\./, ""));
+    } catch {
+      return out;
+    }
+  }
+  if (open("target") && hosts.size === 1) out.push({ key: "target", value: [...hosts][0]! });
+  return out;
+}
+
 /** The form a question id, a subject and an answer key are compared in. */
 function key(text: string): string {
   return text.trim().toLowerCase();
