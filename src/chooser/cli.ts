@@ -33,12 +33,20 @@ export interface CliChooserOptions extends BaseChooserOptions {
   /** Executable name or path; defaults to the harness name resolved on PATH. */
   command?: string;
   runner?: CliRunner;
-  /** Per batch; a slower harness ends the run `model_unavailable`. */
+  /** Per choice batch; a slower harness ends the run `model_unavailable`. */
   timeoutMs?: number;
+  /** Per batch that asks for text: a spec draft is one long answer, not a pick. */
+  textTimeoutMs?: number;
   env?: NodeJS.ProcessEnv;
 }
 
 export const CLI_TIMEOUT_MS = 60_000;
+/**
+ * A text batch writes; a choice batch picks. Found live, 2026-09-23: make's spec
+ * draft took Claude Code ~30 s on a quiet machine and ran past 60 s on a busy one,
+ * so the run stopped at its first stage over a reply that was on its way.
+ */
+export const CLI_TEXT_TIMEOUT_MS = 180_000;
 export const PROBE_TIMEOUT_MS = 20_000;
 export const DEFAULT_CLAUDE_MODEL = "haiku";
 /** Above this the prompt goes on stdin: Linux caps one argv string at 128 KiB. */
@@ -298,6 +306,7 @@ export class CliChooser extends BaseChooser {
   private readonly command: string;
   private readonly runner: CliRunner;
   private readonly timeoutMs: number;
+  private readonly textTimeoutMs: number;
   private reportedCostUsd = 0;
 
   constructor(harness: CliHarness, options: CliChooserOptions = {}) {
@@ -307,8 +316,12 @@ export class CliChooser extends BaseChooser {
     this.name = harness;
     this.model = options.model ?? defaultCliModel(harness, env);
     this.command = options.command ?? harness;
-    this.timeoutMs = options.timeoutMs ?? CLI_TIMEOUT_MS;
-    this.runner = options.runner ?? processRunner(this.timeoutMs, env);
+    // NAVVI_CLI_TIMEOUT_MS is for a machine neither default fits; it sets both ceilings.
+    const fromEnv = Number(env.NAVVI_CLI_TIMEOUT_MS);
+    const override = Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : undefined;
+    this.timeoutMs = options.timeoutMs ?? override ?? CLI_TIMEOUT_MS;
+    this.textTimeoutMs = options.textTimeoutMs ?? override ?? Math.max(this.timeoutMs, CLI_TEXT_TIMEOUT_MS);
+    this.runner = options.runner ?? processRunner(Math.max(this.timeoutMs, this.textTimeoutMs), env);
   }
 
   usage(): ChooserUsage {
@@ -321,7 +334,8 @@ export class CliChooser extends BaseChooser {
     const estimate = estimateTokens(prompt);
     let run: CliRunResult;
     try {
-      run = await withTimeout(this.harness === "claude" ? this.runClaude(prompt) : this.runCodex(prompt), this.timeoutMs);
+      const ceiling = batch.some((q) => q.kind === "text") ? this.textTimeoutMs : this.timeoutMs;
+      run = await withTimeout(this.harness === "claude" ? this.runClaude(prompt) : this.runCodex(prompt), ceiling);
     } catch (err) {
       if (err instanceof CliTimeoutError) throw new ModelUnavailableError(`${HARNESS_LABEL[this.harness]} gave ${err.message}`, { cause: err });
       if (isRecord(err) && err.code === "ENOENT") throw new CliUnavailableError(`${HARNESS_LABEL[this.harness]} is not installed (\`${this.command}\` not found on PATH)`);

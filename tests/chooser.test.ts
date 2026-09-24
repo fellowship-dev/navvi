@@ -27,7 +27,7 @@ import { JevChooser, JEV_MAX_STATE_TOKENS, JEV_PRICE_PER_MILLION_INPUT_USD, Type
 import { ModelChooser, DEFAULT_MODEL_ID, DEFAULT_MODEL_STATE_CHARS, MODEL_PRICES } from "../src/chooser/model.js";
 import { RecordedChooser, RecordingChooser } from "../src/chooser/recorded.js";
 import type { CliRunner, CliRunResult } from "../src/chooser/cli.js";
-import { createChooser } from "../src/chooser/index.js";
+import { TextFallbackChain, createChooser } from "../src/chooser/index.js";
 import { Budget, BudgetExhaustedError, ModelUnavailableError, NavviError, NeedsHumanError } from "../src/billing/budget.js";
 
 const SCRATCH = process.env.CLAUDE_SCRATCHPAD ?? tmpdir();
@@ -798,6 +798,25 @@ const MODEL_ANSWER = JSON.stringify({ answers: [{ id: "query", index: null, text
  * API, ANTHROPIC_API_KEY before the Gateway.
  */
 describe("text fallback precedence: subscription before metered", () => {
+  it("a CLI writer that times out hands the text to the next subscription CLI instead of ending the run", async () => {
+    // Found live, 2026-09-23: Claude Code gave no reply within its ceiling on a busy
+    // machine and make stopped at spec, with a metered writer configured and unused.
+    const usage = (name: ChooserName) => ({ chooser: name, questions: 0, textQuestions: 0, batches: 0, inputTokens: 0, outputTokens: 0, waitMs: 0, costUsd: 0, zeroDataRetention: "not_applicable" as const });
+    const slow: Chooser = { name: "claude", ask: () => Promise.reject(new ModelUnavailableError("Claude Code gave no reply within 60000 ms")), usage: () => usage("claude") };
+    const next: Chooser = { name: "codex", ask: async (b) => b.map((q) => ({ id: q.id, index: null, text: "from the next writer" })), usage: () => usage("codex") };
+    const chain = new TextFallbackChain([{ name: "claude", build: () => slow }, { name: "codex", build: () => next }]);
+    const answers = await chain.ask([textQuestion()]);
+    expect(answers[0]?.text).toBe("from the next writer");
+    expect(chain.name).toBe("codex");
+  });
+
+  it("the last writer's timeout still ends the run model_unavailable", async () => {
+    const usage = (name: ChooserName) => ({ chooser: name, questions: 0, textQuestions: 0, batches: 0, inputTokens: 0, outputTokens: 0, waitMs: 0, costUsd: 0, zeroDataRetention: "not_applicable" as const });
+    const slow: Chooser = { name: "claude", ask: () => Promise.reject(new ModelUnavailableError("no reply")), usage: () => usage("claude") };
+    const chain = new TextFallbackChain([{ name: "claude", build: () => slow }]);
+    await expect(chain.ask([textQuestion()])).rejects.toBeInstanceOf(ModelUnavailableError);
+  });
+
   it("gateway key with a CLI on PATH: Jev answers the choice, the CLI answers the text, nothing is metered", async () => {
     const jev = jevMock();
     const cli = cliRunner("answers");

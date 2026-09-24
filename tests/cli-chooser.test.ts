@@ -184,7 +184,26 @@ describe("claude chooser", () => {
 
   it("a slow harness is model_unavailable after the batch timeout", async () => {
     const runner: CliRunner = () => new Promise((resolve) => setTimeout(() => resolve({ code: 0, stdout: "", stderr: "" }), 200));
-    const err = await new CliChooser("claude", { runner, env: {}, timeoutMs: 20 }).ask(batch()).catch((e: unknown) => e);
+    const err = await new CliChooser("claude", { runner, env: {}, timeoutMs: 20 }).ask(batch().slice(0, 2)).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ModelUnavailableError);
+    expect((err as Error).message).toContain("no reply within 20 ms");
+  });
+
+  it("a batch that asks for text gets the longer text ceiling, a choice batch keeps the short one", async () => {
+    // Found live, 2026-09-23: make's spec draft is one long text answer; Claude Code
+    // took ~30 s on a quiet machine and past the 60 s choice ceiling on a busy one.
+    const slow: CliRunner = () => new Promise((resolve) => setTimeout(() => resolve({ code: 0, stdout: claudeEnvelope(JSON.stringify({ answers: [{ id: "label", index: null, text: "a label" }] })), stderr: "" }), 60));
+    const text: Question[] = [{ id: "label", kind: "text", premise: "Write a label.", state: STATE, maxLength: 40 }];
+    const answers = await new CliChooser("claude", { runner: slow, env: {}, timeoutMs: 20, textTimeoutMs: 500 }).ask(text);
+    expect(answers[0]!.text).toBe("a label");
+    const err = await new CliChooser("claude", { runner: slow, env: {}, timeoutMs: 20, textTimeoutMs: 500, backoffMs: [0] }).ask(batch().slice(0, 1)).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ModelUnavailableError);
+  });
+
+  it("NAVVI_CLI_TIMEOUT_MS sets both ceilings for a machine the defaults do not fit", async () => {
+    const slow: CliRunner = () => new Promise((resolve) => setTimeout(() => resolve({ code: 0, stdout: claudeEnvelope(JSON.stringify({ answers: [{ id: "label", index: null, text: "a label" }] })), stderr: "" }), 60));
+    const text: Question[] = [{ id: "label", kind: "text", premise: "Write a label.", state: STATE, maxLength: 40 }];
+    const err = await new CliChooser("claude", { runner: slow, env: { NAVVI_CLI_TIMEOUT_MS: "20" }, backoffMs: [0] }).ask(text).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ModelUnavailableError);
     expect((err as Error).message).toContain("no reply within 20 ms");
   });

@@ -1,5 +1,5 @@
 import { defaultChooser, hasChooserKey, type AvailableClis, type Chooser as ChooserId, type Decider, type Transport, type Writer } from "../input/schema.js";
-import { Budget } from "../billing/budget.js";
+import { Budget, ModelUnavailableError } from "../billing/budget.js";
 import { AgentChooser, type AgentChooserOptions } from "./agent.js";
 import { CliChooser, CliUnavailableError, HARNESS_LABEL, SIGN_IN_COMMAND, findOnPath, probeCli, type CliChooserOptions, type CliHarness, type CliProbe } from "./cli.js";
 import { JevChooser, type JevChooserOptions } from "./jev.js";
@@ -167,7 +167,8 @@ function textFallbackFor(options: CreateChooserOptions, env: NodeJS.ProcessEnv, 
  * (`CliUnavailableError`: not installed, or installed but not signed in), at
  * which point the next takes over for the rest of the run. Any other failure
  * is the answer: a signed-in CLI that times out or refuses is not a reason to
- * start spending on an API.
+ * start spending on an API — though a timeout does move on to another
+ * subscription CLI when one is installed.
  */
 export class TextFallbackChain implements Chooser {
   private readonly candidates: TextFallbackCandidate[];
@@ -189,7 +190,12 @@ export class TextFallbackChain implements Chooser {
       try {
         return await this.member().ask(batch);
       } catch (err) {
-        if (!(err instanceof CliUnavailableError) || this.index + 1 >= this.candidates.length) throw err;
+        // A missing or signed-out writer hands over to the next one. A signed-in one that
+        // runs out of time hands over only to another subscription CLI: a busy Claude Code
+        // is a reason to try Codex, never a reason to start spending on an API.
+        const next = this.candidates[this.index + 1];
+        const movesOn = err instanceof CliUnavailableError || (err instanceof ModelUnavailableError && next !== undefined && next.name !== "model");
+        if (!movesOn || next === undefined) throw err;
         this.index += 1;
       }
     }
