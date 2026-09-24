@@ -542,13 +542,13 @@ async function make(args: CliArgs, io: CliIo): Promise<number> {
   );
 
   if (result.stoppedAt && result.because && !args.quiet) {
-    io.stderr.write(makeStop(result.stoppedAt, result.because, exitForMake(result.status)));
+    io.stderr.write(makeStop(result.stoppedAt, result.because, exitForMake(result.status, result.runStatus)));
   }
-  return exitForMake(result.status);
+  return exitForMake(result.status, result.runStatus);
 }
 
 /** `make`'s own vocabulary, mapped onto the process exit codes this file owns. */
-function exitForMake(status: MakeStatus): number {
+function exitForMake(status: MakeStatus, runStatus?: RunStatus): number {
   switch (status) {
     case "delivered":
       return EXIT.ok;
@@ -558,6 +558,8 @@ function exitForMake(status: MakeStatus): number {
       return EXIT.configuration;
     case "short":
       return EXIT.short;
+    case "unavailable":
+      return exitCodeFor(runStatus ?? "model_unavailable");
   }
 }
 

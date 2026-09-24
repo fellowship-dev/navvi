@@ -12,6 +12,7 @@ import { readingOf } from "../src/replay/determinism.js";
 import { extractPage, fieldTypesOf, type PageExtraction } from "../src/scraper/extract.js";
 import { canaryOrigin, type CompiledScraper } from "../src/scraper/schema.js";
 import type { Answer, Chooser, ChooserUsage, Question } from "../src/chooser/chooser.js";
+import { ModelUnavailableError } from "../src/billing/budget.js";
 import type { Spec } from "../src/spec/schema.js";
 import type { Manuscript } from "../src/investigate/index.js";
 import type { Reconciliation } from "../src/reconcile/index.js";
@@ -905,6 +906,25 @@ describe("a stage that raised", () => {
     const text = transcript();
     expect(text).toContain("determinism   threw");
     expect(text).toContain("! threw");
+  });
+});
+
+describe("a model that did not answer", () => {
+  it("is model_unavailable at the stage that asked, not a defect in navvi", async () => {
+    // Found live, 2026-09-23: Claude Code ran out of time on the spec draft and the
+    // transcript blamed navvi, with a stack, for a writer that was merely slow.
+    const silent: Chooser = {
+      name: "claude",
+      ask: () => Promise.reject(new ModelUnavailableError("Claude Code gave no reply within 60000 ms")),
+      usage: (): ChooserUsage => ({ chooser: "claude", questions: 0, textQuestions: 0, batches: 0, inputTokens: 0, outputTokens: 0, waitMs: 0, costUsd: 0, zeroDataRetention: "not_applicable" }),
+    };
+    const result = await make(options({ brief: BRIEF }), deps({ openChooser: () => Promise.resolve(silent) }));
+    expect(result.status, transcript()).toBe("unavailable");
+    expect(result.runStatus).toBe("model_unavailable");
+    expect(result.stoppedAt).toBe("spec");
+    expect(outcome(result, "spec")).toBe("stopped");
+    expect(result.because).not.toContain("defect in navvi");
+    expect(result.because).toContain("no reply within 60000 ms");
   });
 });
 

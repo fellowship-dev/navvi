@@ -8,7 +8,7 @@ import { groupByTemplate } from "../template/index.js";
 import { SpecSchema, blockingQuestions, requestedFields, type Rubric, type Spec } from "../spec/schema.js";
 import { briefToSpec } from "../spec/spec.js";
 import { summarizeUsage, type Chooser } from "../chooser/chooser.js";
-import { NeedsHumanError } from "../chooser/index.js";
+import { NavviError, NeedsHumanError } from "../chooser/index.js";
 import type { FieldType } from "../input/schema.js";
 import { AnswerError, applyAnswers, parseAnswer, type FieldTypes, type MatchedAnswer } from "./answers.js";
 import { ARTIFACTS, PRIMARY, STAGES, Work, type StageName } from "./work.js";
@@ -172,10 +172,16 @@ export interface StageReport {
  * owns `EXIT` — a second table of exit numbers here would be exactly the second
  * spelling `tests/second-spelling.test.ts` is about.
  */
-export type MakeStatus = "delivered" | "needs_answers" | "configuration" | "short";
+export type MakeStatus = "delivered" | "needs_answers" | "configuration" | "short" | "unavailable";
 
 export interface MakeResult {
   status: MakeStatus;
+  /**
+   * With `unavailable`: the run status the model or the budget ended it with
+   * (`model_unavailable`, `budget_exhausted`, `charge_limit`), so `bin/cli.ts`
+   * maps it to the same exit code the plain command uses for it.
+   */
+  runStatus?: NavviError["status"];
   /** The stage the run stopped at, when it stopped before the end. */
   stoppedAt?: StageName;
   /** The sentence the stop line prints. */
@@ -814,6 +820,20 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
       }
       say(makeBullet("parked", error.message, "!"));
       return { status: "needs_answers", stoppedAt: running, because: error.message, stages, work: work.dir };
+    }
+    /**
+     * A model that did not answer, or a budget that ran out, is not a defect in
+     * navvi either. Found live, 2026-09-23: a slow Claude Code on the spec draft
+     * was reported as navvi throwing, with a stack, which sends whoever reads it
+     * to the wrong repository. It ends the way the plain command ends it.
+     */
+    if (error instanceof NavviError && (error.status === "model_unavailable" || error.status === "budget_exhausted" || error.status === "charge_limit")) {
+      if (!stages.some((entry) => entry.stage === running)) record(running, "stopped", `${error.status}: ${error.message}`);
+      for (const later of STAGES.slice(STAGES.indexOf(running) + 1)) {
+        if (!stages.some((entry) => entry.stage === later)) record(later, "not reached", `${running} stopped: ${error.status}`);
+      }
+      say(makeBullet(error.status, error.message, "!"));
+      return { status: "unavailable", runStatus: error.status, stoppedAt: running, because: `${error.status}: ${error.message}`, stages, work: work.dir };
     }
     /**
      * F7: an exception is a stage outcome, not an escape from the transcript.
