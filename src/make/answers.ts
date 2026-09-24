@@ -112,9 +112,16 @@ export function answersFromUrls(spec: Spec, urls: readonly string[], fromUrls: r
     const question = spec.openQuestions.find((open) => key(open.id) === key(answer.key));
     if (question) said.add(key(question.about));
   }
-  const open = (subject: OpenQuestionSubject): boolean => !said.has(subject) && spec.openQuestions.filter((question) => key(question.about) === subject).length === 1;
+  // Answered by id, not subject: `target` also carries a page-kind question the
+  // investigation settles, and one string cannot be the answer to both.
+  const open = (subject: OpenQuestionSubject): OpenQuestion | undefined => {
+    if (said.has(subject)) return undefined;
+    const blocking = spec.openQuestions.filter((question) => key(question.about) === subject && question.blocking);
+    return blocking.length === 1 ? blocking[0] : undefined;
+  };
   const out: Answer[] = [];
-  if (open("inputs") && urls.length + fromUrls.length > 0) out.push({ key: "inputs", value: "url_list" });
+  const inputs = open("inputs");
+  if (inputs && urls.length + fromUrls.length > 0) out.push({ key: inputs.id, value: "url_list" });
   const hosts = new Set<string>();
   for (const url of urls) {
     try {
@@ -123,7 +130,8 @@ export function answersFromUrls(spec: Spec, urls: readonly string[], fromUrls: r
       return out;
     }
   }
-  if (open("target") && hosts.size === 1) out.push({ key: "target", value: [...hosts][0]! });
+  const target = open("target");
+  if (target && hosts.size === 1) out.push({ key: target.id, value: [...hosts][0]! });
   return out;
 }
 

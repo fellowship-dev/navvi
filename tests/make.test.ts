@@ -1025,13 +1025,21 @@ describe("--answer", () => {
   it("URLs on the command line answer what the input is and which site, unless the client already did", () => {
     // Found by a fresh-eyes run, 2026-09-23: make stopped to ask for the input shape
     // and then for the site, about three URLs on one host given right there in argv.
-    const withSite: Spec = { ...spec(), openQuestions: [...spec().openQuestions, { id: "target-site", about: "target", question: "which site?", because: "the brief names none", blocking: true, answeredBy: "client" }] };
+    const withSite: Spec = {
+      ...spec(),
+      openQuestions: [
+        ...spec().openQuestions,
+        { id: "target-site", about: "target", question: "which site?", because: "the brief names none", blocking: true, answeredBy: "client" },
+        // Found live: target also carries a non-blocking page-kind question, which a subject answer would collide with.
+        { id: "target-page-kind", about: "target", question: "which kind of page?", because: "the investigation settles it", blocking: false, answeredBy: "investigation" },
+      ],
+    };
     const urls = ["https://shop.example/p/1", "https://shop.example/p/2"];
-    expect(answersFromUrls(withSite, urls, [], [])).toEqual([{ key: "inputs", value: "url_list" }, { key: "target", value: "shop.example" }]);
-    expect(answersFromUrls(withSite, [], ["https://list.example/urls.txt"], [])).toEqual([{ key: "inputs", value: "url_list" }]);
+    expect(answersFromUrls(withSite, urls, [], [])).toEqual([{ key: "inputs-shape", value: "url_list" }, { key: "target-site", value: "shop.example" }]);
+    expect(answersFromUrls(withSite, [], ["https://list.example/urls.txt"], [])).toEqual([{ key: "inputs-shape", value: "url_list" }]);
     // Two hosts do not name one site; an explicit answer is never second-guessed.
-    expect(answersFromUrls(withSite, ["https://a.example/x", "https://b.example/y"], [], [])).toEqual([{ key: "inputs", value: "url_list" }]);
-    expect(answersFromUrls(withSite, urls, [], [parseAnswer("inputs=sku_list")])).toEqual([{ key: "target", value: "shop.example" }]);
+    expect(answersFromUrls(withSite, ["https://a.example/x", "https://b.example/y"], [], [])).toEqual([{ key: "inputs-shape", value: "url_list" }]);
+    expect(answersFromUrls(withSite, urls, [], [parseAnswer("inputs=sku_list")])).toEqual([{ key: "target-site", value: "shop.example" }]);
     expect(answersFromUrls(withSite, [], [], [])).toEqual([]);
     const applied = applyAnswers(withSite, answersFromUrls(withSite, urls, [], []));
     expect(applied.spec.openQuestions.filter((question) => question.blocking)).toHaveLength(0);
