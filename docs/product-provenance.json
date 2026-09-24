@@ -1,0 +1,539 @@
+{
+  "asset": "docs/product.gif, docs/product.mp4",
+  "script": "scripts/record-product.ts",
+  "commit": "5e541f34af01a060a2c1c1a4e59712c1a99ffe56",
+  "workingTreeAtCapture": "M README.md\n M docs/recording.md\n M scripts/record-decisions.ts\n?? docs/decisions-race-claude-code.json\n?? scripts/record-product.ts",
+  "recordedAt": "2026-09-24T03:30:16.480Z",
+  "how": "Each run is main() from the built dist/bin/cli.js, in-process, with the real argv; stderr is captured with timestamps. io.run wraps the built run() only to add CrawlDeps.onPage (actual crawler page screenshots) and to keep the RunSummary. Crawler log lines (deps.log) are kept here but not shown on screen.",
+  "chooser": "default chooser resolution (no --chooser flag): Jev decides, a signed-in Claude Code answers the text question (prompt parsing)",
+  "display": {
+    "width": 1280,
+    "height": 720,
+    "fps": 6,
+    "note": "Clocks show real elapsed time. Each run's live section is sped up uniformly by displaySpeedup, which is printed on screen when > 1. Command typing and result holds are untimed."
+  },
+  "beat3": "controlled two-version fixture (demo/pharmacy-v1 then demo/pharmacy-v2 behind the same URLs, served by tests/server.ts), with live Jev decisions for compile and heal",
+  "frames": 147,
+  "distBuild": {
+    "builtAt": "2026-09-24T03:20:02.774Z",
+    "headAtBuild": "11347076660c8649db584a5451b567c324568721",
+    "srcBinChangesSinceBuild": "src/cli/args.ts | 2 ++\n 1 file changed, 2 insertions(+)"
+  },
+  "runs": [
+    {
+      "run": "compile",
+      "beat": 1,
+      "command": [
+        "Extract the book title, price and availability",
+        "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+        "--browser",
+        "chromium",
+        "--storage",
+        "storage-books"
+      ],
+      "displayCommand": "navvi \"Extract the book title, price and availability\" https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+      "startedAt": "2026-09-24T03:29:25.939Z",
+      "wallMs": 21814,
+      "exitCode": 0,
+      "displaySpeedup": 6,
+      "frames": [
+        0,
+        40
+      ],
+      "stderr": [
+        {
+          "atMs": 3,
+          "text": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\n"
+        },
+        {
+          "atMs": 21814,
+          "text": "navvi: status succeeded\n  items 1  pages 1  templates 1  cache hit no\n  decider jev: 3 decisions, 8049 input tokens, 2.1s waiting, $0.0003\n  writer claude: 1 text question, 19631 input tokens, 15.4s waiting, $0.0000\n  healing events 0  unmapped candidates 0  unhealed 0\n  data: 1 records on stdout\n"
+        }
+      ],
+      "crawlerLog": [
+        {
+          "atMs": 15687,
+          "text": "browser launch #1: launchOptions.executablePath=(unset) resolved=~/Library/Caches/ms-playwright/chromium-1223/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing exists=true",
+          "shownOnScreen": false
+        }
+      ],
+      "summary": {
+        "status": "succeeded",
+        "items": 1,
+        "pages": 1,
+        "templates": 1,
+        "cacheHit": false,
+        "chooser": {
+          "name": "jev",
+          "questions": 4,
+          "inputTokens": 27680,
+          "waitMs": 17513.019111999994,
+          "costUsd": 0.00033805799999999997,
+          "textQuestions": 1,
+          "writer": {
+            "name": "claude",
+            "textQuestions": 1,
+            "inputTokens": 19631,
+            "waitMs": 15422.500498999998,
+            "costUsd": 0
+          }
+        },
+        "healingEvents": [],
+        "unhealed": 0,
+        "unmappedCandidates": 0,
+        "fieldsNotFound": []
+      },
+      "healedFields": [],
+      "records": [
+        {
+          "title": "A Light in the Attic",
+          "price": "£51.77",
+          "availability": "In stock (22 available)",
+          "_source": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html"
+        }
+      ],
+      "pageScreenshots": 14,
+      "screenshotErrors": 2,
+      "screenshotBorrowedFromPreviousRun": null
+    },
+    {
+      "run": "rerun",
+      "beat": 2,
+      "command": [
+        "Extract the book title, price and availability",
+        "https://books.toscrape.com/catalogue/sharp-objects_997/index.html",
+        "--browser",
+        "chromium",
+        "--storage",
+        "storage-books"
+      ],
+      "displayCommand": "navvi \"Extract the book title, price and availability\" https://books.toscrape.com/catalogue/sharp-objects_997/index.html",
+      "startedAt": "2026-09-24T03:29:48.007Z",
+      "wallMs": 2147,
+      "exitCode": 0,
+      "displaySpeedup": 2,
+      "frames": [
+        41,
+        61
+      ],
+      "stderr": [
+        {
+          "atMs": 1,
+          "text": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\n"
+        },
+        {
+          "atMs": 2147,
+          "text": "navvi: status succeeded\n  items 1  pages 1  templates 1  cache hit yes\n  decider jev: 0 decisions, 0 input tokens, 0ms waiting, $0.0000\n  healing events 0  unmapped candidates 0  unhealed 0\n  data: 1 records on stdout\n"
+        }
+      ],
+      "crawlerLog": [
+        {
+          "atMs": 235,
+          "text": "browser launch #1: launchOptions.executablePath=(unset) resolved=~/Library/Caches/ms-playwright/chromium-1223/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing exists=true",
+          "shownOnScreen": false
+        }
+      ],
+      "summary": {
+        "status": "succeeded",
+        "items": 1,
+        "pages": 1,
+        "templates": 1,
+        "cacheHit": true,
+        "chooser": {
+          "name": "jev",
+          "questions": 0,
+          "inputTokens": 0,
+          "waitMs": 0,
+          "costUsd": 0,
+          "textQuestions": 0
+        },
+        "healingEvents": [],
+        "unhealed": 0,
+        "unmappedCandidates": 0,
+        "fieldsNotFound": []
+      },
+      "healedFields": [],
+      "records": [
+        {
+          "title": "Sharp Objects",
+          "price": "£47.82",
+          "availability": "In stock (20 available)",
+          "_source": "https://books.toscrape.com/catalogue/sharp-objects_997/index.html"
+        }
+      ],
+      "pageScreenshots": 2,
+      "screenshotErrors": 1,
+      "screenshotBorrowedFromPreviousRun": null
+    },
+    {
+      "run": "fixture-compile",
+      "beat": 3,
+      "command": [
+        "Extract the product name, laboratory, price and stock",
+        "http://127.0.0.1:52440/demo/pharmacy/producto/amoxicilina-500-mg.html",
+        "http://127.0.0.1:52440/demo/pharmacy/producto/loratadina-10-mg.html",
+        "http://127.0.0.1:52440/demo/pharmacy/producto/omeprazol-20-mg.html",
+        "http://127.0.0.1:52440/demo/pharmacy/producto/paracetamol-500-mg.html",
+        "--allow-private-host",
+        "127.0.0.1",
+        "--browser",
+        "chromium",
+        "--storage",
+        "storage-pharmacy"
+      ],
+      "displayCommand": "navvi \"Extract the product name, laboratory, price and stock\" <4 product pages>",
+      "startedAt": "2026-09-24T03:29:50.181Z",
+      "wallMs": 23215,
+      "exitCode": 0,
+      "displaySpeedup": 20,
+      "frames": [
+        62,
+        75
+      ],
+      "stderr": [
+        {
+          "atMs": 1,
+          "text": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\n"
+        },
+        {
+          "atMs": 23215,
+          "text": "navvi: status succeeded\n  items 4  pages 4  templates 1  cache hit no\n  decider jev: 4 decisions, 18143 input tokens, 4.8s waiting, $0.0008\n  writer claude: 1 text question, 19631 input tokens, 15.3s waiting, $0.0000\n  healing events 0  unmapped candidates 0  unhealed 0\n  data: 4 records on stdout\n"
+        }
+      ],
+      "crawlerLog": [
+        {
+          "atMs": 15481,
+          "text": "browser launch #1: launchOptions.executablePath=(unset) resolved=~/Library/Caches/ms-playwright/chromium-1223/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing exists=true",
+          "shownOnScreen": false
+        }
+      ],
+      "summary": {
+        "status": "succeeded",
+        "items": 4,
+        "pages": 4,
+        "templates": 1,
+        "cacheHit": false,
+        "chooser": {
+          "name": "jev",
+          "questions": 5,
+          "inputTokens": 37774,
+          "waitMs": 20071.116442000002,
+          "costUsd": 0.0007620060000000001,
+          "textQuestions": 1,
+          "writer": {
+            "name": "claude",
+            "textQuestions": 1,
+            "inputTokens": 19631,
+            "waitMs": 15291.459535999998,
+            "costUsd": 0
+          }
+        },
+        "healingEvents": [],
+        "unhealed": 0,
+        "unmappedCandidates": 0,
+        "fieldsNotFound": []
+      },
+      "healedFields": [],
+      "records": [
+        {
+          "product_name": "Amoxicilina 500 mg x 21 cápsulas",
+          "laboratory": "Bagó",
+          "price": "$ 6.990",
+          "stock": "Disponible",
+          "_source": "http://127.0.0.1:52440/demo/pharmacy/producto/amoxicilina-500-mg.html"
+        },
+        {
+          "product_name": "Loratadina 10 mg x 30 comprimidos",
+          "laboratory": "Andrómaco",
+          "price": "$ 4.290",
+          "stock": "Disponible",
+          "_source": "http://127.0.0.1:52440/demo/pharmacy/producto/loratadina-10-mg.html"
+        },
+        {
+          "product_name": "Omeprazol 20 mg x 30 cápsulas",
+          "laboratory": "Saval",
+          "price": "$ 5.490",
+          "stock": "Disponible",
+          "_source": "http://127.0.0.1:52440/demo/pharmacy/producto/omeprazol-20-mg.html"
+        },
+        {
+          "product_name": "Paracetamol 500 mg x 16 comprimidos",
+          "laboratory": "Laboratorio Chile",
+          "price": "$ 2.490",
+          "stock": "Disponible",
+          "_source": "http://127.0.0.1:52440/demo/pharmacy/producto/paracetamol-500-mg.html"
+        }
+      ],
+      "pageScreenshots": 24,
+      "screenshotErrors": 5,
+      "screenshotBorrowedFromPreviousRun": null
+    },
+    {
+      "run": "fixture-heal",
+      "beat": 3,
+      "command": [
+        "Extract the product name, laboratory, price and stock",
+        "http://127.0.0.1:52440/demo/pharmacy/producto/amoxicilina-500-mg.html",
+        "http://127.0.0.1:52440/demo/pharmacy/producto/loratadina-10-mg.html",
+        "http://127.0.0.1:52440/demo/pharmacy/producto/omeprazol-20-mg.html",
+        "http://127.0.0.1:52440/demo/pharmacy/producto/paracetamol-500-mg.html",
+        "--allow-private-host",
+        "127.0.0.1",
+        "--browser",
+        "chromium",
+        "--storage",
+        "storage-pharmacy"
+      ],
+      "displayCommand": "navvi \"Extract the product name, laboratory, price and stock\" <4 product pages>",
+      "startedAt": "2026-09-24T03:30:13.408Z",
+      "wallMs": 1717,
+      "exitCode": 0,
+      "displaySpeedup": 2,
+      "frames": [
+        76,
+        104
+      ],
+      "stderr": [
+        {
+          "atMs": 1,
+          "text": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\n"
+        },
+        {
+          "atMs": 1717,
+          "text": "navvi: status succeeded\n  items 4  pages 4  templates 1  cache hit yes\n  decider jev: 4 decisions, 6690 input tokens, 464ms waiting, $0.0003\n  healing events 1  unmapped candidates 2  unhealed 0\n  data: 4 records on stdout\n"
+        }
+      ],
+      "crawlerLog": [
+        {
+          "atMs": 247,
+          "text": "browser launch #1: launchOptions.executablePath=(unset) resolved=~/Library/Caches/ms-playwright/chromium-1223/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing exists=true",
+          "shownOnScreen": false
+        },
+        {
+          "atMs": 781,
+          "text": "healing licensed on http://127.0.0.1:52440/demo/pharmacy/producto/amoxicilina-500-mg.html: the field is in \"replayed\" (the alternative resolved on a later run and produced a value of the recorded shape) and classifyRun answered \"drift\", which licenses \"stop-filling\" (replayed -> drifted): product_name, laboratory, price, stock stopped filling — every field collapsed, but the canary page still resolves: the site is serving you and the template is what changed — the canary still resolves: 22 of 24 recorded words and 798 characters of text.",
+          "shownOnScreen": false
+        }
+      ],
+      "summary": {
+        "status": "succeeded",
+        "items": 4,
+        "pages": 4,
+        "templates": 1,
+        "cacheHit": true,
+        "chooser": {
+          "name": "jev",
+          "questions": 4,
+          "inputTokens": 6690,
+          "waitMs": 464.38107899999886,
+          "costUsd": 0.00028098,
+          "textQuestions": 0
+        },
+        "healingEvents": [
+          {
+            "kind": "field",
+            "fields": [
+              "product_name",
+              "laboratory",
+              "price",
+              "stock"
+            ],
+            "at": "2026-09-24T03:30:14.706Z",
+            "url": "http://127.0.0.1:52440/demo/pharmacy/producto/amoxicilina-500-mg.html"
+          }
+        ],
+        "unhealed": 0,
+        "unmappedCandidates": 2,
+        "fieldsNotFound": []
+      },
+      "healedFields": [
+        "laboratory",
+        "price",
+        "product_name",
+        "stock"
+      ],
+      "records": [
+        {
+          "product_name": "Amoxicilina 500 mg x 21 cápsulas",
+          "laboratory": "Bagó",
+          "price": "$ 6.990",
+          "stock": "Disponible",
+          "_source": "http://127.0.0.1:52440/demo/pharmacy/producto/amoxicilina-500-mg.html"
+        },
+        {
+          "product_name": "Loratadina 10 mg x 30 comprimidos",
+          "laboratory": "Andrómaco",
+          "price": "$ 4.290",
+          "stock": "Disponible",
+          "_source": "http://127.0.0.1:52440/demo/pharmacy/producto/loratadina-10-mg.html"
+        },
+        {
+          "product_name": "Omeprazol 20 mg x 30 cápsulas",
+          "laboratory": "Saval",
+          "price": "$ 4.390",
+          "stock": "Disponible",
+          "_source": "http://127.0.0.1:52440/demo/pharmacy/producto/omeprazol-20-mg.html"
+        },
+        {
+          "product_name": "Paracetamol 500 mg x 16 comprimidos",
+          "laboratory": "Laboratorio Chile",
+          "price": "$ 2.490",
+          "stock": "Disponible",
+          "_source": "http://127.0.0.1:52440/demo/pharmacy/producto/paracetamol-500-mg.html"
+        }
+      ],
+      "pageScreenshots": 7,
+      "screenshotErrors": 0,
+      "screenshotBorrowedFromPreviousRun": null
+    },
+    {
+      "run": "fixture-replay",
+      "beat": 3,
+      "command": [
+        "Extract the product name, laboratory, price and stock",
+        "http://127.0.0.1:52440/demo/pharmacy/producto/amoxicilina-500-mg.html",
+        "http://127.0.0.1:52440/demo/pharmacy/producto/loratadina-10-mg.html",
+        "http://127.0.0.1:52440/demo/pharmacy/producto/omeprazol-20-mg.html",
+        "http://127.0.0.1:52440/demo/pharmacy/producto/paracetamol-500-mg.html",
+        "--allow-private-host",
+        "127.0.0.1",
+        "--browser",
+        "chromium",
+        "--storage",
+        "storage-pharmacy"
+      ],
+      "displayCommand": "navvi \"Extract the product name, laboratory, price and stock\" <4 product pages>",
+      "startedAt": "2026-09-24T03:30:15.207Z",
+      "wallMs": 1010,
+      "exitCode": 0,
+      "displaySpeedup": 1,
+      "frames": [
+        105,
+        125
+      ],
+      "stderr": [
+        {
+          "atMs": 1,
+          "text": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\n"
+        },
+        {
+          "atMs": 1010,
+          "text": "navvi: status succeeded\n  items 4  pages 4  templates 1  cache hit yes\n  decider jev: 0 decisions, 0 input tokens, 0ms waiting, $0.0000\n  healing events 4  unmapped candidates 0  unhealed 0\n  data: 4 records on stdout\n"
+        }
+      ],
+      "crawlerLog": [
+        {
+          "atMs": 182,
+          "text": "browser launch #1: launchOptions.executablePath=(unset) resolved=~/Library/Caches/ms-playwright/chromium-1223/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing exists=true",
+          "shownOnScreen": false
+        },
+        {
+          "atMs": 1007,
+          "text": "promoted product_name on 127.0.0.1:52440/demo/pharmacy/producto/{slug}.html: product_name resolved through alternative 1 (dom h1) on all 4 items this run, and the alternative ahead of it answered none of them (0: dom h1.producto-nombre). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn.",
+          "shownOnScreen": false
+        },
+        {
+          "atMs": 1007,
+          "text": "promoted laboratory on 127.0.0.1:52440/demo/pharmacy/producto/{slug}.html: laboratory resolved through alternative 1 (dom :scope > body > main > article > div > p:nth-of-type(1) > span:nth-of-type(2)) on all 4 items this run, and the alternative ahead of it answered none of them (0: dom p.producto-laboratorio > span.valor). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn.",
+          "shownOnScreen": false
+        },
+        {
+          "atMs": 1007,
+          "text": "promoted price on 127.0.0.1:52440/demo/pharmacy/producto/{slug}.html: price resolved through alternative 1 (dom :scope > body > main > article > aside > span:nth-of-type(2)) on all 4 items this run, and the alternative ahead of it answered none of them (0: dom div.producto-precio > span.precio). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn.",
+          "shownOnScreen": false
+        },
+        {
+          "atMs": 1007,
+          "text": "promoted stock on 127.0.0.1:52440/demo/pharmacy/producto/{slug}.html: stock resolved through alternative 1 (dom :scope > body > main > article > div > p:nth-of-type(2) > span:nth-of-type(2)) on all 4 items this run, and the alternative ahead of it answered none of them (0: dom span.stock). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn.",
+          "shownOnScreen": false
+        }
+      ],
+      "summary": {
+        "status": "succeeded",
+        "items": 4,
+        "pages": 4,
+        "templates": 1,
+        "cacheHit": true,
+        "chooser": {
+          "name": "jev",
+          "questions": 0,
+          "inputTokens": 0,
+          "waitMs": 0,
+          "costUsd": 0,
+          "textQuestions": 0
+        },
+        "healingEvents": [
+          {
+            "kind": "promotion",
+            "field": "product_name",
+            "from": 1,
+            "observations": 4,
+            "at": "2026-09-24T03:30:16.209Z",
+            "because": "product_name resolved through alternative 1 (dom h1) on all 4 items this run, and the alternative ahead of it answered none of them (0: dom h1.producto-nombre). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+          },
+          {
+            "kind": "promotion",
+            "field": "laboratory",
+            "from": 1,
+            "observations": 4,
+            "at": "2026-09-24T03:30:16.209Z",
+            "because": "laboratory resolved through alternative 1 (dom :scope > body > main > article > div > p:nth-of-type(1) > span:nth-of-type(2)) on all 4 items this run, and the alternative ahead of it answered none of them (0: dom p.producto-laboratorio > span.valor). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+          },
+          {
+            "kind": "promotion",
+            "field": "price",
+            "from": 1,
+            "observations": 4,
+            "at": "2026-09-24T03:30:16.209Z",
+            "because": "price resolved through alternative 1 (dom :scope > body > main > article > aside > span:nth-of-type(2)) on all 4 items this run, and the alternative ahead of it answered none of them (0: dom div.producto-precio > span.precio). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+          },
+          {
+            "kind": "promotion",
+            "field": "stock",
+            "from": 1,
+            "observations": 4,
+            "at": "2026-09-24T03:30:16.209Z",
+            "because": "stock resolved through alternative 1 (dom :scope > body > main > article > div > p:nth-of-type(2) > span:nth-of-type(2)) on all 4 items this run, and the alternative ahead of it answered none of them (0: dom span.stock). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+          }
+        ],
+        "unhealed": 0,
+        "unmappedCandidates": 0,
+        "fieldsNotFound": []
+      },
+      "healedFields": [],
+      "records": [
+        {
+          "product_name": "Amoxicilina 500 mg x 21 cápsulas",
+          "laboratory": "Bagó",
+          "price": "$ 6.990",
+          "stock": "Disponible",
+          "_source": "http://127.0.0.1:52440/demo/pharmacy/producto/amoxicilina-500-mg.html"
+        },
+        {
+          "product_name": "Loratadina 10 mg x 30 comprimidos",
+          "laboratory": "Andrómaco",
+          "price": "$ 4.290",
+          "stock": "Disponible",
+          "_source": "http://127.0.0.1:52440/demo/pharmacy/producto/loratadina-10-mg.html"
+        },
+        {
+          "product_name": "Omeprazol 20 mg x 30 cápsulas",
+          "laboratory": "Saval",
+          "price": "$ 4.390",
+          "stock": "Disponible",
+          "_source": "http://127.0.0.1:52440/demo/pharmacy/producto/omeprazol-20-mg.html"
+        },
+        {
+          "product_name": "Paracetamol 500 mg x 16 comprimidos",
+          "laboratory": "Laboratorio Chile",
+          "price": "$ 2.490",
+          "stock": "Disponible",
+          "_source": "http://127.0.0.1:52440/demo/pharmacy/producto/paracetamol-500-mg.html"
+        }
+      ],
+      "pageScreenshots": 0,
+      "screenshotErrors": 5,
+      "screenshotBorrowedFromPreviousRun": "fixture-heal-006.png"
+    }
+  ]
+}

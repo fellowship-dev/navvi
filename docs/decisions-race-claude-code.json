@@ -1,0 +1,1446 @@
+{
+  "claim": "Decision-step latency only, lanes jev, haiku, claude-code: the same captured choice/boolean questions, same batches, sequential per lane, wall clock per batch.",
+  "measuredAt": "2026-09-24T03:20:16.693Z",
+  "navviCommit": "11347076660c8649db584a5451b567c324568721",
+  "workingTreeAtMeasurement": "M README.md\n M SKILL.md\n M docs/architecture.md\n M docs/testing.md\n M llms.txt\n M scripts/record-decisions.ts\n M src/cli/args.ts\n?? docs/apify.md",
+  "capture": {
+    "dir": "/private/tmp/claude-501/-Users-maxfindel-Projects-fellowship-dev-claude-buddy/e03339d2-236c-4596-968c-7aac32f5da45/scratchpad/runs/navvi-decisions-L0R0bg/capture",
+    "site": "https://hn.algolia.com/",
+    "task": "Search Hacker News for Python stories and extract up to 10 results with title, author, points and story link.",
+    "capturedAt": "2026-09-24T03:07:26.806Z",
+    "commit": "49f6eb2e378244681399ccf81d26e4c2b0528965",
+    "referenceDecider": {
+      "chooser": "ModelChooser",
+      "modelId": "claude-sonnet-4-6",
+      "transport": "Vercel AI Gateway"
+    }
+  },
+  "questions": {
+    "batches": 7,
+    "count": 19,
+    "ids": [
+      {
+        "batch": 2,
+        "ids": [
+          "nav.0.op",
+          "nav.0.click",
+          "nav.0.type"
+        ],
+        "kinds": [
+          "choice",
+          "choice",
+          "choice"
+        ]
+      },
+      {
+        "batch": 3,
+        "ids": [
+          "nav.1.op",
+          "nav.1.click",
+          "nav.1.type"
+        ],
+        "kinds": [
+          "choice",
+          "choice",
+          "choice"
+        ]
+      },
+      {
+        "batch": 5,
+        "ids": [
+          "nav.2.op",
+          "nav.2.click",
+          "nav.2.type"
+        ],
+        "kinds": [
+          "choice",
+          "choice",
+          "choice"
+        ]
+      },
+      {
+        "batch": 6,
+        "ids": [
+          "nav.3.op",
+          "nav.3.click",
+          "nav.3.type"
+        ],
+        "kinds": [
+          "choice",
+          "choice",
+          "choice"
+        ]
+      },
+      {
+        "batch": 7,
+        "ids": [
+          "nav.3.done"
+        ],
+        "kinds": [
+          "boolean"
+        ]
+      },
+      {
+        "batch": 8,
+        "ids": [
+          "group"
+        ],
+        "kinds": [
+          "choice"
+        ]
+      },
+      {
+        "batch": 9,
+        "ids": [
+          "field.title",
+          "field.author",
+          "field.points",
+          "field.story_link",
+          "link.next"
+        ],
+        "kinds": [
+          "choice",
+          "choice",
+          "choice",
+          "choice",
+          "choice"
+        ]
+      }
+    ]
+  },
+  "method": {
+    "warmUp": "one untimed one-question choice call per lane immediately before its timed pass",
+    "order": "lanes one after the other, never concurrently; order rotated per run so each lane takes each position",
+    "timing": "performance.now() around chooser.ask(batch) per captured batch; lane total is wall clock over all batches; BaseChooser re-asks, if any, are inside the timing (apiBatches counts backend calls)",
+    "reference": "the answer the reference decider gave during the capture run; matching it is agreement with that run, not ground truth"
+  },
+  "lanes": {
+    "jev": {
+      "modelId": "jev-latest",
+      "transport": "TypeSafe API https://api.typesafe.ai/v1/systemone (JevChooser, provider typesafe)",
+      "failedRuns": [],
+      "totalMsPerRun": [
+        3339,
+        3482,
+        4017
+      ],
+      "medianTotalMs": 3482,
+      "medianBatchMs": 575,
+      "warmupMsPerRun": [
+        915,
+        791,
+        834
+      ],
+      "agreementPerRun": [
+        {
+          "matchesReference": 19,
+          "of": 19,
+          "mismatches": []
+        },
+        {
+          "matchesReference": 19,
+          "of": 19,
+          "mismatches": []
+        },
+        {
+          "matchesReference": 19,
+          "of": 19,
+          "mismatches": []
+        }
+      ]
+    },
+    "haiku": {
+      "modelId": "anthropic/claude-haiku-4-5",
+      "transport": "Vercel AI Gateway (stock ModelChooser, AI SDK generateObject)",
+      "failedRuns": [],
+      "totalMsPerRun": [
+        14725,
+        11964,
+        11744
+      ],
+      "medianTotalMs": 11964,
+      "medianBatchMs": 1522,
+      "warmupMsPerRun": [
+        1628,
+        1301,
+        1692
+      ],
+      "agreementPerRun": [
+        {
+          "matchesReference": 19,
+          "of": 19,
+          "mismatches": []
+        },
+        {
+          "matchesReference": 19,
+          "of": 19,
+          "mismatches": []
+        },
+        {
+          "matchesReference": 19,
+          "of": 19,
+          "mismatches": []
+        }
+      ]
+    },
+    "claude-code": {
+      "modelId": "claude --model haiku",
+      "transport": "Claude Code CLI on the signed-in subscription (CliChooser claude: `claude -p <prompt> --output-format json --model <m>`, one process per batch)",
+      "failedRuns": [],
+      "totalMsPerRun": [
+        111982,
+        87296,
+        91619
+      ],
+      "medianTotalMs": 91619,
+      "medianBatchMs": 11626,
+      "warmupMsPerRun": [
+        6351,
+        6021,
+        5514
+      ],
+      "agreementPerRun": [
+        {
+          "matchesReference": 19,
+          "of": 19,
+          "mismatches": []
+        },
+        {
+          "matchesReference": 19,
+          "of": 19,
+          "mismatches": []
+        },
+        {
+          "matchesReference": 19,
+          "of": 19,
+          "mismatches": []
+        }
+      ]
+    }
+  },
+  "ratios": {
+    "haiku/jev": {
+      "ofMedians": 3.44,
+      "perRun": [
+        4.41,
+        3.44,
+        2.92
+      ],
+      "medianOfPerRun": 3.44
+    },
+    "claude-code/jev": {
+      "ofMedians": 26.31,
+      "perRun": [
+        33.54,
+        25.07,
+        22.81
+      ],
+      "medianOfPerRun": 25.07
+    }
+  },
+  "runs": [
+    {
+      "run": 1,
+      "order": [
+        "jev",
+        "haiku",
+        "claude-code"
+      ],
+      "lanes": {
+        "jev": {
+          "totalMs": 3339,
+          "warmupMs": 915,
+          "apiBatches": 7,
+          "batches": [
+            {
+              "batch": 2,
+              "ms": 709,
+              "answers": [
+                {
+                  "id": "nav.0.op",
+                  "index": 1
+                },
+                {
+                  "id": "nav.0.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.0.type",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 3,
+              "ms": 642,
+              "answers": [
+                {
+                  "id": "nav.1.op",
+                  "index": 1
+                },
+                {
+                  "id": "nav.1.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.1.type",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 5,
+              "ms": 659,
+              "answers": [
+                {
+                  "id": "nav.2.op",
+                  "index": 5
+                },
+                {
+                  "id": "nav.2.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.2.type",
+                  "index": null
+                }
+              ]
+            },
+            {
+              "batch": 6,
+              "ms": 396,
+              "answers": [
+                {
+                  "id": "nav.3.op",
+                  "index": 5
+                },
+                {
+                  "id": "nav.3.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.3.type",
+                  "index": null
+                }
+              ]
+            },
+            {
+              "batch": 7,
+              "ms": 335,
+              "answers": [
+                {
+                  "id": "nav.3.done",
+                  "index": 1
+                }
+              ]
+            },
+            {
+              "batch": 8,
+              "ms": 300,
+              "answers": [
+                {
+                  "id": "group",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 9,
+              "ms": 298,
+              "answers": [
+                {
+                  "id": "field.title",
+                  "index": 1
+                },
+                {
+                  "id": "field.author",
+                  "index": 9
+                },
+                {
+                  "id": "field.points",
+                  "index": 5
+                },
+                {
+                  "id": "field.story_link",
+                  "index": 4
+                },
+                {
+                  "id": "link.next",
+                  "index": null
+                }
+              ]
+            }
+          ]
+        },
+        "haiku": {
+          "totalMs": 14725,
+          "warmupMs": 1628,
+          "apiBatches": 7,
+          "explanationTexts": 7,
+          "batches": [
+            {
+              "batch": 2,
+              "ms": 1441,
+              "answers": [
+                {
+                  "id": "nav.0.op",
+                  "index": 1
+                },
+                {
+                  "id": "nav.0.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.0.type",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 3,
+              "ms": 3709,
+              "answers": [
+                {
+                  "id": "nav.1.op",
+                  "index": 1
+                },
+                {
+                  "id": "nav.1.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.1.type",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 5,
+              "ms": 3762,
+              "answers": [
+                {
+                  "id": "nav.2.op",
+                  "index": 5
+                },
+                {
+                  "id": "nav.2.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.2.type",
+                  "index": null
+                }
+              ]
+            },
+            {
+              "batch": 6,
+              "ms": 1634,
+              "answers": [
+                {
+                  "id": "nav.3.op",
+                  "index": 5
+                },
+                {
+                  "id": "nav.3.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.3.type",
+                  "index": null
+                }
+              ]
+            },
+            {
+              "batch": 7,
+              "ms": 1386,
+              "answers": [
+                {
+                  "id": "nav.3.done",
+                  "index": 1
+                }
+              ]
+            },
+            {
+              "batch": 8,
+              "ms": 1279,
+              "answers": [
+                {
+                  "id": "group",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 9,
+              "ms": 1514,
+              "answers": [
+                {
+                  "id": "field.title",
+                  "index": 1
+                },
+                {
+                  "id": "field.author",
+                  "index": 9
+                },
+                {
+                  "id": "field.points",
+                  "index": 5
+                },
+                {
+                  "id": "field.story_link",
+                  "index": 4
+                },
+                {
+                  "id": "link.next",
+                  "index": null
+                }
+              ]
+            }
+          ]
+        },
+        "claude-code": {
+          "totalMs": 111982,
+          "warmupMs": 6351,
+          "apiBatches": 7,
+          "batches": [
+            {
+              "batch": 2,
+              "ms": 9727,
+              "answers": [
+                {
+                  "id": "nav.0.op",
+                  "index": 1
+                },
+                {
+                  "id": "nav.0.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.0.type",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 3,
+              "ms": 22178,
+              "answers": [
+                {
+                  "id": "nav.1.op",
+                  "index": 1
+                },
+                {
+                  "id": "nav.1.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.1.type",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 5,
+              "ms": 22174,
+              "answers": [
+                {
+                  "id": "nav.2.op",
+                  "index": 5
+                },
+                {
+                  "id": "nav.2.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.2.type",
+                  "index": null
+                }
+              ]
+            },
+            {
+              "batch": 6,
+              "ms": 14968,
+              "answers": [
+                {
+                  "id": "nav.3.op",
+                  "index": 5
+                },
+                {
+                  "id": "nav.3.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.3.type",
+                  "index": null
+                }
+              ]
+            },
+            {
+              "batch": 7,
+              "ms": 11626,
+              "answers": [
+                {
+                  "id": "nav.3.done",
+                  "index": 1
+                }
+              ]
+            },
+            {
+              "batch": 8,
+              "ms": 8782,
+              "answers": [
+                {
+                  "id": "group",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 9,
+              "ms": 22527,
+              "answers": [
+                {
+                  "id": "field.title",
+                  "index": 1
+                },
+                {
+                  "id": "field.author",
+                  "index": 9
+                },
+                {
+                  "id": "field.points",
+                  "index": 5
+                },
+                {
+                  "id": "field.story_link",
+                  "index": 4
+                },
+                {
+                  "id": "link.next",
+                  "index": null
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run": 2,
+      "order": [
+        "haiku",
+        "claude-code",
+        "jev"
+      ],
+      "lanes": {
+        "haiku": {
+          "totalMs": 11964,
+          "warmupMs": 1301,
+          "apiBatches": 7,
+          "explanationTexts": 5,
+          "batches": [
+            {
+              "batch": 2,
+              "ms": 1438,
+              "answers": [
+                {
+                  "id": "nav.0.op",
+                  "index": 1
+                },
+                {
+                  "id": "nav.0.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.0.type",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 3,
+              "ms": 1499,
+              "answers": [
+                {
+                  "id": "nav.1.op",
+                  "index": 1
+                },
+                {
+                  "id": "nav.1.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.1.type",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 5,
+              "ms": 1695,
+              "answers": [
+                {
+                  "id": "nav.2.op",
+                  "index": 5
+                },
+                {
+                  "id": "nav.2.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.2.type",
+                  "index": null
+                }
+              ]
+            },
+            {
+              "batch": 6,
+              "ms": 1592,
+              "answers": [
+                {
+                  "id": "nav.3.op",
+                  "index": 5
+                },
+                {
+                  "id": "nav.3.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.3.type",
+                  "index": null
+                }
+              ]
+            },
+            {
+              "batch": 7,
+              "ms": 1753,
+              "answers": [
+                {
+                  "id": "nav.3.done",
+                  "index": 1
+                }
+              ]
+            },
+            {
+              "batch": 8,
+              "ms": 1594,
+              "answers": [
+                {
+                  "id": "group",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 9,
+              "ms": 2393,
+              "answers": [
+                {
+                  "id": "field.title",
+                  "index": 1
+                },
+                {
+                  "id": "field.author",
+                  "index": 9
+                },
+                {
+                  "id": "field.points",
+                  "index": 5
+                },
+                {
+                  "id": "field.story_link",
+                  "index": 4
+                },
+                {
+                  "id": "link.next",
+                  "index": null
+                }
+              ]
+            }
+          ]
+        },
+        "claude-code": {
+          "totalMs": 87296,
+          "warmupMs": 6021,
+          "apiBatches": 7,
+          "batches": [
+            {
+              "batch": 2,
+              "ms": 9580,
+              "answers": [
+                {
+                  "id": "nav.0.op",
+                  "index": 1
+                },
+                {
+                  "id": "nav.0.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.0.type",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 3,
+              "ms": 11580,
+              "answers": [
+                {
+                  "id": "nav.1.op",
+                  "index": 1
+                },
+                {
+                  "id": "nav.1.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.1.type",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 5,
+              "ms": 19894,
+              "answers": [
+                {
+                  "id": "nav.2.op",
+                  "index": 5
+                },
+                {
+                  "id": "nav.2.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.2.type",
+                  "index": null
+                }
+              ]
+            },
+            {
+              "batch": 6,
+              "ms": 16698,
+              "answers": [
+                {
+                  "id": "nav.3.op",
+                  "index": 5
+                },
+                {
+                  "id": "nav.3.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.3.type",
+                  "index": null
+                }
+              ]
+            },
+            {
+              "batch": 7,
+              "ms": 10370,
+              "answers": [
+                {
+                  "id": "nav.3.done",
+                  "index": 1
+                }
+              ]
+            },
+            {
+              "batch": 8,
+              "ms": 7616,
+              "answers": [
+                {
+                  "id": "group",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 9,
+              "ms": 11557,
+              "answers": [
+                {
+                  "id": "field.title",
+                  "index": 1
+                },
+                {
+                  "id": "field.author",
+                  "index": 9
+                },
+                {
+                  "id": "field.points",
+                  "index": 5
+                },
+                {
+                  "id": "field.story_link",
+                  "index": 4
+                },
+                {
+                  "id": "link.next",
+                  "index": null
+                }
+              ]
+            }
+          ]
+        },
+        "jev": {
+          "totalMs": 3482,
+          "warmupMs": 791,
+          "apiBatches": 7,
+          "batches": [
+            {
+              "batch": 2,
+              "ms": 699,
+              "answers": [
+                {
+                  "id": "nav.0.op",
+                  "index": 1
+                },
+                {
+                  "id": "nav.0.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.0.type",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 3,
+              "ms": 575,
+              "answers": [
+                {
+                  "id": "nav.1.op",
+                  "index": 1
+                },
+                {
+                  "id": "nav.1.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.1.type",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 5,
+              "ms": 575,
+              "answers": [
+                {
+                  "id": "nav.2.op",
+                  "index": 5
+                },
+                {
+                  "id": "nav.2.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.2.type",
+                  "index": null
+                }
+              ]
+            },
+            {
+              "batch": 6,
+              "ms": 656,
+              "answers": [
+                {
+                  "id": "nav.3.op",
+                  "index": 5
+                },
+                {
+                  "id": "nav.3.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.3.type",
+                  "index": null
+                }
+              ]
+            },
+            {
+              "batch": 7,
+              "ms": 386,
+              "answers": [
+                {
+                  "id": "nav.3.done",
+                  "index": 1
+                }
+              ]
+            },
+            {
+              "batch": 8,
+              "ms": 278,
+              "answers": [
+                {
+                  "id": "group",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 9,
+              "ms": 313,
+              "answers": [
+                {
+                  "id": "field.title",
+                  "index": 1
+                },
+                {
+                  "id": "field.author",
+                  "index": 9
+                },
+                {
+                  "id": "field.points",
+                  "index": 5
+                },
+                {
+                  "id": "field.story_link",
+                  "index": 4
+                },
+                {
+                  "id": "link.next",
+                  "index": null
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run": 3,
+      "order": [
+        "claude-code",
+        "jev",
+        "haiku"
+      ],
+      "lanes": {
+        "claude-code": {
+          "totalMs": 91619,
+          "warmupMs": 5514,
+          "apiBatches": 7,
+          "batches": [
+            {
+              "batch": 2,
+              "ms": 20515,
+              "answers": [
+                {
+                  "id": "nav.0.op",
+                  "index": 1
+                },
+                {
+                  "id": "nav.0.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.0.type",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 3,
+              "ms": 9878,
+              "answers": [
+                {
+                  "id": "nav.1.op",
+                  "index": 1
+                },
+                {
+                  "id": "nav.1.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.1.type",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 5,
+              "ms": 15336,
+              "answers": [
+                {
+                  "id": "nav.2.op",
+                  "index": 5
+                },
+                {
+                  "id": "nav.2.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.2.type",
+                  "index": null
+                }
+              ]
+            },
+            {
+              "batch": 6,
+              "ms": 13031,
+              "answers": [
+                {
+                  "id": "nav.3.op",
+                  "index": 5
+                },
+                {
+                  "id": "nav.3.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.3.type",
+                  "index": null
+                }
+              ]
+            },
+            {
+              "batch": 7,
+              "ms": 9611,
+              "answers": [
+                {
+                  "id": "nav.3.done",
+                  "index": 1
+                }
+              ]
+            },
+            {
+              "batch": 8,
+              "ms": 7356,
+              "answers": [
+                {
+                  "id": "group",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 9,
+              "ms": 15892,
+              "answers": [
+                {
+                  "id": "field.title",
+                  "index": 1
+                },
+                {
+                  "id": "field.author",
+                  "index": 9
+                },
+                {
+                  "id": "field.points",
+                  "index": 5
+                },
+                {
+                  "id": "field.story_link",
+                  "index": 4
+                },
+                {
+                  "id": "link.next",
+                  "index": null
+                }
+              ]
+            }
+          ]
+        },
+        "jev": {
+          "totalMs": 4017,
+          "warmupMs": 834,
+          "apiBatches": 7,
+          "batches": [
+            {
+              "batch": 2,
+              "ms": 767,
+              "answers": [
+                {
+                  "id": "nav.0.op",
+                  "index": 1
+                },
+                {
+                  "id": "nav.0.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.0.type",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 3,
+              "ms": 598,
+              "answers": [
+                {
+                  "id": "nav.1.op",
+                  "index": 1
+                },
+                {
+                  "id": "nav.1.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.1.type",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 5,
+              "ms": 630,
+              "answers": [
+                {
+                  "id": "nav.2.op",
+                  "index": 5
+                },
+                {
+                  "id": "nav.2.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.2.type",
+                  "index": null
+                }
+              ]
+            },
+            {
+              "batch": 6,
+              "ms": 596,
+              "answers": [
+                {
+                  "id": "nav.3.op",
+                  "index": 5
+                },
+                {
+                  "id": "nav.3.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.3.type",
+                  "index": null
+                }
+              ]
+            },
+            {
+              "batch": 7,
+              "ms": 395,
+              "answers": [
+                {
+                  "id": "nav.3.done",
+                  "index": 1
+                }
+              ]
+            },
+            {
+              "batch": 8,
+              "ms": 321,
+              "answers": [
+                {
+                  "id": "group",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 9,
+              "ms": 711,
+              "answers": [
+                {
+                  "id": "field.title",
+                  "index": 1
+                },
+                {
+                  "id": "field.author",
+                  "index": 9
+                },
+                {
+                  "id": "field.points",
+                  "index": 5
+                },
+                {
+                  "id": "field.story_link",
+                  "index": 4
+                },
+                {
+                  "id": "link.next",
+                  "index": null
+                }
+              ]
+            }
+          ]
+        },
+        "haiku": {
+          "totalMs": 11744,
+          "warmupMs": 1692,
+          "apiBatches": 7,
+          "explanationTexts": 8,
+          "batches": [
+            {
+              "batch": 2,
+              "ms": 1591,
+              "answers": [
+                {
+                  "id": "nav.0.op",
+                  "index": 1
+                },
+                {
+                  "id": "nav.0.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.0.type",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 3,
+              "ms": 1509,
+              "answers": [
+                {
+                  "id": "nav.1.op",
+                  "index": 1
+                },
+                {
+                  "id": "nav.1.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.1.type",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 5,
+              "ms": 3214,
+              "answers": [
+                {
+                  "id": "nav.2.op",
+                  "index": 5
+                },
+                {
+                  "id": "nav.2.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.2.type",
+                  "index": null
+                }
+              ]
+            },
+            {
+              "batch": 6,
+              "ms": 1522,
+              "answers": [
+                {
+                  "id": "nav.3.op",
+                  "index": 5
+                },
+                {
+                  "id": "nav.3.click",
+                  "index": null
+                },
+                {
+                  "id": "nav.3.type",
+                  "index": null
+                }
+              ]
+            },
+            {
+              "batch": 7,
+              "ms": 1215,
+              "answers": [
+                {
+                  "id": "nav.3.done",
+                  "index": 1
+                }
+              ]
+            },
+            {
+              "batch": 8,
+              "ms": 1233,
+              "answers": [
+                {
+                  "id": "group",
+                  "index": 0
+                }
+              ]
+            },
+            {
+              "batch": 9,
+              "ms": 1459,
+              "answers": [
+                {
+                  "id": "field.title",
+                  "index": 1
+                },
+                {
+                  "id": "field.author",
+                  "index": 9
+                },
+                {
+                  "id": "field.points",
+                  "index": 5
+                },
+                {
+                  "id": "field.story_link",
+                  "index": 4
+                },
+                {
+                  "id": "link.next",
+                  "index": null
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "claudeCodeInvocation": {
+    "chooser": "CliChooser(\"claude\") from src/chooser/cli.ts, unmodified",
+    "command": "claude -p <rendered batch prompt> --output-format json --model haiku",
+    "model": "haiku (NAVVI_CLAUDE_MODEL unset, so DEFAULT_CLAUDE_MODEL)",
+    "cliVersion": "2.1.281 (Claude Code)",
+    "auth": "the signed-in Claude subscription (macOS keychain); ANTHROPIC_API_KEY and every CLAUDE*/ANTHROPIC* variable removed from the child env so it is neither API-key billed nor a nested session of the Claude Code session that ran the script",
+    "cwd": "the navvi checkout (the process cwd, as for a navvi user running from their project); the user-level Claude Code configuration on this machine applies",
+    "processPerBatch": true,
+    "timingNote": "each lane batch time includes starting a new Claude Code process, its own system prompt and the model call. That is the user-facing cost of the no-API-key path, but it is not model latency alone."
+  },
+  "claudeCodeTimeSplit": {
+    "note": "separate diagnostic after the bench, same machine, same clean env, not part of the medians: the rendered batch prompts run directly through `claude -p ... --output-format json --model haiku`; wall clock vs the envelope duration_api_ms",
+    "samples": [
+      {
+        "batch": 6,
+        "wallMs": 8111,
+        "durationApiMs": 5469,
+        "inputTokens": 20497,
+        "outputTokens": 457,
+        "thinkingTokens": 413
+      },
+      {
+        "batch": 2,
+        "wallMs": 10336,
+        "durationApiMs": 7647,
+        "inputTokens": 31390,
+        "outputTokens": 643,
+        "thinkingTokens": 588
+      },
+      {
+        "batch": 2,
+        "wallMs": 29335,
+        "durationApiMs": 26820,
+        "inputTokens": 31390,
+        "outputTokens": 2515,
+        "thinkingTokens": 2461
+      }
+    ],
+    "reading": "process startup and exit add about 2.5 s per batch. The rest is API time: Claude Code sends roughly 19k tokens of its own prompt with each batch, and Haiku inside Claude Code spends 400 to 2,500 tokens thinking before it answers, which also makes the per-batch time vary widely (the same batch took 10.3 s and 29.3 s)."
+  },
+  "reading": {
+    "haikuApiVsJev": "3.4x by median (per run 2.9 to 4.4x); reproduces the published 3.4x",
+    "claudeCodeVsJev": "26x by median (per run 22.8 to 33.5x); dominated by Claude Code API time with thinking, not by process startup",
+    "scope": "decision step only, one task (HN search), one network location, 19 questions; not end-to-end compile time, not a general accuracy claim"
+  }
+}

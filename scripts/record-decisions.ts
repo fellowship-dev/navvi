@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { Actor } from "apify";
 import { LogLevel, MemoryStorage, log as crawleeLog } from "crawlee";
 import { chromium } from "playwright";
-import { JevChooser, ModelChooser, RecordingChooser, type Answer, type BackendResult, type Chooser, type Question } from "../src/chooser/index.js";
+import { CliChooser, JevChooser, ModelChooser, RecordingChooser, type Answer, type BackendResult, type Chooser, type Question } from "../src/chooser/index.js";
 import { run, type RunSummary } from "../src/main.js";
 import { FFMPEG } from "./recorder.js";
 
@@ -21,14 +21,19 @@ import { FFMPEG } from "./recorder.js";
  *    and the answers go through `RecordingChooser` into `capture/recorded/`.
  * 2. race — the captured choice/boolean batches, replayed as captured (same
  *    grouping, text questions removed because Jev cannot write), sequentially
- *    per lane, wall clock per batch. Haiku: `ModelChooser` over the AI Gateway.
- *    Jev: `JevChooser` over the TypeSafe API. One untimed warm-up call per lane.
- *    `DECISIONS_RUNS` runs (default 3); lane order alternates per run.
+ *    per lane, wall clock per batch. Haiku: the stock `ModelChooser` over the
+ *    AI Gateway. Jev: `JevChooser` over the TypeSafe API. One untimed warm-up
+ *    call per lane. `DECISIONS_RUNS` runs (default 3); lane order alternates per run.
  * 3. render — the median run (by speedup ratio) as GIF and MP4, answers ticking
  *    in at their measured times, plus `provenance.json`.
  *
  * Env:
  *   DECISIONS_MODE     capture (capture + race + render, default) | race (from DECISIONS_CAPTURE) | render (from DECISIONS_SOURCE)
+ *                      | bench (race only from DECISIONS_CAPTURE: no capture, no render; writes bench.json)
+ *   DECISIONS_LANES    bench mode lanes, comma-separated (default jev,haiku): jev | haiku | claude-code
+ *                      claude-code is navvi's CliChooser("claude"): `claude -p` on the signed-in subscription,
+ *                      model NAVVI_CLAUDE_MODEL (default haiku), a fresh CLI process per batch
+ *   DECISIONS_BENCH_OUT  bench mode: also write the summary JSON to this path
  *   DECISIONS_CAPTURE  an existing run directory whose capture/ is reused (race mode)
  *   DECISIONS_SOURCE   an existing run directory whose race.json is re-rendered (render mode)
  *   DECISIONS_OUT      parent directory for the new run directory (default: system temp)
@@ -69,14 +74,17 @@ interface LaneBatch {
   answers: Answer[];
 }
 
+type Lane = "haiku" | "jev" | "claude-code";
+const LANES: readonly Lane[] = ["jev", "haiku", "claude-code"];
+
 interface LaneRun {
-  lane: "haiku" | "jev";
+  lane: Lane;
   modelId: string;
   transport: string;
   warmupMs: number;
   warmupError?: string;
-  /** Haiku lane: choice/boolean answers that arrived with an explanation in `text`, dropped before validation (includes the warm-up). */
-  strippedExplanationTexts?: number;
+  /** Haiku API lane: choice/boolean answers that arrived with an explanation in `text` beside the pick (observed, not altered; the stock validator accepts them since 8d868fb). Includes the warm-up. */
+  explanationTexts?: number;
   totalMs: number;
   batches: LaneBatch[];
   apiBatches: number;
@@ -166,37 +174,45 @@ function loadBatches(captureDir: string): CapturedBatch[] {
 // ---------------------------------------------------------------- race
 
 /**
- * The Haiku lane. Measured on the captured navigation batches, Haiku returns
- * the right-shaped index but also fills the schema's optional `text` with an
- * explanation on choice questions ("TYPE_TEXT: enter ... to search for Python
- * stories"), and navvi's validator rejects any text on a choice twice, so the
- * stock ModelChooser fails the batch. This lane drops `text` on non-text
- * questions before validation and counts how often it had to. It changes no
- * index and adds no request; the count goes into the provenance.
+ * The Haiku API lane: the stock ModelChooser. Until 8d868fb navvi's validator
+ * rejected the explanation Haiku writes in `text` beside a valid index, and
+ * this recorder stripped it in a subclass. Now the stock validator accepts
+ * the pick and drops the words, so this subclass only counts how many answers
+ * carried an explanation; it changes nothing it returns.
  */
-class HaikuLaneChooser extends ModelChooser {
-  strippedText = 0;
+class CountingModelChooser extends ModelChooser {
+  explanationTexts = 0;
   protected override async callBackend(batch: Question[]): Promise<BackendResult> {
     const result = await super.callBackend(batch);
     const kinds = new Map(batch.map((q) => [q.id, q.kind]));
     if (Array.isArray(result.answers)) {
-      result.answers = result.answers.map((a: unknown) => {
-        if (a && typeof a === "object" && "text" in a && kinds.get(String((a as { id?: unknown }).id)) !== "text") {
-          this.strippedText += 1;
-          const { text: _t, ...rest } = a as Record<string, unknown>;
-          return rest;
-        }
-        return a;
-      });
+      for (const a of result.answers as unknown[]) {
+        if (a && typeof a === "object" && typeof (a as { text?: unknown }).text === "string" && kinds.get(String((a as { id?: unknown }).id)) !== "text") this.explanationTexts += 1;
+      }
     }
     return result;
   }
 }
 
+/**
+ * The Claude Code lane runs `claude` as a navvi user without an API key would:
+ * signed in on the subscription, no ANTHROPIC_API_KEY, and none of the parent
+ * Claude Code session's variables (CLAUDECODE, CLAUDE_CODE_*), which would
+ * otherwise make the child a nested session of whatever is running this script.
+ */
+function claudeCodeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(env)) if (!/^(CLAUDE|ANTHROPIC)/.test(k)) out[k] = v;
+  return out;
+}
+
 const WARMUP: Question[] = [{ id: "w1", kind: "choice", premise: "Which of these is a fruit?", options: ["carrot", "apple", "stone"], state: "A grocery list." }];
 
-async function raceLane(lane: "haiku" | "jev", batches: CapturedBatch[], env: NodeJS.ProcessEnv, haikuModel: string): Promise<LaneRun> {
-  const chooser = lane === "haiku" ? new HaikuLaneChooser({ env, modelId: haikuModel }) : new JevChooser({ env, provider: "typesafe" });
+async function raceLane(lane: Lane, batches: CapturedBatch[], env: NodeJS.ProcessEnv, haikuModel: string): Promise<LaneRun> {
+  const chooser =
+    lane === "haiku" ? new CountingModelChooser({ env, modelId: haikuModel })
+    : lane === "jev" ? new JevChooser({ env, provider: "typesafe" })
+    : new CliChooser("claude", { env: claudeCodeEnv(env) });
   // Untimed warm-up (connection setup). A failed warm-up is recorded, not fatal: the timed pass stands on its own.
   const w = performance.now();
   let warmupError: string | undefined;
@@ -223,10 +239,13 @@ async function raceLane(lane: "haiku" | "jev", batches: CapturedBatch[], env: No
   }
   const totalMs = performance.now() - t0;
   return {
-    lane, modelId: lane === "haiku" ? `anthropic/${haikuModel}` : "jev-latest",
-    transport: lane === "haiku" ? "Vercel AI Gateway (ModelChooser, AI SDK generateObject)" : "TypeSafe API https://api.typesafe.ai/v1/systemone (JevChooser, provider typesafe)",
+    lane,
+    modelId: lane === "haiku" ? `anthropic/${haikuModel}` : lane === "jev" ? "jev-latest" : `claude --model ${(chooser as CliChooser).model ?? "(CLI default)"}`,
+    transport: lane === "haiku" ? "Vercel AI Gateway (stock ModelChooser, AI SDK generateObject)"
+      : lane === "jev" ? "TypeSafe API https://api.typesafe.ai/v1/systemone (JevChooser, provider typesafe)"
+      : "Claude Code CLI on the signed-in subscription (CliChooser claude: `claude -p <prompt> --output-format json --model <m>`, one process per batch)",
     warmupMs, ...(warmupError ? { warmupError } : {}), totalMs, batches: out,
-    ...(chooser instanceof HaikuLaneChooser ? { strippedExplanationTexts: chooser.strippedText } : {}), apiBatches: chooser.usage().batches - before, ...(error ? { error } : {}),
+    ...(chooser instanceof CountingModelChooser ? { explanationTexts: chooser.explanationTexts } : {}), apiBatches: chooser.usage().batches - before, ...(error ? { error } : {}),
   };
 }
 
@@ -243,6 +262,100 @@ async function race(batches: CapturedBatch[], env: NodeJS.ProcessEnv, runs: numb
     out.push({ run: r, order, lanes, ratio: lanes.haiku.totalMs / lanes.jev.totalMs });
   }
   return out;
+}
+
+// ---------------------------------------------------------------- bench (race only)
+
+const median = (xs: number[]): number => {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
+};
+
+/**
+ * Race only: no capture, no render. Any set of lanes over an existing capture,
+ * sequential, one untimed warm-up per lane, order rotated per run so every
+ * lane takes every position (with two lanes this is plain alternation).
+ */
+async function bench(dir: string, captureDir: string, env: NodeJS.ProcessEnv, commit: string, workingTree: string): Promise<void> {
+  const lanes = (process.env.DECISIONS_LANES ?? "jev,haiku").split(",").map((l) => l.trim()).filter(Boolean) as Lane[];
+  for (const l of lanes) if (!LANES.includes(l)) throw new Error(`DECISIONS_LANES: unknown lane ${l} (jev, haiku, claude-code)`);
+  const runsWanted = Number(process.env.DECISIONS_RUNS ?? 3);
+  const haikuModel = process.env.DECISIONS_HAIKU_MODEL ?? "claude-haiku-4-5";
+  const batches = loadBatches(captureDir);
+  const measuredAt = new Date().toISOString();
+  const runs: Array<{ run: number; order: Lane[]; lanes: Partial<Record<Lane, LaneRun>> }> = [];
+  for (let r = 0; r < runsWanted; r++) {
+    const order = lanes.map((_, i) => lanes[(i + r) % lanes.length]!);
+    const out: Partial<Record<Lane, LaneRun>> = {};
+    for (const lane of order) {
+      out[lane] = await raceLane(lane, batches, env, haikuModel);
+      const lr = out[lane]!;
+      console.log(`run ${r + 1} ${lane}: ${(lr.totalMs / 1000).toFixed(2)} s over ${lr.batches.length} batches (warm-up ${(lr.warmupMs / 1000).toFixed(2)} s)${lr.error ? ` ERROR ${lr.error}` : ""}`);
+    }
+    runs.push({ run: r + 1, order, lanes: out });
+    writeFileSync(join(dir, "bench.json"), JSON.stringify({ measuredAt, commit, workingTree, captureDir, lanes, runs }, null, 2) + "\n");
+  }
+  const cap = JSON.parse(readFileSync(join(captureDir, "capture.json"), "utf8")) as { url: string; prompt: string; capturedAt: string; commit: string; referenceDecider: unknown };
+  const perLane = Object.fromEntries(lanes.map((lane) => {
+    const lrs = runs.map((r) => r.lanes[lane]!);
+    const totals = lrs.map((l) => l.totalMs);
+    return [lane, {
+      modelId: lrs[0]!.modelId,
+      transport: lrs[0]!.transport,
+      failedRuns: lrs.filter((l) => l.error).map((l, i) => ({ run: i + 1, error: l.error })),
+      totalMsPerRun: totals.map(Math.round),
+      medianTotalMs: Math.round(median(totals)),
+      medianBatchMs: Math.round(median(lrs.flatMap((l) => l.batches.map((b) => b.ms)))),
+      warmupMsPerRun: lrs.map((l) => Math.round(l.warmupMs)),
+      agreementPerRun: lrs.map((l) => { const a = laneMatches(batches, l); return { matchesReference: a.matchesReference, of: a.questions, mismatches: a.mismatches }; }),
+    }];
+  }));
+  const ratios: Record<string, unknown> = {};
+  if (lanes.includes("jev")) {
+    for (const other of lanes.filter((l) => l !== "jev")) {
+      const perRun = runs.map((r) => r.lanes[other]!.totalMs / r.lanes.jev!.totalMs);
+      ratios[`${other}/jev`] = {
+        ofMedians: Number(((perLane[other] as { medianTotalMs: number }).medianTotalMs / (perLane.jev as { medianTotalMs: number }).medianTotalMs).toFixed(2)),
+        perRun: perRun.map((x) => Number(x.toFixed(2))),
+        medianOfPerRun: Number(median(perRun).toFixed(2)),
+      };
+    }
+  }
+  const summary = {
+    claim: `Decision-step latency only, lanes ${lanes.join(", ")}: the same captured choice/boolean questions, same batches, sequential per lane, wall clock per batch.`,
+    measuredAt,
+    navviCommit: commit,
+    workingTreeAtMeasurement: workingTree || "clean",
+    capture: { dir: captureDir, site: cap.url, task: cap.prompt, capturedAt: cap.capturedAt, commit: cap.commit, referenceDecider: cap.referenceDecider },
+    questions: { batches: batches.length, count: batches.reduce((n, b) => n + b.questions.length, 0), ids: batches.map((b) => ({ batch: b.batch, ids: b.questions.map((q) => q.id), kinds: b.questions.map((q) => q.kind) })) },
+    method: {
+      warmUp: "one untimed one-question choice call per lane immediately before its timed pass",
+      order: "lanes one after the other, never concurrently; order rotated per run so each lane takes each position",
+      timing: "performance.now() around chooser.ask(batch) per captured batch; lane total is wall clock over all batches; BaseChooser re-asks, if any, are inside the timing (apiBatches counts backend calls)",
+      reference: "the answer the reference decider gave during the capture run; matching it is agreement with that run, not ground truth",
+    },
+    lanes: perLane,
+    ratios,
+    runs: runs.map((r) => ({
+      run: r.run, order: r.order,
+      lanes: Object.fromEntries(r.order.map((k) => { const l = r.lanes[k]!; return [k, {
+        totalMs: Math.round(l.totalMs), warmupMs: Math.round(l.warmupMs), ...(l.warmupError ? { warmupError: l.warmupError } : {}), apiBatches: l.apiBatches,
+        ...(l.explanationTexts !== undefined ? { explanationTexts: l.explanationTexts } : {}), ...(l.error ? { error: l.error } : {}),
+        batches: l.batches.map((b) => ({ batch: b.batch, ms: Math.round(b.ms), answers: b.answers.map((a) => ({ id: a.id, index: a.index })) })),
+      }]; })),
+    })),
+  };
+  writeFileSync(join(dir, "bench-summary.json"), JSON.stringify(summary, null, 2) + "\n");
+  if (process.env.DECISIONS_BENCH_OUT) writeFileSync(resolve(process.env.DECISIONS_BENCH_OUT), JSON.stringify(summary, null, 2) + "\n");
+  for (const lane of lanes) {
+    const p = perLane[lane] as { medianTotalMs: number; totalMsPerRun: number[]; agreementPerRun: Array<{ matchesReference: number; of: number }> };
+    console.log(`${lane}: median ${(p.medianTotalMs / 1000).toFixed(2)} s · runs ${p.totalMsPerRun.map((x) => (x / 1000).toFixed(2)).join(" / ")} s · reference ${p.agreementPerRun.map((a) => `${a.matchesReference}/${a.of}`).join(", ")}`);
+  }
+  for (const [k, v] of Object.entries(ratios)) console.log(`${k}: ${JSON.stringify(v)}`);
+  const failed = runs.flatMap((r) => r.order.filter((k) => r.lanes[k]!.error).map((k) => `run ${r.run} ${k}: ${r.lanes[k]!.error}`));
+  if (failed.length) throw new Error(`bench had failing lanes: ${failed.join("; ")}`);
+  console.log(`evidence in ${dir}`);
 }
 
 // ---------------------------------------------------------------- scoring
@@ -286,6 +399,22 @@ function pickText(q: Question, a: Answer | undefined): string {
   else if (q.id.startsWith("group")) s = raw.split(": ")[0]!.split(" > ").pop()!;
   else if (q.id.startsWith("link.")) s = raw.split(" -> ")[0]!;
   return s;
+}
+
+function laneMatches(batches: CapturedBatch[], lane: LaneRun): { questions: number; matchesReference: number; mismatches: Array<{ id: string; reference: number | null | undefined; lane: number | null | undefined }> } {
+  let n = 0;
+  let m = 0;
+  const mismatches: Array<{ id: string; reference: number | null | undefined; lane: number | null | undefined }> = [];
+  for (const b of batches) {
+    for (const q of b.questions) {
+      n += 1;
+      const ref = b.answers.find((a) => a.id === q.id)?.index;
+      const got = lane.batches.find((x) => x.batch === b.batch)?.answers.find((a) => a.id === q.id)?.index;
+      if (got !== undefined && got === ref) m += 1;
+      else mismatches.push({ id: q.id, reference: ref, lane: got });
+    }
+  }
+  return { questions: n, matchesReference: m, mismatches };
 }
 
 function score(batches: CapturedBatch[], run: RaceRun): Scored[] {
@@ -451,14 +580,27 @@ async function render(dir: string, inp: RenderInput): Promise<{ gif: string; mp4
 
 async function main(): Promise<void> {
   const mode = process.env.DECISIONS_MODE ?? "capture";
-  if (!["capture", "race", "render"].includes(mode)) throw new Error("DECISIONS_MODE must be capture, race or render");
+  if (!["capture", "race", "render", "bench"].includes(mode)) throw new Error("DECISIONS_MODE must be capture, race, render or bench");
   const parent = resolve(process.env.DECISIONS_OUT ?? tmpdir());
   mkdirSync(parent, { recursive: true });
   const dir = mkdtempSync(join(parent, "navvi-decisions-"));
   console.log(`run directory: ${dir}`);
-  execFileSync(FFMPEG, ["-version"], { stdio: "ignore" });
   const commit = sh("git", ["rev-parse", "HEAD"]);
   const workingTree = sh("git", ["status", "--porcelain"]);
+  if (mode === "bench") {
+    const src = process.env.DECISIONS_CAPTURE;
+    if (!src) throw new Error("DECISIONS_CAPTURE is required in bench mode");
+    const captureDir = join(dir, "capture");
+    cpSync(join(resolve(src), "capture"), captureDir, { recursive: true });
+    const lanes = (process.env.DECISIONS_LANES ?? "jev,haiku").split(",").map((l) => l.trim());
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    delete env.ANTHROPIC_API_KEY;
+    if (lanes.includes("haiku") && !env.AI_GATEWAY_API_KEY) throw new Error("AI_GATEWAY_API_KEY is required (Haiku lane over the AI Gateway)");
+    if (lanes.includes("jev") && !env.TYPESAFE_API_KEY) throw new Error("TYPESAFE_API_KEY is required (Jev lane over the TypeSafe API)");
+    await bench(dir, captureDir, env, commit, workingTree);
+    return;
+  }
+  execFileSync(FFMPEG, ["-version"], { stdio: "ignore" });
 
   let captureDir = join(dir, "capture");
   let runs: RaceRun[];
@@ -526,7 +668,7 @@ async function main(): Promise<void> {
       questionList: batches.flatMap((b) => b.questions.map((q) => ({ batch: b.batch, id: q.id, kind: q.kind, label: premiseLabel(q), premise: q.premise, options: q.options?.length ?? 0, stateChars: q.state.length }))),
     },
     lanes: {
-      haiku: { chooser: "ModelChooser subclass (HaikuLaneChooser): drops the explanation Haiku puts in `text` on choice/boolean answers, which the stock validator rejects; indices untouched", modelId: median.lanes.haiku.modelId, transport: median.lanes.haiku.transport },
+      haiku: { chooser: "ModelChooser (stock validation since 8d868fb; a counting subclass records how many picks arrived with an explanation, changing nothing)", modelId: median.lanes.haiku.modelId, transport: median.lanes.haiku.transport },
       jev: { chooser: "JevChooser", modelId: median.lanes.jev.modelId, transport: median.lanes.jev.transport },
     },
     method: {
@@ -540,7 +682,7 @@ async function main(): Promise<void> {
     runs: runs.map((r) => ({
       run: r.run, order: r.order, ratio: Number(r.ratio.toFixed(2)),
       lanes: Object.fromEntries((["haiku", "jev"] as const).map((k) => [k, {
-        totalMs: Math.round(r.lanes[k].totalMs), warmupMs: Math.round(r.lanes[k].warmupMs), ...(r.lanes[k].warmupError ? { warmupError: r.lanes[k].warmupError } : {}), apiBatches: r.lanes[k].apiBatches, ...(r.lanes[k].strippedExplanationTexts !== undefined ? { strippedExplanationTexts: r.lanes[k].strippedExplanationTexts } : {}),
+        totalMs: Math.round(r.lanes[k].totalMs), warmupMs: Math.round(r.lanes[k].warmupMs), ...(r.lanes[k].warmupError ? { warmupError: r.lanes[k].warmupError } : {}), apiBatches: r.lanes[k].apiBatches, ...(r.lanes[k].explanationTexts !== undefined ? { explanationTexts: r.lanes[k].explanationTexts } : {}),
         batches: r.lanes[k].batches.map((b) => ({ batch: b.batch, ms: Math.round(b.ms), answers: b.answers })),
       }])),
       agreement: (() => { const s = score(batches, r); return { questions: s.length, haikuMatchesReference: s.filter((x) => x.haikuMatch).length, jevMatchesReference: s.filter((x) => x.jevMatch).length, lanesAgree: s.filter((x) => x.agree).length }; })(),

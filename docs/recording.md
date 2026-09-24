@@ -163,12 +163,16 @@ the media.
   over the TypeSafe API. Each lane gets one untimed warm-up call, then runs its
   batches sequentially with wall-clock timing per batch. The lanes never run
   concurrently, and their order alternates between runs.
-- **Haiku lane caveat.** Haiku returns the right index on the navigation
-  batches, but it also fills the optional `text` field with an explanation.
-  Navvi's validator rejects that twice, so the stock `ModelChooser` fails
-  batch 3. The lane subclass drops `text` on non-text answers before
-  validation and never changes an index. The provenance counts these drops per
-  run.
+- **Haiku lane.** Haiku returns the right index on the navigation batches,
+  but it also fills the optional `text` field with an explanation. Before
+  8d868fb navvi's validator rejected that and the stock `ModelChooser` failed
+  batch 3, so the published render (`docs/decisions-race-provenance.json`)
+  used a lane subclass that dropped `text` before validation. Since 8d868fb
+  the stock validator keeps the pick and ignores the words, and the recorder's
+  Haiku lane is now the stock `ModelChooser`: a subclass only counts
+  explanations (`explanationTexts`) and changes nothing it returns. Verified
+  on September 24: 7 backend calls for 7 batches in every run, 5 to 8
+  explained picks per run, 19/19 reference matches.
 - **Render.** The run with the median Haiku/Jev ratio. Answers appear at their
   measured batch end times. If the slower lane exceeds 15 s, both lanes are
   compressed by the same factor and the frame says so. A ✓ means the lane
@@ -180,3 +184,111 @@ median run, with a range of 3.4 to 5.0×. Both lanes matched the reference
 19/19 in every run. This is a decision-latency measurement from one network
 location on one task. It does not measure end-to-end compile time and does not
 support a general accuracy claim.
+
+### Race only, and the Claude Code lane
+
+`DECISIONS_MODE=bench` races an existing capture with no capture and no
+render. `DECISIONS_LANES` picks the lanes (default `jev,haiku`; also
+`claude-code`), and the order rotates per run so every lane takes every
+position. It writes `bench.json` and `bench-summary.json` in the run
+directory, and `DECISIONS_BENCH_OUT` copies the summary elsewhere.
+
+```sh
+set -a; . /path/to/.env; set +a
+DECISIONS_MODE=bench DECISIONS_LANES=jev,haiku,claude-code \
+  DECISIONS_CAPTURE=/tmp/navvi-decisions/navvi-decisions-XXXX DECISIONS_OUT=/tmp/navvi-decisions \
+  DECISIONS_BENCH_OUT=docs/decisions-race-claude-code.json npx tsx scripts/record-decisions.ts
+```
+
+The `claude-code` lane is what a navvi user without an API key gets:
+`CliChooser("claude")`, which runs `claude -p <prompt> --output-format json
+--model haiku` (`NAVVI_CLAUDE_MODEL`, default `haiku`) once per batch on the
+signed-in subscription. The lane removes `ANTHROPIC_API_KEY` and every
+`CLAUDE*` variable so that the child process is not a nested session of the
+shell running the script. Its time includes starting a Claude Code process
+for every batch. That is the cost a user pays, but it is not model latency.
+A separate timing check found that startup accounts for only about 2.5 s per
+batch. The rest is API time: Claude Code adds about 19k tokens of its own
+prompt, and Haiku in Claude Code thinks for 400 to 2,500 tokens before it
+answers.
+
+September 24 result (`docs/decisions-race-claude-code.json`): the same 19
+questions in 7 batches from the published capture, 3 runs. Medians: Jev
+3.5 s, Haiku over the Gateway (stock `ModelChooser`) 12.0 s, Haiku through
+Claude Code 91.6 s. That is 3.4× for Haiku over the API and 26× for Claude
+Code (per-run 22.8 to 33.5×). All three lanes matched the reference 19/19 in
+every run. The Claude Code figure varies with the machine, the user's Claude
+Code configuration and how long Haiku thinks: the same batch took 10 s once
+and 29 s another time. Present it as the no-API-key path, not as the speed of
+Haiku.
+
+## Product GIF: compile, zero-call re-run, self-heal
+
+`scripts/record-product.ts` records the three-beat product clip for the README
+and social posts. Output: `docs/product.gif`, `docs/product.mp4` and
+`docs/product-provenance.json`, 1280×720 at 6 fps.
+
+```sh
+npm run build                     # the script drives dist/, not src/
+set -a; . /path/to/.env; set +a   # AI_GATEWAY_API_KEY and/or TYPESAFE_API_KEY
+PRODUCT_OUT=/tmp/navvi-product npx tsx scripts/record-product.ts                     # capture + render
+PRODUCT_SOURCE=/tmp/navvi-product/navvi-product-XXXX PRODUCT_PUBLISH=1 \
+  npx tsx scripts/record-product.ts                                                  # re-render, copy to docs/
+```
+
+A signed-in Claude Code must be on `PATH`: with a key present and no
+`--chooser`, the CLI's default resolution picks Jev for decisions and Claude
+Code for the one text question (prompt parsing). The announcement line is shown
+on screen.
+
+- **Beat 1, compile.** `navvi "Extract the book title, price and availability"
+  <a-light-in-the-attic_1000>` on books.toscrape.com with empty storage.
+- **Beat 2, re-run.** The same command on `sharp-objects_997`, the same
+  template, and the same storage: `cache hit yes`, `decider jev: 0 decisions`.
+- **Beat 3, self-heal.** A controlled fixture, labeled as such on every frame.
+  Four pharmacy product pages served by `tests/server.ts`: a compile on v1, a
+  `switchDemo("v2")` under the same URLs, a heal run, then a replay on v2.
+  Jev answers live in both the compile and the heal; nothing is recorded. The
+  healed field names come from the run's `RunSummary.healingEvents`, because
+  the CLI summary prints only the count, and they are drawn as an annotation
+  rather than as stderr. The replay after a heal reports `promotion` events
+  (the working alternatives move to the front) with zero decisions. The frame
+  says so, so the non-zero count is not read as another heal.
+
+Each run is `main()` from `dist/bin/cli.js`, called in-process with the real
+argv and captured stdout and stderr. The only injection is `io.run`: it wraps
+the built `run()` to add `CrawlDeps.onPage`, which screenshots the crawler's
+own page every 300 ms and on each load event (a CDP capture, because
+Playwright's `page.screenshot` timed out on pages that were still loading), and
+to keep the `RunSummary`. A 1-second replay can close its pages before any
+frame lands. The pane then shows the previous run's last page for one of the
+same URLs, and the caption says so. The provenance records the screenshot count,
+the capture errors and any borrowed frame for each run.
+Crawler log lines (`deps.log`) go to the provenance file. They are not drawn,
+because the per-launch browser diagnostic prints a local filesystem path.
+Stdout JSON is drawn without `_source`, and the provenance keeps full records.
+
+Capture and render are separate passes. Stderr chunks and screenshots carry
+real timestamps. The renderer plays each run's live section with one uniform
+factor, chosen from a per-run display budget, and prints `sped up N×` on the
+frame whenever N > 1. Clocks and every number are the real ones. Command
+typing, the "site changed" card and result holds are untimed.
+
+The script refuses to render if the compile is not a cache miss with decisions,
+if the re-run is not a cache hit with zero questions, if the heal has no
+healing events, or if the post-heal replay asks a question. Before publishing,
+inspect one frame per beat plus the end card.
+
+September 24 capture (`dist/` built from `1134707`; the provenance records the
+build commit and every later `src/`/`bin/` change, which was one usage-text
+edit). Compile: 21.8 s, cache miss, Jev made 3 decisions (2.1 s waiting,
+$0.0003), and Claude Code answered 1 text question (15.4 s waiting). Re-run:
+2.1 s, cache hit, 0 decisions. Fixture compile on v1: 23.2 s, 4 decisions.
+Heal on v2: 1.7 s, 4 decisions, 1 field healing event covering `product_name`,
+`laboratory`, `price` and `stock`, 0 unhealed. Replay on v2: 1.0 s,
+0 decisions, 4 promotion events. On screen, the live sections run at 6×, 2×,
+20×, 2× and 1× respectively. On two of five earlier takes, the fixture
+compile's Jev calls fell back from the AI Gateway to the TypeSafe API after
+three `Service temporarily unavailable` responses. On one take, the fixture
+compile ended `no_items_found`, and the script refused to render it. Neither
+problem affected this capture.
