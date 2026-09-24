@@ -4,8 +4,8 @@
  * The committed Store B compile input records its sample as **"lines 2-5 of
  * the Store B list"**. An arbitrary slice off the top of a catalogue is how
  * three confidently wrong scrapers were produced in one session on 2026-09-22:
- * StoreC bound `listPrice` to the sale price because every sampled page had a
- * sale; StoreC abandoned 4 of 7 templates and returned 3 items from 115 URLs;
+ * Store C bound `listPrice` to the sale price because every sampled page had a
+ * sale; Store C abandoned 4 of 7 templates and returned 3 items from 115 URLs;
  * Store B collapsed `listPrice` and `promoPrice` onto the same node on 46 of
  * 46 comparable products, median ratio 0.80 against legacy, with both numbers
  * plausible and every type check passing. That is R23 of the client plan: a
@@ -78,20 +78,20 @@ export type PickReason = Stratum | "coverage";
  *
  * 1. **dead** — a scraper that never saw a dead URL has never been asked to
  *    reproduce a blank, and reproducing the blank is what parity means. It is
- *    also not an edge case: roughly 73% of client's StoreA URLs 302 away from
- *    their product page, and in the same day's legacy run 33 of 131 StoreA
+ *    also not an edge case: roughly 73% of the client's Store A URLs 302 away from
+ *    their product page, and in the same day's legacy run 33 of 131 Store A
  *    rows carry an empty product name — excel4node accepted every one of them,
  *    so a quarter of that column has been blank with no error raised anywhere.
  *    Omitting this stratum means compiling from the minority of the catalogue.
  * 2. **out-of-stock** — the stratum most likely to be *missing markup*. The
  *    price node a binding depends on may not render at all when nothing is for
  *    sale, and a binding compiled only on in-stock pages has never seen its own
- *    absence. StoreA already defaults to out of stock when the page says
+ *    absence. Store A already defaults to out of stock when the page says
  *    nothing, so the two readings have to be told apart from a real sample.
  * 3. **discounted** (list != promo) — two distinct prices on the page are the
  *    only condition under which the Store B collapse is visible at all.
  * 4. **undiscounted** (list == promo, or no promo) — the converse, and the one
- *    StoreC lacked: with a sale on every sampled page, binding `listPrice` to
+ *    Store C lacked: with a sale on every sampled page, binding `listPrice` to
  *    the sale price looked correct. A single-price page is what proves the
  *    binding does not secretly require a second one.
  *
@@ -172,7 +172,7 @@ function stockBand(inStock: boolean | undefined): string {
  *
  * Dead and refused are kept apart on purpose. A 403 or a 429 is the blocked
  * state U3a detects, and compiling a blank from it would teach the scraper to
- * write an empty row every time a datacenter IP is turned away — the StoreC
+ * write an empty row every time a datacenter IP is turned away — the Store C
  * failure mode, arriving as data instead of as an error. A 5xx is the site
  * having a bad minute; it is not a property of the catalogue and will not
  * reproduce. Neither belongs in a compile sample, and both are reported rather
@@ -219,8 +219,8 @@ export function classify(probe: UrlProbe): Classification {
     return { url, strata: ["dead"], signature: "dead:redirect", note: `redirects to ${where}, which is not its product page` };
   }
   if (probe.hasDeclaredProduct === false && probe.isShell === false) {
-    // StoreA, 2026-09-22: a 200 that declares Organization and no Product.
-    // The graph walk bound productName to "StoreA" on all 33 of them, so
+    // Store A, 2026-09-22: a 200 that declares Organization and no Product.
+    // The graph walk bound productName to "Store A" on all 33 of them, so
     // the row looked extracted. Same blank, wearing a different coat.
     //
     // It takes `isShell === false` to say that, and the qualifier is the whole
@@ -371,7 +371,7 @@ export function chooseSample(probes: readonly UrlProbe[], options: ChooseOptions
       (a, b) =>
         contested(a) - contested(b) ||
         // Then the majority form of this stratum: parity means reproducing what
-        // the catalogue actually does, and on StoreA what it does is 302.
+        // the catalogue actually does, and on Store A what it does is 302.
         freq(b.signature) - freq(a.signature) ||
         a.signature.localeCompare(b.signature) ||
         a.url.localeCompare(b.url),
@@ -470,7 +470,7 @@ export const NO_SHELLS_YET: ReadonlySet<string> = new Set<string>();
  *
  *  - **dead** is a fact about the probe. `classify` owns it and this function
  *    does not get a second opinion. A dead pick belongs in the sample — 73% of
- *    client's StoreA URLs 302 away, and reproducing a blank is what parity
+ *    the client's Store A URLs 302 away, and reproducing a blank is what parity
  *    means — but it declares nothing, and a sample that declares nothing does
  *    not merely fail to contribute: it deletes every candidate for every field.
  *  - **shell** cannot be known until the plain fetch has happened, because it

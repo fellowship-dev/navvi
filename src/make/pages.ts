@@ -19,16 +19,16 @@ import type { Capture, Obstacle, PageResponse } from "../investigate/index.js";
  * makes that possible, and it is also the file that cannot be unit-tested,
  * which is why it contains decisions and no logic.
  *
- * ## It is a transcription of `scripts/live-investigate.ts`, on purpose
+ * ## It is a transcription of the live smoke script, on purpose
  *
- * That script is the only thing in this repository that has ever driven the
+ * That script was the only thing that had ever driven the
  * cascade against real pages, and every line of its capture sequence was
  * bought by a failure:
  *
  *  - **`captureJson` rather than a hand-rolled `page.on("response")`.** The
  *    first version of the script pushed from inside an async handler and closed
- *    the page without draining it, so `products/detail` — the endpoint Cruz
- *    Verde's entire answer lives in — was still being parsed when the run moved
+ *    the page without draining it, so `products/detail` — the endpoint Store
+ *    B's entire answer lives in — was still being parsed when the run moved
  *    on. The manuscript reported ten endpoints and none of them was the right
  *    one. `captureJson` has the drain (`settled()`); a second capture written
  *    here would be the same race a third time.
@@ -266,7 +266,7 @@ export interface SettleTrend {
  * character page, bound 0 of 5 with "no captured leaf survived the filter", and
  * read exactly like a site that had changed under us. The same run alone bound
  * 3 of 5. A harness that reports a site regression when it was merely busy is
- * the failure `scripts/live-investigate.ts`'s own header warns about, one layer
+ * the failure the live smoke script's own header warns about, one layer
  * out.
  *
  * `unreachable` is the third of them and it was swallowed for longer than the

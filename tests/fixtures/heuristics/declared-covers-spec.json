@@ -1,9 +1,9 @@
 {
   "heuristic": "declared-covers-spec",
-  "encounter": "StoreA, 2026-09-22. The og:/product: meta tags answered the whole spec while the compiled scraper read body.one-col.christmas-pattern.",
+  "encounter": "Store A, 2026-09-22. The og:/product: meta tags answered the whole spec while the compiled scraper read body.one-col.christmas-pattern.",
   "cases": [
     {
-      "name": "StoreA states every requested field in its own meta tags",
+      "name": "Store A states every requested field in its own meta tags",
       "observation": {
         "requested": [
           "product_name",

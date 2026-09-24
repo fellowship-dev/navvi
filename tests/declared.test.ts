@@ -21,8 +21,8 @@ const page = (name: string): string => readFileSync(join(DIR, `${name}.html`), "
 const at = (sources: readonly DeclaredSource[], path: string): DeclaredSource | undefined => sources.find((source) => source.path === path);
 const paths = (sources: readonly DeclaredSource[]): string[] => sources.map((source) => source.path);
 
-describe("declaredFrom — StoreA, the encounter", () => {
-  const sources = declaredFrom(page("storea-product"));
+describe("declaredFrom — Store A, the encounter", () => {
+  const sources = declaredFrom(page("store-a-product"));
 
   /**
    * The verification the plan asks for: the five fields the client scraper was
@@ -43,8 +43,8 @@ describe("declaredFrom — StoreA, the encounter", () => {
     expect(at(sources, "brand.name")?.value).toBe("Laboratorio Ejemplo");
     expect(at(sources, "offers.price")?.value).toBe("10493");
     // The Organization and the WebSite in the same @graph are also named
-    // "StoreA". Neither is read, so neither can become a product name.
-    expect(sources.some((source) => source.value === "StoreA")).toBe(false);
+    // "Store A". Neither is read, so neither can become a product name.
+    expect(sources.some((source) => source.value === "Store A")).toBe(false);
   });
 
   it("spells a json-ld finding the way the compiled scraper reads it back", () => {
@@ -79,14 +79,14 @@ describe("declaredFrom — StoreA, the encounter", () => {
 
 describe("declaredFrom — the JSON-LD gate", () => {
   /**
-   * StoreA's 33 redirect URLs. The @graph holds an Organization and a
+   * Store A's 33 redirect URLs. The @graph holds an Organization and a
    * WebSite and no Product; a graph walk that keeps walking until something has
-   * a name bound productName to "StoreA" on every one of them.
+   * a name bound productName to "Store A" on every one of them.
    */
   it("returns no declared product when the graph declares none", () => {
-    const { sources, verdicts } = readDeclared(page("storea-redirect"));
+    const { sources, verdicts } = readDeclared(page("store-a-redirect"));
     expect(sources.filter((source) => source.kind === "json-ld")).toEqual([]);
-    expect(sources.some((source) => source.value === "StoreA" && source.kind !== "meta")).toBe(false);
+    expect(sources.some((source) => source.value === "Store A" && source.kind !== "meta")).toBe(false);
 
     const gate = verdicts.find((entry) => entry.id === "json-ld-needs-product-node")!;
     expect(gate.verdict.fires).toBe(true);
@@ -100,28 +100,28 @@ describe("declaredFrom — the JSON-LD gate", () => {
    * variation check in `leaves.ts` still has to run over several samples.
    */
   it("still reports the meta tag that survived the redirect, because it is there", () => {
-    const sources = declaredFrom(page("storea-redirect"));
+    const sources = declaredFrom(page("store-a-redirect"));
     expect(at(sources, "product:price:amount")?.value).toBe("14990");
-    expect(at(sources, "og:title")?.value).toBe("StoreA");
+    expect(at(sources, "og:title")?.value).toBe("Store A");
   });
 
   it("reports the gate as not firing on a page that does declare one", () => {
-    const { verdicts } = readDeclared(page("storec-product"));
+    const { verdicts } = readDeclared(page("store-c-product"));
     const gate = verdicts.find((entry) => entry.id === "json-ld-needs-product-node")!;
     expect(gate.verdict.fires).toBe(false);
   });
 
   it("honours a case override: a silenced gate says so rather than going quiet", () => {
     const view = bank({ "json-ld-needs-product-node": { enabled: false, note: "client: this store's graph is hand-written" } });
-    const { verdicts } = readDeclared(page("storea-redirect"), { view });
+    const { verdicts } = readDeclared(page("store-a-redirect"), { view });
     const gate = verdicts.find((entry) => entry.id === "json-ld-needs-product-node")!;
     expect(gate.verdict.fires).toBe(false);
     expect(gate.verdict.because).toContain("disabled for this case");
   });
 });
 
-describe("declaredFrom — StoreC, a bare Product block", () => {
-  const sources = declaredFrom(page("storec-product"));
+describe("declaredFrom — Store C, a bare Product block", () => {
+  const sources = declaredFrom(page("store-c-product"));
 
   it("reads a top-level Product with no @graph around it", () => {
     expect(at(sources, "name")?.value).toBe("Ejemplo Ibuprofeno 400 mg 20 Comprimidos");
@@ -132,7 +132,7 @@ describe("declaredFrom — StoreC, a bare Product block", () => {
 
   it("ignores a block of the wrong type and survives one the site broke", () => {
     // Three blocks: a Product, a BreadcrumbList, and one that is not JSON.
-    expect(jsonLdBlocks(page("storec-product"))).toHaveLength(2);
+    expect(jsonLdBlocks(page("store-c-product"))).toHaveLength(2);
     expect(paths(sources)).not.toContain("itemListElement");
   });
 });
@@ -187,7 +187,7 @@ describe("coversSpec — the stop-at-tier-1 answer", () => {
   const requested = ["productName", "sku", "listPrice", "promoPrice", "stock"];
 
   it("fires when the page stated every requested field, so tiers 2 and 3 never run", () => {
-    const sources = declaredFrom(page("storea-product"));
+    const sources = declaredFrom(page("store-a-product"));
     const bound = {
       productName: at(sources, "og:title")!.value,
       sku: at(sources, "product:retailer_item_id")!.value,
@@ -201,7 +201,7 @@ describe("coversSpec — the stop-at-tier-1 answer", () => {
   });
 
   it("names what is still missing rather than stopping early", () => {
-    const sources = declaredFrom(page("storec-product"));
+    const sources = declaredFrom(page("store-c-product"));
     const verdict = coversSpec({ productName: at(sources, "name")!.value, sku: at(sources, "sku")!.value, listPrice: null, promoPrice: null, stock: null }, requested);
     expect(verdict.fires).toBe(false);
     expect(verdict.because).toContain("listPrice");
@@ -249,14 +249,14 @@ describe("declaredFrom — the scanner", () => {
   });
 
   it("honours the cap on how much it will carry off one page", () => {
-    expect(declaredFrom(page("storea-product"), { maxSources: 3 })).toHaveLength(3);
+    expect(declaredFrom(page("store-a-product"), { maxSources: 3 })).toHaveLength(3);
   });
 
   it("takes any schema.org type, not only Product", () => {
     const html = `<html><head><script type="application/ld+json">
-      {"@context":"https://schema.org","@graph":[{"@type":"Organization","name":"StoreA","url":"https://example.test/"}]}
+      {"@context":"https://schema.org","@graph":[{"@type":"Organization","name":"Store A","url":"https://example.test/"}]}
     </script></head></html>`;
-    expect(at(declaredFrom(html, { want: "Organization" }), "name")?.value).toBe("StoreA");
+    expect(at(declaredFrom(html, { want: "Organization" }), "name")?.value).toBe("Store A");
     expect(declaredFrom(html, { want: "Product" })).toEqual([]);
   });
 });

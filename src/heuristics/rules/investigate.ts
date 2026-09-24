@@ -36,7 +36,7 @@ const declaredCoversSpec = define({
   stage: "investigate",
   decides: "Whether tiers 2 and 3 run at all.",
   encounter:
-    "StoreA, 2026-09-22: name, sku, brand, listPrice, promoPrice and stock were all stated in the page's own og:/product: meta tags, " +
+    "Store A, 2026-09-22: name, sku, brand, listPrice, promoPrice and stock were all stated in the page's own og:/product: meta tags, " +
     "while the compiled scraper was reading a seasonal CSS class (body.one-col.christmas-pattern) and covering 27-44% of the catalogue.",
   input: z.object({
     requested: z.array(z.string().min(1)).min(1),

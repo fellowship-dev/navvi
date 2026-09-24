@@ -354,7 +354,7 @@ interface Fact {
 /** A path segment that is an array index. `key-names-carry-the-signal` is about key names; a position is not one. */
 const POSITION = /^\d+$/;
 
-/** `promotionalPrice` becomes `["promotional", "Price"]`; `price-sale-std` becomes `["price", "sale", "cl"]`. */
+/** `promotionalPrice` becomes `["promotional", "Price"]`; `price-sale-std` becomes `["price", "sale", "std"]`. */
 function words(text: string): string[] {
   return text
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")

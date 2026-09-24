@@ -63,7 +63,7 @@ describe("browser pool options", () => {
  *
  * Store B died at 50 requests, then at 49 with the browser-pool bound
  * already raised, which is what proved the browser pool was never the trigger.
- * StoreC, which only reached 10 requests, survived.
+ * Store C, which only reached 10 requests, survived.
  *
  * A run replaying a pinned scraper has no reason to rotate sessions at all.
  */

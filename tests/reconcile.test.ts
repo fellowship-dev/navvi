@@ -22,7 +22,7 @@ import type { Spec } from "../src/spec/schema.js";
 const DIR = join(import.meta.dirname, "fixtures", "investigate");
 const MATCH = "catalog-svc/products/detail";
 
-const payloads = (["", "-2", "-3"] as const).map((n) => JSON.parse(readFileSync(join(DIR, `storeb-detail${n}.json`), "utf8")) as unknown);
+const payloads = (["", "-2", "-3"] as const).map((n) => JSON.parse(readFileSync(join(DIR, `store-b-detail${n}.json`), "utf8")) as unknown);
 const samples: Leaf[][] = payloads.map((payload) => flatten(payload));
 
 /**

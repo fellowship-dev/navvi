@@ -4,10 +4,10 @@ Decided 2026-09-23. The first ADR in this repository; `docs/adr/` starts here.
 
 ## The encounter
 
-StoreA, 2026-09-22: 33 URLs redirect away from their product page to a
+Store A, 2026-09-22: 33 URLs redirect away from their product page to a
 shell whose `@graph` holds an Organization and a WebSite and no Product. A
 graph walk that kept walking until *something* answered found the Organization
-and bound `productName` to `"StoreA"` on all 33 rows — with a SKU off the
+and bound `productName` to `"Store A"` on all 33 rows — with a SKU off the
 URL and a price from a surviving `product:` meta tag, so the rows looked
 extracted and would have entered a price index at invented prices.
 

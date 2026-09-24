@@ -13,7 +13,7 @@ const everyFieldCollapsedIsBlocking = define({
   stage: "replay",
   decides: "Whether the run reports drift and heals, or reports blocked and stops.",
   encounter:
-    "StoreC, 2026-09-22: sku 0/111, stock 0/111, prices 3/111 and \"¡Lo sentimos!\" as a product name — the error page Apify's datacenter IPs are served. " +
+    "Store C, 2026-09-22: sku 0/111, stock 0/111, prices 3/111 and \"¡Lo sentimos!\" as a product name — the error page Apify's datacenter IPs are served. " +
     "The same URLs read perfectly from a laptop. The legacy scraper has the same no-proxy config and has failed the same way for months, looking like drift the whole time.",
   input: z.object({
     /** Fill counts per field for this run. */
@@ -28,7 +28,7 @@ const everyFieldCollapsedIsBlocking = define({
     canary: z.enum(["resolved", "failed", "unchecked"]).default("unchecked"),
     /**
      * Fields that filled but hold the same value on every sample — which
-     * `no-variation-no-field` has already rejected as bindings. StoreC is why
+     * `no-variation-no-field` has already rejected as bindings. Store C is why
      * this input exists: its product name was 111/111 filled, with "¡Lo
      * sentimos!" in every row. A fill rate alone would have called that healthy
      * and hidden the collapse behind it.

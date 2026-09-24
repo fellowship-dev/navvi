@@ -1,0 +1,41 @@
+{
+  "productData": {
+    "id": "100003",
+    "name": "Tercero Capsulas 500 mg 16 Capsulas",
+    "price": 7490,
+    "prices": {
+      "price-list-std": 7490,
+      "price-sale-std": 6741
+    },
+    "appliedPromotions": {
+      "price-sale-std": {
+        "promotionalPrice": 6741,
+        "promotionId": "SALE-10"
+      }
+    },
+    "promotions": [
+      {
+        "id": "SALE-10",
+        "isClubPromotion": false,
+        "calloutMsg": "10% de descuento"
+      }
+    ],
+    "hasClubPromotion": false,
+    "stock": 33,
+    "laboratory": "Laboratorio Tercero",
+    "activeIngredient": "Tercero",
+    "bioequivalence": false,
+    "pum": {
+      "value": 468,
+      "unit": "Capsula"
+    },
+    "seo": {
+      "metaTitle": "Tercero Capsulas",
+      "canonical": "/tercero/100003.html"
+    },
+    "telemetry": {
+      "sessionId": "g7h8i9",
+      "renderedAt": 1758561999000
+    }
+  }
+}

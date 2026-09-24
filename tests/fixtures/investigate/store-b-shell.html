@@ -1,0 +1,35 @@
+<!doctype html>
+<!--
+  Synthetic. The shape of a plain fetch against a single-page storefront, as
+  Store B answered one on 2026-09-22: 25 of 25 URLs came back like this and
+  the product was in the page's own products/detail call.
+
+  Three properties are what `shell-skips-tier-1` reads, and all three are here
+  on purpose: almost no visible text, no declaration of a product to anybody,
+  and script bundles that will fetch the content later. Tier 1 cannot answer
+  from this page and should not be charged for trying on the other 24.
+
+  Deliberately *not* here: any WAF resource or challenge marker, not even
+  named in this comment. A shell that also loads Imperva's always-on resource
+  is read by blocked.ts as a challenge interstitial — no declared product plus
+  almost no text is exactly its corroboration rule — and that is a different
+  diagnosis with a different remedy. The marker scan reads the raw source,
+  comments included, so writing the string here would have made this fixture
+  the other diagnosis. (It did, for one run.)
+-->
+<html lang="es">
+  <head>
+    <title>Store B</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="preconnect" href="https://api.example.test" />
+    <script src="/static/runtime.8f31c0.js" defer></script>
+    <script src="/static/vendor.4ab902.js" defer></script>
+    <script src="/static/main.1c77de.js" defer></script>
+    <script src="/static/analytics.66b1af.js" async></script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <noscript>Necesitas habilitar JavaScript para ver esta tienda.</noscript>
+  </body>
+</html>

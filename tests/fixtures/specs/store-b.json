@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "brief": "I need the product info of a dynamic set of products in Store B.",
+  "target": {
+    "site": "Store B",
+    "pageKind": "product",
+    "provenance": "brief"
+  },
+  "entity": {
+    "name": "product",
+    "provenance": "brief"
+  },
+  "inputs": {
+    "shape": "unknown",
+    "description": "a dynamic set of products",
+    "provenance": "inferred"
+  },
+  "fields": [
+    {
+      "name": "product_name",
+      "description": "the product's name as shown on its page",
+      "provenance": "inferred"
+    },
+    {
+      "name": "sku",
+      "provenance": "inferred"
+    },
+    {
+      "name": "list_price",
+      "provenance": "inferred"
+    },
+    {
+      "name": "promo_price",
+      "provenance": "inferred"
+    },
+    {
+      "name": "stock",
+      "provenance": "inferred"
+    }
+  ],
+  "constraints": {
+    "freshness": {
+      "stated": false
+    },
+    "volume": {
+      "stated": false
+    },
+    "cadence": {
+      "stated": false
+    },
+    "budget": {
+      "stated": false
+    }
+  },
+  "rubrics": [],
+  "openQuestions": [
+    {
+      "id": "fields-unnamed",
+      "about": "fields",
+      "question": "Which fields should the scraper return?",
+      "because": "the brief says \"product info\", which names no field",
+      "candidates": [
+        "product_name",
+        "sku",
+        "list_price",
+        "promo_price",
+        "stock"
+      ],
+      "blocking": true,
+      "answeredBy": "client"
+    },
+    {
+      "id": "inputs-shape",
+      "about": "inputs",
+      "question": "In what shape do the inputs arrive: a URL list, a SKU or code list, or search terms?",
+      "because": "the brief describes the inputs as \"a dynamic set of products\", which fits all three",
+      "candidates": [
+        "a URL list",
+        "a SKU or code list",
+        "search terms"
+      ],
+      "blocking": true,
+      "answeredBy": "client"
+    },
+    {
+      "id": "constraints-unstated",
+      "about": "constraints",
+      "question": "Does the run have a freshness, volume, cadence, budget constraint?",
+      "because": "the brief states none of these",
+      "candidates": [
+        "freshness",
+        "volume",
+        "cadence",
+        "budget"
+      ],
+      "blocking": false,
+      "answeredBy": "client"
+    }
+  ]
+}

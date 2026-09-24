@@ -1021,7 +1021,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
    * Only pages that failed their fingerprint check get here, and that is the
    * right population rather than a saving: the question `classifyRun` is being
    * asked is "may a repair be learned from this page", so the corpus is the
-   * pages a repair would be learned from. StoreC's 111 failures are 111
+   * pages a repair would be learned from. Store C's 111 failures are 111
    * copies of one apology and the apology shape sees that; a redesign's
    * failures are as many different pages as the run read and it does not.
    */
@@ -1095,7 +1095,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
      * **U9c: the gate.** Until this line existed `createHealer()` was called
      * unconditionally and `classifyRun` had no importer in `src/replay/` at
      * all — `mayHeal` was a guarantee in the type system that the run did not
-     * keep, and a recompile against StoreC's "¡Lo sentimos!" page was
+     * keep, and a recompile against Store C's "¡Lo sentimos!" page was
      * reachable from a blocked verdict in the code.
      *
      * The seam the plan flagged — `classifyRun` is offline and run-wide, the
@@ -1315,7 +1315,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
    *
    * Both halves are needed and neither is enough. The counts are what
    * `every-field-collapsed-is-blocking` weighs; the values are what
-   * `no-variation-no-field` weighs, and without them StoreC reads as healthy
+   * `no-variation-no-field` weighs, and without them Store C reads as healthy
    * — its `product_name` was 111 of 111 filled, every one of them
    * "¡Lo sentimos!". A fill rate cannot see a column that filled perfectly
    * with one wrong answer, and that is the exact page a repair would have
@@ -1639,7 +1639,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
  * The corpus is only there so the apology shape has something to compare
  * against, and that shape is decided by whether the *same document* comes back
  * on different URLs — a question two dozen pages answer as well as a thousand.
- * StoreC's run was 111 URLs of one page and would have been settled by the
+ * Store C's run was 111 URLs of one page and would have been settled by the
  * second. The cap is what stops a long crawl of a genuinely broken template
  * from carrying its whole HTML in memory.
  */

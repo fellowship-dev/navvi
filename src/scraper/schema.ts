@@ -73,10 +73,10 @@ export const FieldAlternativeSchema = z.object({
    * `Product`. Without it only the top-level object is read.
    *
    * It is not optional decoration. A page's JSON-LD commonly holds several
-   * typed nodes in an `@graph` -- StoreA's carries Organization, WebSite and
+   * typed nodes in an `@graph` -- Store A's carries Organization, WebSite and
    * Product -- and `name` resolves against all of them. Searching the graph for
    * the first node that answers found the Organization and returned the store's
-   * own name, "StoreA", as the product name on all 33 URLs that redirect
+   * own name, "Store A", as the product name on all 33 URLs that redirect
    * away from their product page. Those rows had a name, a SKU from the URL and
    * a price from whatever meta tag survived, so they looked like products and
    * would have gone into a price index. Walking the graph is opt-in now, and

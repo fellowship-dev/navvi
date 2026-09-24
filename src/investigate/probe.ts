@@ -8,7 +8,7 @@ import type { UrlProbe } from "./sample.js";
  *
  * `chooseSample` and `classify` were well covered and every input they had ever
  * been given was a hand-written literal. The only code in the repo that
- * produced a probe from an actual page lived in `scripts/live-investigate.ts`,
+ * produced a probe from an actual page lived in a live smoke script,
  * outside `src/`, with no test — and it spelled the shell rule itself:
  *
  *     isShell: visibleText(body).length < 400 && /<script[^>]+src=/i.test(body) && !declared
@@ -50,7 +50,7 @@ function priceCount(body: string): number {
  * answer came from; when they differ the probe carries `redirectedTo`, which is
  * what lets `classify` tell "302 to a category page" (dead) from "302 that only
  * added a trailing slash" (not dead). Both readings matter: roughly 73% of
- * client's StoreA URLs move.
+ * the client's Store A URLs move.
  */
 export function probeFrom(requested: string, response: PageResponse, options: ProbeOptions = {}): UrlProbe {
   const body = response.body ?? "";

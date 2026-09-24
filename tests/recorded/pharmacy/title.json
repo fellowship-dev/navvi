@@ -2,7 +2,7 @@
   "id": "title",
   "kind": "text",
   "index": null,
-  "text": "Farmacia Store B",
+  "text": "Farmacia Ejemplo",
   "inputTokens": 40,
   "outputTokens": 8,
   "chooser": "model",

@@ -37,7 +37,7 @@ import type { DeclaredKind, DeclaredSource } from "./declared.js";
  *
  * `price` is deliberately separate from `listPrice` and `salePrice`: schema.org
  * `offers.price` is *what you pay now* and says nothing about whether it is
- * discounted. On the StoreA fixture it is 10493, the same number as
+ * discounted. On the Store A fixture it is 10493, the same number as
  * `product:sale_price:amount` and not the 14990 in the `<del>` — which is
  * exactly why reading it as the list price is the defect this file exists to
  * avoid.
@@ -62,7 +62,7 @@ export type DeclaredRole =
  * JSON-LD first, and not for tidiness: it is the only declaration a heuristic
  * vouched for. `json-ld-needs-product-node` refuses a block with no `Product`
  * node, so a JSON-LD finding is known to be about a product. A `<meta>` tag is
- * gated by nothing — StoreA's 33 redirect pages carry a surviving
+ * gated by nothing — Store A's 33 redirect pages carry a surviving
  * `product:price:amount` with no Product anywhere, which is the trap that put
  * 33 fabricated rows into a price index. (The sample chooser keeps those URLs
  * out of the binding set as `dead`; this ordering is the second lock on the
@@ -227,7 +227,7 @@ const FIELD_TERMS: ReadonlyArray<{ role: DeclaredRole; terms: readonly string[] 
 ];
 
 /**
- * `productData.prices[price-list-std]` -> ["product","data","prices","price","list","cl"].
+ * `productData.prices[price-list-std]` -> ["product","data","prices","price","list","std"].
  * Same split `key-names-carry-the-signal` uses, and deliberately so: a field
  * whose tokens this file reads one way and the bank reads another is a field
  * whose two tiers disagree about what it is called.
@@ -266,10 +266,10 @@ export function roleOfField(field: string): DeclaredRole | undefined {
  * The roles a field will accept, best first.
  *
  * The fallback chain is where the unqualified `price` role is spent, and it is
- * spent **once**. StoreC declares a bare JSON-LD `offers.price` and nothing
+ * spent **once**. Store C declares a bare JSON-LD `offers.price` and nothing
  * else: that number is what you pay today, so it answers `promoPrice`, and
  * `listPrice` is left for tier 3 to find under the `<del>` — which is exactly
- * the shape the plan asks StoreC to produce. Handing the same leaf to both
+ * the shape the plan asks Store C to produce. Handing the same leaf to both
  * fields would instead collapse them onto one value, which is the Store B
  * defect of 2026-09-22 arriving one tier earlier.
  *

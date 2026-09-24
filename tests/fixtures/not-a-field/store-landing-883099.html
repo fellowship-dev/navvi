@@ -1,0 +1,49 @@
+<!doctype html>
+<!--
+  Synthetic. The shape of a Store A redirect URL on 2026-09-22: the product
+  at this address is gone, the store answered with its own landing page, and the
+  product: meta namespace of the address you asked for is still attached to it.
+  See README.md in this directory. Every value here is invented.
+-->
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Store A</title>
+    <meta property="og:site_name" content="Store A" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Store A" />
+    <meta property="og:url" content="https://tienda.ejemplo.test/p/883099" />
+    <meta property="product:retailer_item_id" content="883099" />
+    <meta property="product:price:amount" content="14990" />
+    <meta property="product:price:currency" content="CLP" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          { "@type": "Organization", "name": "Store A", "url": "https://tienda.ejemplo.test/" },
+          { "@type": "WebSite", "name": "Store A", "url": "https://tienda.ejemplo.test/" }
+        ]
+      }
+    </script>
+  </head>
+  <body class="one-col">
+    <header class="site-header">
+      <a class="brand" href="/">Store A</a>
+      <nav><a href="/farmacia">Farmacia</a> <a href="/dermocosmetica">Dermocosmetica</a> <a href="/bebe">Bebe</a></nav>
+    </header>
+    <main>
+      <h1>Store A</h1>
+      <p class="lead">Encuentra medicamentos, dermocosmetica y cuidado personal con despacho a todo Chile.</p>
+      <section class="destacados">
+        <h2>Destacados de la semana</h2>
+        <ul>
+          <li><a href="/p/900001">Ver ofertas de farmacia</a></li>
+          <li><a href="/p/900002">Ver ofertas de dermocosmetica</a></li>
+        </ul>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <p>Store A &mdash; servicio al cliente 600 600 6000</p>
+    </footer>
+  </body>
+</html>

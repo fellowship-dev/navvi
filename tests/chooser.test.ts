@@ -703,7 +703,7 @@ describe("recorded chooser (KTD12)", () => {
     const qs: Question[] = [...batch(), { id: "title", kind: "text", premise: "name", state: STATE, maxLength: 40 }];
     const answers = await chooser.ask(qs);
     expect(answers.map((a) => a.index)).toEqual([1, 1, 2, null]);
-    expect(answers[3]?.text).toBe("Farmacia Store B");
+    expect(answers[3]?.text).toBe("Farmacia Ejemplo");
     expect(chooser.usage().chooser).toBe("recorded");
     expect(chooser.usage().inputTokens).toBe(400);
   });

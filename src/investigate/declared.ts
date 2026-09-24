@@ -9,7 +9,7 @@ import { flatten } from "./leaves.js";
  * U2a: tier 1, what a page declares about itself. One plain HTTP fetch, no
  * browser, no model.
  *
- * On 2026-09-22 the committed StoreA scraper was reading a *seasonal* CSS
+ * On 2026-09-22 the committed Store A scraper was reading a *seasonal* CSS
  * class — `body.one-col.christmas-pattern` — fourteen levels down from `body`,
  * and covering 27-44% of the catalogue. The same page stated its name, sku,
  * brand, list price, promotional price and availability in its own `<meta>`
@@ -132,7 +132,7 @@ export function declaredFrom(html: string, options: DeclaredOptions = {}): Decla
  *
  * Takes the *bound* record rather than the raw findings, because "which
  * declared value is `listPrice`" is the binding question `bind.ts` answers and
- * this is only the stopping question. StoreA is the case: all six requested
+ * this is only the stopping question. Store A is the case: all six requested
  * fields were stated by the page, so tiers 2 and 3 were pure waste, and the
  * run spent them anyway for want of anyone asking.
  */
@@ -178,10 +178,10 @@ function fromJsonLd(tokens: readonly Token[], want: string, view: Bank, verdicts
   /**
    * The gate, and it is not a formality.
    *
-   * StoreA, 2026-09-22: 33 URLs redirect away from their product page to a
+   * Store A, 2026-09-22: 33 URLs redirect away from their product page to a
    * shell whose `@graph` holds an Organization and a WebSite and no Product.
    * A graph walk that keeps walking until *something* answers found the
-   * Organization, bound `productName` to `"StoreA"`, and — with a sku
+   * Organization, bound `productName` to `"Store A"`, and — with a sku
    * scraped off the URL and a price from a `product:` meta tag that survived
    * the redirect — produced 33 rows that looked extracted and would have
    * entered a price index.
@@ -425,7 +425,7 @@ function isMicroItem(value: unknown): value is MicroItem {
  * (`no-variation-no-field`). Carrying it would cost the variation check work to
  * reach the answer it already knows.
  *
- * `product:price:amount` and `product:sale_price:amount` are the two StoreA
+ * `product:price:amount` and `product:sale_price:amount` are the two Store A
  * was stating all along while the compiled scraper read a Christmas class, and
  * `product:retailer_item_id` is the sku. They are the whole reason this tier
  * pays for itself.

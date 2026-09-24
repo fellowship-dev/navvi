@@ -62,8 +62,8 @@ export const REVALIDATION_HEADERS = ["if-none-match", "if-modified-since"] as co
  * The surgery is the smallest that works. A request with no conditional header
  * is continued untouched rather than re-sent with a header list navvi rebuilt:
  * `route.continue({ headers })` replaces the whole block, and a rebuilt block
- * is a different client to anything that fingerprints header order. On a Cruz
- * Verde product page that is every request but one.
+ * is a different client to anything that fingerprints header order. On a Store
+ * B product page that is every request but one.
  *
  * What it costs was measured rather than argued, and it does not show: two
  * passes over two store-b.example product pages, twice each, returned the same

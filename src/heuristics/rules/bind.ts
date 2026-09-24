@@ -30,7 +30,7 @@ const jsonLdNeedsProductNode = define({
   stage: "bind",
   decides: "Whether declared data may be read at all on this page.",
   encounter:
-    "StoreA, 2026-09-22: the graph walk kept walking until something had a name, found the Organization node, and bound productName to \"StoreA\" on all 33 redirect URLs — " +
+    "Store A, 2026-09-22: the graph walk kept walking until something had a name, found the Organization node, and bound productName to \"Store A\" on all 33 redirect URLs — " +
     "with a SKU from the URL and a price from a surviving meta tag, so the row looked extracted and would have entered a price index.",
   input: z.object({
     jsonLd: z.array(JsonValue),
@@ -64,7 +64,7 @@ const noVariationNoField = define({
   stage: "bind",
   decides: "Whether a candidate that extracted cleanly is allowed to become a binding.",
   encounter:
-    "StoreA, 2026-09-22: productName came back as \"StoreA\" on all 33 samples. The generic rule catches it without knowing anything about schema.org, " +
+    "Store A, 2026-09-22: productName came back as \"Store A\" on all 33 samples. The generic rule catches it without knowing anything about schema.org, " +
     "and it is the same invariant the client admission loop applies after a compile, moved to where it prevents the defect instead of detecting it.",
   input: z.object({
     field: z.string().min(1),
@@ -280,7 +280,7 @@ const struckPriceIsPrevious = define({
   title: "<del> and strike/old-price classes mean the previous price.",
   stage: "bind",
   decides: "Which of several prices on a page is the list price and which is what you pay today.",
-  encounter: "StoreC, 2026-09-22: the list price was struck through, and the compiled path to it was fourteen levels deep from body.modal-open.",
+  encounter: "Store C, 2026-09-22: the list price was struck through, and the compiled path to it was fourteen levels deep from body.modal-open.",
   input: z.object({
     candidates: z.array(z.object({ value: z.string().min(1), markup: z.string(), selector: z.string().optional() })).min(1),
   }),
@@ -306,7 +306,7 @@ const urlVariantBeatsMaster = define({
   title: "A variant named in the URL beats the page's master identity.",
   stage: "bind",
   decides: "Which identifier the row is keyed by when the page and the URL disagree.",
-  encounter: "StoreA, 2026-09-22: the URL asked for variant 883052 while the page declared its master SKU 8820237; the caller asked for the variant.",
+  encounter: "Store A, 2026-09-22: the URL asked for variant 883052 while the page declared its master SKU 8820237; the caller asked for the variant.",
   input: z.object({
     url: z.string().min(1),
     declaredSku: z.union([z.string(), z.number(), z.null()]),
@@ -347,7 +347,7 @@ const SENSES: Record<string, { self: string[]; opposite: string[] }> = {
 };
 
 /**
- * `productData.prices[price-list-std]` -> ["product", "data", "prices", "price", "list", "cl"].
+ * `productData.prices[price-list-std]` -> ["product", "data", "prices", "price", "list", "std"].
  * camelCase is split before lower-casing, because a payload key is as likely to
  * be `listPrice` as `price-list-std` and a single run-together token matches nothing.
  */

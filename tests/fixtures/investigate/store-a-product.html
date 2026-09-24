@@ -1,0 +1,78 @@
+<!doctype html>
+<!--
+  Synthetic. The SHAPE was probed off a live Store A product page on
+  2026-09-22; every value here is invented.
+
+  Two things are worth staring at.
+
+  1. The page states name, sku, brand, list price, sale price and availability
+     in its own <head>, where nothing about the season can move them.
+  2. The committed scraper was reading the *body class* below —
+     body.one-col.christmas-pattern — fourteen levels down, and covering 27-44%
+     of the catalogue.
+-->
+<html lang="es">
+  <head>
+    <title>Ejemplo Complejo B 30 Comprimidos | Store A</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Compra Ejemplo Complejo B 30 Comprimidos en Store A." />
+
+    <meta property="og:type" content="product" />
+    <meta property="og:title" content="Ejemplo Complejo B 30 Comprimidos" />
+    <meta property="og:description" content="Suplemento de ejemplo, 30 comprimidos." />
+    <meta property="og:url" content="https://example.test/products/ejemplo-complejo-b" />
+    <meta property="og:image" content="https://example.test/img/ejemplo-complejo-b.jpg" />
+
+    <meta property="product:brand" content="Laboratorio Ejemplo" />
+    <meta property="product:price:amount" content="14990" />
+    <meta property="product:price:currency" content="CLP" />
+    <meta property="product:sale_price:amount" content="10493" />
+    <meta property="product:sale_price:currency" content="CLP" />
+    <meta property="product:availability" content="in stock" />
+    <meta property="product:retailer_item_id" content="8820237" />
+    <meta property="product:condition" content="new" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://example.test/#organization",
+            "name": "Store A",
+            "url": "https://example.test/"
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://example.test/#website",
+            "name": "Store A",
+            "url": "https://example.test/"
+          },
+          {
+            "@type": "Product",
+            "name": "Ejemplo Complejo B 30 Comprimidos",
+            "sku": "8820237",
+            "brand": { "@type": "Brand", "name": "Laboratorio Ejemplo" },
+            "offers": {
+              "@type": "Offer",
+              "price": "10493",
+              "priceCurrency": "CLP",
+              "availability": "https://schema.org/InStock"
+            }
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body class="one-col christmas-pattern">
+    <main>
+      <h1>Ejemplo Complejo B 30 Comprimidos</h1>
+      <div class="prices">
+        <del class="old">$ 14.990</del>
+        <span class="now">$ 10.493</span>
+      </div>
+      <div class="desc">Disponible</div>
+    </main>
+  </body>
+</html>

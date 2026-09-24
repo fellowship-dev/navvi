@@ -10,7 +10,7 @@ import { visibleText } from "../src/heuristics/index.js";
  * firing, or starts firing wrongly, is a failing test here.
  *
  * Every finding of 2026-09-22 was already written down as prose in a plan
- * document — the SKU defect at line 35, StoreC's JSON-LD at line 990 — and
+ * document — the SKU defect at line 35, Store C's JSON-LD at line 990 — and
  * four sessions went by without any of it executing. This file is the
  * difference.
  */
@@ -66,7 +66,7 @@ describe("the heuristic bank (U8b)", () => {
 
   it("lets a case silence a heuristic, and says so rather than going quiet", () => {
     const view = bank({ "no-variation-no-field": { enabled: false, note: "client: a single-product catalogue is expected to repeat" } });
-    const verdict = view.run("no-variation-no-field", { field: "product_name", values: ["StoreA", "StoreA"] });
+    const verdict = view.run("no-variation-no-field", { field: "product_name", values: ["Store A", "Store A"] });
     expect(verdict.fires).toBe(false);
     expect(verdict.because).toContain("disabled for this case");
     expect(verdict.because).toContain("single-product catalogue");

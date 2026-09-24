@@ -1,0 +1,81 @@
+<!doctype html>
+<!--
+  Synthetic, and the second sample of the same template as
+  `store-a-product.html`. It exists for the reason `store-b-detail-2.json`
+  exists: a binding is compiled from a *sample*, and `no-variation-no-field`
+  cannot say anything about one page.
+
+  What varies: name, sku, both prices, and availability — that last one on
+  purpose, because a field that reads "in stock" on every sampled page is
+  indistinguishable from a field that is not being read at all.
+
+  What is deliberately constant: the brand, both currencies and the condition.
+  A value identical across every sample is not a field, and a run that asked
+  for `brand` here should be told so rather than handed "Laboratorio Ejemplo"
+  as an extraction.
+-->
+<html lang="es">
+  <head>
+    <title>Ejemplo Vitamina C 60 Comprimidos | Store A</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Compra Ejemplo Vitamina C 60 Comprimidos en Store A." />
+
+    <meta property="og:type" content="product" />
+    <meta property="og:title" content="Ejemplo Vitamina C 60 Comprimidos" />
+    <meta property="og:description" content="Suplemento de ejemplo, 60 comprimidos." />
+    <meta property="og:url" content="https://example.test/products/ejemplo-vitamina-c" />
+    <meta property="og:image" content="https://example.test/img/ejemplo-vitamina-c.jpg" />
+
+    <meta property="product:brand" content="Laboratorio Ejemplo" />
+    <meta property="product:price:amount" content="9990" />
+    <meta property="product:price:currency" content="CLP" />
+    <meta property="product:sale_price:amount" content="6993" />
+    <meta property="product:sale_price:currency" content="CLP" />
+    <meta property="product:availability" content="out of stock" />
+    <meta property="product:retailer_item_id" content="8804411" />
+    <meta property="product:condition" content="new" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://example.test/#organization",
+            "name": "Store A",
+            "url": "https://example.test/"
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://example.test/#website",
+            "name": "Store A",
+            "url": "https://example.test/"
+          },
+          {
+            "@type": "Product",
+            "name": "Ejemplo Vitamina C 60 Comprimidos",
+            "sku": "8804411",
+            "brand": { "@type": "Brand", "name": "Laboratorio Ejemplo" },
+            "offers": {
+              "@type": "Offer",
+              "price": "6993",
+              "priceCurrency": "CLP",
+              "availability": "https://schema.org/OutOfStock"
+            }
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body class="one-col christmas-pattern">
+    <main>
+      <h1>Ejemplo Vitamina C 60 Comprimidos</h1>
+      <div class="prices">
+        <del class="old">$ 9.990</del>
+        <span class="now">$ 6.993</span>
+      </div>
+      <div class="desc">Sin stock</div>
+    </main>
+  </body>
+</html>

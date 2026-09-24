@@ -111,7 +111,7 @@ describe("the machine is total over the unions it claims to cover", () => {
     // The shell that carries Imperva's always-on resource: the same fixture the
     // cascade's own tests use, because a hand-written shell would be a second
     // spelling of what a shell is and `shell-skips-tier-1` owns that.
-    const shellWaf = readFileSync(join(import.meta.dirname, "fixtures", "investigate", "storeb-shell-waf.html"), "utf8");
+    const shellWaf = readFileSync(join(import.meta.dirname, "fixtures", "investigate", "store-b-shell-waf.html"), "utf8");
     const product = readFileSync(join(import.meta.dirname, "fixtures", "investigate", "product.html"), "utf8");
 
     const observed: Array<{ verdict: RunVerdict; because: string }> = [
@@ -237,7 +237,7 @@ describe("the graph is connected and every state earns its place", () => {
 describe("the three defects of 2026-09-22 are each a state and a failed transition", () => {
   const cases: Array<{ defect: string; state: StateId; transition: TransitionId; guard: string }> = [
     {
-      defect: "a seasonal CSS class bound as if it were meaning (StoreA stock, body.one-col.christmas-pattern)",
+      defect: "a seasonal CSS class bound as if it were meaning (Store A stock, body.one-col.christmas-pattern)",
       state: "bound",
       transition: "accept-binding",
       guard: "selector gate",
@@ -249,7 +249,7 @@ describe("the three defects of 2026-09-22 are each a state and a failed transiti
       guard: "key-names-carry-the-signal",
     },
     {
-      defect: "two distinct facts collapsed onto one node (StoreA productName, the Organization node's name)",
+      defect: "two distinct facts collapsed onto one node (Store A productName, the Organization node's name)",
       state: "offered",
       transition: "narrow",
       guard: "json-ld-needs-product-node",

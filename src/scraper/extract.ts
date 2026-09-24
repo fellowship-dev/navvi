@@ -562,7 +562,7 @@ async function resolveDeclared(
  * `readJsonPath` and `isType` used to live here, and were one of four copies of
  * "read a path out of a declared block, optionally only off a typed node". They
  * are now `readDeclared`/`typedNodes`/`declares` in `src/declared/json.ts`,
- * which carries the StoreA encounter and the rule that `@graph` and arrays
+ * which carries the Store A encounter and the rule that `@graph` and arrays
  * are the only nesting the walk descends into. Nothing here parses a path or
  * walks a graph any more. See `docs/adr/0001-one-declared-json-reader.md`.
  */

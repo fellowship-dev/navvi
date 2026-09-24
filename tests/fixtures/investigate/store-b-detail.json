@@ -1,0 +1,47 @@
+{
+  "productData": {
+    "id": "100001",
+    "name": "Ejemplo Comprimidos 100 mg 30 Comprimidos",
+    "price": 4990,
+    "prices": {
+      "price-list-std": 4990,
+      "price-sale-std": 4491
+    },
+    "appliedPromotions": {
+      "price-sale-std": {
+        "promotionalPrice": 4491,
+        "promotionId": "SALE-10"
+      }
+    },
+    "promotions": [
+      {
+        "id": "SALE-10",
+        "isClubPromotion": false,
+        "calloutMsg": "10% de descuento"
+      },
+      {
+        "id": "CLUB-20",
+        "isClubPromotion": true,
+        "promotionalPrice": 3992,
+        "calloutMsg": "Club Store B"
+      }
+    ],
+    "hasClubPromotion": true,
+    "stock": 412,
+    "laboratory": "Laboratorio Ejemplo",
+    "activeIngredient": "Ejemplo",
+    "bioequivalence": true,
+    "pum": {
+      "value": 166,
+      "unit": "Comprimido"
+    },
+    "seo": {
+      "metaTitle": "Ejemplo Comprimidos",
+      "canonical": "/ejemplo/100001.html"
+    },
+    "telemetry": {
+      "sessionId": "a1b2c3",
+      "renderedAt": 1758560000000
+    }
+  }
+}

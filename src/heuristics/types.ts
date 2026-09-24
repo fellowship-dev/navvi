@@ -71,7 +71,7 @@ export function define<In>(heuristic: Heuristic<In>): AnyHeuristic {
 }
 
 /**
- * A case may switch a heuristic off — client's rubrics override several of these —
+ * A case may switch a heuristic off — the client's rubrics override several of these —
  * and the override is recorded rather than applied silently, so a compile that
  * went a strange way can say which rule was not allowed to speak.
  */

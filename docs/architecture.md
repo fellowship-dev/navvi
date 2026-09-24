@@ -287,7 +287,7 @@ that, and both were closed by writing the caller rather than by widening the
 list.
 
 - **`src/investigate/` (4,447 lines)** was the largest module in the repo with
-  no importer anywhere but `scripts/live-investigate.ts`. `src/reconcile/` began
+  no importer anywhere but a live smoke script (since retired from the repo). `src/reconcile/` began
   reading its manuscript, and `src/compile/proven.ts` now reads it too — for
   `FieldRecord.rejected`, the candidates a tier considered and did not bind,
   which is the half of the rationale that says what a binding *beat*.

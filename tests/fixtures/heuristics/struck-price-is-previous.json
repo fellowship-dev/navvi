@@ -1,9 +1,9 @@
 {
   "heuristic": "struck-price-is-previous",
-  "encounter": "StoreC, 2026-09-22. The list price was struck through, and the compiled path to it ran fourteen levels deep from body.modal-open.",
+  "encounter": "Store C, 2026-09-22. The list price was struck through, and the compiled path to it ran fourteen levels deep from body.modal-open.",
   "cases": [
     {
-      "name": "StoreC strikes the list price and leaves the offer plain",
+      "name": "Store C strikes the list price and leaves the offer plain",
       "observation": {
         "candidates": [
           {

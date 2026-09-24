@@ -646,7 +646,7 @@ describe("the round trip: manuscript -> reconcile -> compile -> extract", () => 
   });
 
   /**
-   * The StoreA defect, riding through the whole pipeline rather than
+   * The Store A defect, riding through the whole pipeline rather than
    * through a unit test of the reader.
    *
    * The fixture page's `@graph` leads with an Organization and a WebSite, both

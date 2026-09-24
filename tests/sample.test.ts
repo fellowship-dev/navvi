@@ -56,7 +56,7 @@ function probeOf(kind: Kind, url: string): UrlProbe {
     case "gone":
       return { url, status: 404 };
     case "no-product":
-      // StoreA's shape: a 200 that declares Organization and no Product.
+      // Store A's shape: a 200 that declares Organization and no Product.
       return { url, status: 200, hasDeclaredProduct: false, isShell: false };
     case "blocked":
       return { url, status: 403 };
@@ -295,7 +295,7 @@ describe("chooseSample — the degenerate catalogues, answered honestly", () => 
     expect(shell.strata).not.toContain("dead");
     expect(shell.excluded).toBeUndefined();
 
-    // A real page that declares nothing is still dead -- the StoreA case.
+    // A real page that declares nothing is still dead -- the Store A case.
     const served = classify({ url: `${HOST}/producto/y`, status: 200, hasDeclaredProduct: false, isShell: false });
     expect(served.strata).toContain("dead");
     expect(served.signature).toBe("dead:no-product");

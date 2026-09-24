@@ -19,7 +19,7 @@ import { chooseSample, type UrlProbe } from "../src/investigate/sample.js";
  */
 
 const DIR = join(import.meta.dirname, "fixtures", "investigate");
-const detail = (n: "" | "-2" | "-3" = ""): unknown => JSON.parse(readFileSync(join(DIR, `storeb-detail${n}.json`), "utf8"));
+const detail = (n: "" | "-2" | "-3" = ""): unknown => JSON.parse(readFileSync(join(DIR, `store-b-detail${n}.json`), "utf8"));
 
 /** What each sample page showed a reader, near enough to anchor against. */
 const PAGE_TEXT = [
@@ -125,8 +125,8 @@ describe("narrow", () => {
 
   it("drops a leaf whose value never changes, which is the rule that catches a site name", () => {
     const constant: Leaf[][] = [
-      [{ path: "a.brand", value: "StoreA" }, { path: "a.name", value: "Paracetamol" }],
-      [{ path: "a.brand", value: "StoreA" }, { path: "a.name", value: "Ibuprofeno" }],
+      [{ path: "a.brand", value: "Store A" }, { path: "a.name", value: "Paracetamol" }],
+      [{ path: "a.brand", value: "Store A" }, { path: "a.name", value: "Ibuprofeno" }],
     ];
     expect(narrow(constant).map((c) => c.path)).toEqual(["a.name"]);
     expect(narrow(constant, { requireVariation: false }).map((c) => c.path)).toEqual(["a.brand", "a.name"]);
@@ -199,7 +199,7 @@ describe("bindField — the bank's first consumer", () => {
  * view, and `catalog-svc/products/detail` is missing from one capture
  * while the page that produced it rendered perfectly well. Before 2026-09-23
  * that deleted the endpoint for all three samples and the run bound nothing:
- * `npm run smoke:live -- "Store B"` returned `0 of 5 bound` instead of
+ * a live smoke run against Store B returned `0 of 5 bound` instead of
  * `3 of 5` three times on 2026-09-23.
  *
  * The fixture is that run and not the 2026-09-22 one, and the difference is
@@ -219,7 +219,7 @@ describe("tier 2 — an endpoint one render never asked for", () => {
     urls.map((url) => ({ url, status: 200, hasDeclaredProduct: undefined, priceCount: 2, inStock: true }) satisfies UrlProbe),
     { size: 3 },
   );
-  const pages = Object.fromEntries(urls.map((url) => [url, readFileSync(join(DIR, "storeb-shell.html"), "utf8")]));
+  const pages = Object.fromEntries(urls.map((url) => [url, readFileSync(join(DIR, "store-b-shell.html"), "utf8")]));
 
   const FIELDS: RequestedField[] = [
     { name: "productName", type: "text" },
@@ -232,7 +232,7 @@ describe("tier 2 — an endpoint one render never asked for", () => {
 
   /** What every Store B page loads for itself, answering the same bytes each time. */
   const shared = (): Capture["responses"] => [
-    { url: `${API}/shopping-basket-svc/basket`, status: 200, body: { total: 0, currency: "CLP", lines: 0 } },
+    { url: `${API}/cart-svc/basket`, status: 200, body: { total: 0, currency: "CLP", lines: 0 } },
     { url: `${API}/settings-svc/coverage`, status: 200, body: { coverage: [{ comuna: "Centro", despacho: true }] } },
   ];
 

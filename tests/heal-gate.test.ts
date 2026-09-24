@@ -144,7 +144,7 @@ describe("U9c: mayHeal at the call site", () => {
       evidence({
         pages: [asResponse("https://example.test/p/1", refusalPage), asResponse("https://example.test/p/2", refusalPage), asResponse("https://example.test/p/3", refusalPage)],
         fields: { name: { filled: 3, total: 3 }, price: { filled: 0, total: 3 } },
-        // The StoreC shape: the one field that fills, fills identically every time.
+        // The Store C shape: the one field that fills, fills identically every time.
         values: { name: ["No podemos mostrar esta pagina", "No podemos mostrar esta pagina", "No podemos mostrar esta pagina"], price: [null, null, null] },
       }),
     );
@@ -244,7 +244,7 @@ describe("U9b: an alternative that keeps working outranks one that keeps failing
   it("the correct selector healing left second moves first, unattended, on the run after the repair", () => {
     const scraper = scraperWith(2);
     const tally: ResolutionTally = {};
-    // StoreC's shape: the compiled selector answers nothing, the appended one
+    // Store C's shape: the compiled selector answers nothing, the appended one
     // answers every row, and nobody is asked anything.
     for (let item = 0; item < 111; item++) observeResolutions(tally, { productName: 1, sku: 0 });
 
@@ -469,7 +469,7 @@ describe("U9b end to end: the selector healing left second moves first, unattend
     const key = cacheKey(templateKey, { fields: ["name", "stock"], profile: "store" });
     const store = await ScraperStore.open({ actor });
     /**
-     * The state StoreC was left in: the compiled selector is dead, healing
+     * The state Store C was left in: the compiled selector is dead, healing
      * found the right one and appended it second, and the scraper carries
      * `healedAt`. Nothing in this run heals — the first alternative simply
      * never answers and the second always does.

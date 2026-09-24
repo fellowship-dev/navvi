@@ -346,7 +346,7 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
    * The sample and the binding set are not the same list.
    *
    * A `dead` pick belongs in the sample — reproducing a blank is parity, and on
-   * StoreA 73% of the catalogue redirects — but it declares no product and
+   * Store A 73% of the catalogue redirects — but it declares no product and
    * carries no payload, so including it in the binding set deletes every
    * candidate for every field ("present on every sample"). `bindable` decides
    * which is which, so this module does not get a second opinion — and it is
@@ -435,7 +435,7 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
    * The render, taken once and shared.
    *
    * Tier 2 is still the only thing that *binds* from a capture, and the
-   * StoreA run still never reaches for one. What changed is that a run the
+   * Store A run still never reaches for one. What changed is that a run the
    * transport could not settle may now ask for the same render early, to find
    * out whether the shell it fetched fills or refuses — and it must not then
    * pay for a second one.
@@ -482,7 +482,7 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
   /**
    * Blocked before bound, and this order is the whole of U3a.
    *
-   * StoreC's run came back `sku 0/111`, `stock 0/111` and `¡Lo sentimos!`
+   * Store C's run came back `sku 0/111`, `stock 0/111` and `¡Lo sentimos!`
    * sitting where a product name belongs — 111/111 filled, every type checked.
    * Binding against that page learns the apology as the product name, which is
    * why nothing below this line runs when the transport says the site refused
@@ -604,7 +604,7 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
    *
    * `declared-covers-spec` is handed the *bound* record — what tier 1 settled,
    * per field — and answers whether the run may stop before a browser is
-   * opened. On StoreA all five requested fields were stated by the page, so
+   * opened. On Store A all five requested fields were stated by the page, so
    * tiers 2 and 3 were pure waste, and the run spent them anyway for want of
    * anyone asking.
    */
@@ -729,7 +729,7 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
      * nondeterministically — a fetch still in flight when the capture closed,
      * a lazy component that did not come into view — and an endpoint nobody
      * failed to serve is deleted for every sample because one of them never
-     * got round to asking. `npm run smoke:live -- "Store B"` returned
+     * got round to asking. a live smoke run against Store B returned
      * `0 of 5 bound` instead of `3 of 5` roughly one run in three — observed
      * three times on 2026-09-23 — and the missing call was `products/detail`
      * every time.
@@ -1032,7 +1032,7 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
  * Anchoring asks whether a value appears in what the page showed a reader, which
  * is exactly right for a captured payload full of telemetry and someone else's
  * products. Applied to a declaration it deletes the two fields tier 1 is best
- * at: StoreA's sku `8820237` is never rendered anywhere on the page, and its
+ * at: Store A's sku `8820237` is never rendered anywhere on the page, and its
  * availability renders as "Disponible" while the machine reading is "in stock".
  * A declared `Product` node has already been vouched for by
  * `json-ld-needs-product-node`; it does not also have to be visible.
@@ -1052,8 +1052,8 @@ function bindDeclared(samples: readonly DeclaredSample[], fields: readonly Reque
         continue;
       }
       /**
-       * A value identical across every sample is not a field. StoreA's
-       * `productName` came back as "StoreA" on all 33 samples; the rule
+       * A value identical across every sample is not a field. Store A's
+       * `productName` came back as "Store A" on all 33 samples; the rule
        * catches it without knowing anything about schema.org, and it is the
        * same invariant the client admission loop applies *after* a compile, moved
        * to where it prevents the defect instead of detecting it.
@@ -1136,7 +1136,7 @@ function takeByKeyNames(samples: readonly DeclaredSample[], field: RequestedFiel
  *
  * Preference order matters: a page that declares a product is one the site
  * served properly, and the declared-`Product` conjunct is the load-bearing half
- * of `checkCanary` — word overlap alone would not have caught StoreC, whose
+ * of `checkCanary` — word overlap alone would not have caught Store C, whose
  * apology keeps half the canary's vocabulary.
  *
  * Shells never reach here: the caller filters them out, and takes a rendered

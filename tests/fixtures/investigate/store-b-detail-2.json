@@ -1,0 +1,41 @@
+{
+  "productData": {
+    "id": "100002",
+    "name": "Otro Jarabe 120 ml",
+    "price": 12990,
+    "prices": {
+      "price-list-std": 12990,
+      "price-sale-std": 11691
+    },
+    "appliedPromotions": {
+      "price-sale-std": {
+        "promotionalPrice": 11691,
+        "promotionId": "SALE-10"
+      }
+    },
+    "promotions": [
+      {
+        "id": "SALE-10",
+        "isClubPromotion": false,
+        "calloutMsg": "10% de descuento"
+      }
+    ],
+    "hasClubPromotion": false,
+    "stock": 57,
+    "laboratory": "Laboratorio Otro",
+    "activeIngredient": "Otro",
+    "bioequivalence": true,
+    "pum": {
+      "value": 108,
+      "unit": "ml"
+    },
+    "seo": {
+      "metaTitle": "Otro Jarabe",
+      "canonical": "/otro/100002.html"
+    },
+    "telemetry": {
+      "sessionId": "d4e5f6",
+      "renderedAt": 1758560999000
+    }
+  }
+}

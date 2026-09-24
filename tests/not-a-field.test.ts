@@ -61,7 +61,7 @@ async function run(): Promise<Manuscript> {
 
 const field = (manuscript: Manuscript, name: string): Manuscript["fields"][number] => manuscript.fields.find((entry) => entry.field === name)!;
 
-describe('U6c: "StoreA" on every sample, rejected', () => {
+describe('U6c: "Store A" on every sample, rejected', () => {
   it("refuses the name, and says which rule refused it and why", async () => {
     const name = field(await run(), "productName");
 
@@ -72,11 +72,11 @@ describe('U6c: "StoreA" on every sample, rejected', () => {
 
     const rejection = name.rejected.find((entry) => entry.values.length === 2)!;
     expect(rejection.tier).toBe(1);
-    expect(rejection.values).toEqual(["StoreA", "StoreA"]);
+    expect(rejection.values).toEqual(["Store A", "Store A"]);
 
     const verdict = name.verdicts.find((entry) => entry.id === "no-variation-no-field")!.verdict;
     expect(verdict.fires).toBe(true);
-    expect(verdict.because).toBe('productName is "StoreA" on all 2 samples');
+    expect(verdict.because).toBe('productName is "Store A" on all 2 samples');
     expect(verdict.action).toBe("reject this candidate: it is describing the site, not the record");
     // The manuscript carries the reason, not just the outcome: the rejection is
     // written in the rule's words rather than restated in the cascade's.
@@ -133,7 +133,7 @@ describe('U6c: "StoreA" on every sample, rejected', () => {
  * text — is what the bank is given.
  */
 describe("U6c: a value that varies, that no reader ever saw", () => {
-  const payload = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures", "investigate", "storeb-detail.json"), "utf8")) as unknown;
+  const payload = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures", "investigate", "store-b-detail.json"), "utf8")) as unknown;
   const PAGE_TEXT = "Ejemplo Comprimidos 100 mg 30 Comprimidos $ 4.990 $ 4.491 Club Store B $ 3.992 Laboratorio Ejemplo";
 
   /** One leaf of the payload, as `InventoryRecord` carries it: path, values, anchored. */

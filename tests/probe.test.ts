@@ -9,7 +9,7 @@ import { chooseSample, classify, probeFrom, type PageResponse, type UrlProbe } f
  *
  * `chooseSample` and `classify` are covered by 21 tests and every input any of
  * them had ever seen was a hand-written literal. The only code that turned a
- * real page into a `UrlProbe` was `probeOf` in `scripts/live-investigate.ts` —
+ * real page into a `UrlProbe` was `probeOf` in the live smoke script —
  * outside `src/`, untested, and carrying its own copy of the shell rule:
  *
  *     isShell: visibleText(body).length < 400 && /<script[^>]+src=/i.test(body) && !declared
@@ -30,12 +30,12 @@ const DIR = join(import.meta.dirname, "fixtures", "investigate");
 const html = (name: string): string => readFileSync(join(DIR, `${name}.html`), "utf8");
 
 const PRODUCT = html("product");
-const SHELL = html("storeb-shell");
-const SHELL_WAF = html("storeb-shell-waf");
-const REDIRECT = html("storea-redirect");
+const SHELL = html("store-b-shell");
+const SHELL_WAF = html("store-b-shell-waf");
+const REDIRECT = html("store-a-redirect");
 const FORBIDDEN = html("forbidden");
 
-/** One plain fetch, in the shape `plainFetch` in `scripts/live-investigate.ts` returns. */
+/** One plain fetch, in the shape `plainFetch` in the live smoke script returns. */
 function fetched(url: string, status: number, body: string, landedOn = url): PageResponse {
   return { url: landedOn, status, body };
 }

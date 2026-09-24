@@ -1,6 +1,6 @@
 {
   "heuristic": "url-variant-beats-master",
-  "encounter": "StoreA, 2026-09-22. The URL asked for variant 883052 while the page declared master SKU 8820237; the caller asked for the variant.",
+  "encounter": "Store A, 2026-09-22. The URL asked for variant 883052 while the page declared master SKU 8820237; the caller asked for the variant.",
   "cases": [
     {
       "name": "the URL names the variant the caller asked for",

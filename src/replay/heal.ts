@@ -36,7 +36,7 @@ import { withCss } from "../navigate/trace.js";
  *    `createHealer()` unconditionally and `classifyRun` had no importer in this
  *    module at all: the guarantee that "healing must never fire on a blocked
  *    page" was real in the type system — `heal: true` exists only on
- *    `DriftVerdict` — and unenforced in the run. A recompile against StoreC's
+ *    `DriftVerdict` — and unenforced in the run. A recompile against Store C's
  *    "¡Lo sentimos!" page was reachable in the code the whole time.
  *  - **U9b, `judgePromotions`.** An alternative that keeps working outranks one
  *    that keeps failing, so the cascade stops paying for a dead first
@@ -372,7 +372,7 @@ export function createHealer(): HealerHook {
  * member of it. A verdict computed once at the start would have been a verdict
  * about a run that had not happened; a verdict computed from this page alone
  * could not see the apology shape, which is a statement about a corpus and the
- * only thing that caught StoreC without a canary.
+ * only thing that caught Store C without a canary.
  *
  * What is deliberately *not* in here: a threshold, a page count, a "once the
  * run has enough" clause. Healing is the operation where a gate that is
@@ -386,7 +386,7 @@ export interface HealEvidence {
    *
    * Failures only, and that is the right corpus rather than a saving: the
    * question is "may I learn from this page", so the population is the pages a
-   * repair would be learned from. StoreC's 111 failures are 111 copies of one
+   * repair would be learned from. Store C's 111 failures are 111 copies of one
    * apology and `apologySignals` sees that; the pharmacy redesign's 12 failures
    * are 12 different product pages and it does not.
    */
@@ -405,7 +405,7 @@ export interface HealEvidence {
   /**
    * The values each field actually produced on them, so `no-variation-no-field`
    * runs inside `classifyRun` rather than being trusted to the caller. This is
-   * the half a fill rate cannot see: StoreC's `product_name` was 111/111
+   * the half a fill rate cannot see: Store C's `product_name` was 111/111
    * filled with "¡Lo sentimos!", which is a collapse wearing a healthy number.
    */
   values: Readonly<Record<string, ReadonlyArray<string | number | null>>>;
@@ -654,7 +654,7 @@ export interface PromotionOptions {
    *
    * A healed alternative did not exist for the first part of the run, so its
    * count and the incumbent's were taken over different sets of pages, and
-   * comparing them is comparing two different measurements. StoreC's
+   * comparing them is comparing two different measurements. Store C's
    * promotion is described as happening *unattended* for exactly this reason:
    * the repair is one run's work and the promotion is the next run's evidence
    * that it was the right one.

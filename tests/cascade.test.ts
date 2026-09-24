@@ -15,17 +15,17 @@ import { chooseSample, type UrlProbe } from "../src/investigate/sample.js";
  * Every test here is offline by construction — `investigate` never fetches or
  * renders anything, it asks the two callbacks it was handed — and that is the
  * point rather than a convenience. The value of a cascade is the call it does
- * **not** make, so the StoreA test below asserts that `capture` was never
+ * **not** make, so the Store A test below asserts that `capture` was never
  * invoked, which is only assertable because `capture` is something the test owns.
  *
  * The three store shapes the plan names are the three `describe` blocks:
- * StoreA stops at tier 1, Store B skips tier 1 as a shell and binds from
+ * Store A stops at tier 1, Store B skips tier 1 as a shell and binds from
  * the payload, and a blocked run reports `blocked` without binding anything.
  */
 
 const DIR = join(import.meta.dirname, "fixtures", "investigate");
 const page = (name: string): string => readFileSync(join(DIR, `${name}.html`), "utf8");
-const detail = (n: "" | "-2" | "-3" = ""): unknown => JSON.parse(readFileSync(join(DIR, `storeb-detail${n}.json`), "utf8"));
+const detail = (n: "" | "-2" | "-3" = ""): unknown => JSON.parse(readFileSync(join(DIR, `store-b-detail${n}.json`), "utf8"));
 
 /** The clock, injected: a manuscript that moves between two identical runs is not diffable. */
 const NOW = new Date("2026-09-22T18:00:00.000Z");
@@ -107,7 +107,7 @@ describe("roles — a declared property is a lookup, not a search", () => {
 
 // ------------------------------------------------- shape 1: stop at tier 1
 
-describe("StoreA — the run stops at tier 1", () => {
+describe("Store A — the run stops at tier 1", () => {
   const probes: UrlProbe[] = [
     live("https://example.test/p/complejo-b", { priceCount: 2, inStock: true }),
     live("https://example.test/p/vitamina-c", { priceCount: 2, inStock: false }),
@@ -115,9 +115,9 @@ describe("StoreA — the run stops at tier 1", () => {
   ];
   const sample = chooseSample(probes, { size: 3 });
   const pages = {
-    "https://example.test/p/complejo-b": page("storea-product"),
-    "https://example.test/p/vitamina-c": page("storea-product-2"),
-    "https://example.test/p/descontinuado": page("storea-redirect"),
+    "https://example.test/p/complejo-b": page("store-a-product"),
+    "https://example.test/p/vitamina-c": page("store-a-product-2"),
+    "https://example.test/p/descontinuado": page("store-a-redirect"),
   };
 
   async function run(): Promise<{ manuscript: Manuscript; sources: ReturnType<typeof sourcesOf> }> {
@@ -253,9 +253,9 @@ describe("a mixed sample — one shell must not delete tier 1 for the pages that
   ];
   const sample = chooseSample(probes, { size: 3 });
   const pages = {
-    [REAL[0]!]: page("storea-product"),
-    [REAL[1]!]: page("storea-product-2"),
-    [SHELL]: page("storeb-shell"),
+    [REAL[0]!]: page("store-a-product"),
+    [REAL[1]!]: page("store-a-product-2"),
+    [SHELL]: page("store-b-shell"),
   };
 
   async function run(): Promise<{ manuscript: Manuscript; sources: ReturnType<typeof sourcesOf> }> {
@@ -318,8 +318,8 @@ describe("Store B — tier 1 is skipped as a shell and the payload answers", () 
   );
 
   const pages = {
-    "https://example.test/p/100001": page("storeb-shell"),
-    "https://example.test/p/100002": page("storeb-shell"),
+    "https://example.test/p/100001": page("store-b-shell"),
+    "https://example.test/p/100002": page("store-b-shell"),
   };
   /** What each rendered page showed a reader, near enough to anchor against. */
   const TEXT = [
@@ -454,7 +454,7 @@ describe("Store B, three samples — one product the store cannot serve must not
     urls.map((url) => live(url, { hasDeclaredProduct: undefined, priceCount: 2, inStock: true })),
     { size: 3 },
   );
-  const pages = Object.fromEntries(urls.map((url) => [url, page("storeb-shell")]));
+  const pages = Object.fromEntries(urls.map((url) => [url, page("store-b-shell")]));
 
   /**
    * The dozen endpoints every Store B page loads for itself, answering the
@@ -465,14 +465,14 @@ describe("Store B, three samples — one product the store cannot serve must not
   function noise(basketId: string): Capture["responses"] {
     const api = "https://api.example.test";
     return [
-      { url: `${api}/customer-svc/login`, status: 200, body: { authType: "guest", locale: "es-CL" } },
+      { url: `${api}/account-svc/login`, status: 200, body: { authType: "guest", locale: "es-CL" } },
       { url: "https://profiles.example.test/identity/v1/client/auth", status: 200, body: { granted: true, scope: "anonymous" } },
       { url: `${api}/catalog-svc/categories/category-tree`, status: 200, body: { categories: [{ id: "medicamentos", name: "Medicamentos" }] } },
       { url: `${api}/catalog-svc/zones`, status: 200, body: { zones: [{ id: "Zona0001", name: "Centro" }] } },
       { url: `${api}/settings-svc/coverage`, status: 200, body: { coverage: [{ comuna: "Centro", despacho: true }] } },
-      { url: `${api}/shopping-basket-svc/basket`, status: 200, body: { total: 0, currency: "CLP", lines: 0 } },
-      { url: `${api}/shopping-basket-svc/basket/detail/${basketId}`, status: 200, body: { id: basketId, total: 0, savings: 0 } },
-      { url: `${api}/shopping-basket-svc/config/preferences`, status: 200, body: { pickup: true } },
+      { url: `${api}/cart-svc/basket`, status: 200, body: { total: 0, currency: "CLP", lines: 0 } },
+      { url: `${api}/cart-svc/basket/detail/${basketId}`, status: 200, body: { id: basketId, total: 0, savings: 0 } },
+      { url: `${api}/cart-svc/config/preferences`, status: 200, body: { pickup: true } },
       { url: "https://cdn.example.test/spaces/abc123/environments/master/entries", status: 200, body: { items: [{ headline: "Club" }] } },
       { url: "https://connect.example.test/app_config/json/244320463907739/", status: 200, body: { enabled: true } },
       { url: `${api}/catalog-svc/products/breadcrumbs/${ids[0]}`, status: 200, body: { crumbs: ["Medicamentos"] } },
@@ -731,11 +731,11 @@ describe("Store B behind Imperva — the plain fetch looks refused and the rende
     { size: 3 },
   );
   /** Every binding URL answers the same shell, marker and all. 3 of 3, as the live run did. */
-  const pages = Object.fromEntries(URLS.map((url) => [url, page("storeb-shell-waf")]));
+  const pages = Object.fromEntries(URLS.map((url) => [url, page("store-b-shell-waf")]));
 
   /** A third payload, by substitution: what is under test is the cascade, not a third JSON file. */
   const THIRD: unknown = JSON.parse(
-    readFileSync(join(DIR, "storeb-detail.json"), "utf8")
+    readFileSync(join(DIR, "store-b-detail.json"), "utf8")
       .replace(/100001/g, "100003")
       .replace(/Ejemplo Comprimidos 100 mg 30 Comprimidos/g, "Tercero Comprimidos 50 mg 10 Comprimidos")
       .replace(/4990/g, "8990")
@@ -808,7 +808,7 @@ describe("Store B behind Imperva — the plain fetch looks refused and the rende
   });
 
   it("still reports blocked when the render produces an apology, and binds nothing", async () => {
-    // The StoreC shape arriving one tier later: the shell fills, with the
+    // The Store C shape arriving one tier later: the shell fills, with the
     // store's error page. Substantial text, no declared product, the same
     // document on every URL — and `apologySignals` has it.
     const apology = page("apology");
@@ -843,7 +843,7 @@ describe("a blocked run — reported, never bound from", () => {
 
   it("reports blocked with a remedy and binds nothing", async () => {
     const sources = sourcesOf(pages, {});
-    const manuscript = await investigate({ site: "storec.cl", fields: FIELDS, sample, sources, now: NOW });
+    const manuscript = await investigate({ site: "store-c.example", fields: FIELDS, sample, sources, now: NOW });
     expect(manuscript.verdict).toBe("blocked");
     expect(manuscript.because).toContain("enable-proxy");
     // The apology was 111/111 filled on the day this rule was written, and a
@@ -855,7 +855,7 @@ describe("a blocked run — reported, never bound from", () => {
 
   it("skips every tier and says the same reason in each", async () => {
     const sources = sourcesOf(pages, {});
-    const manuscript = await investigate({ site: "storec.cl", fields: FIELDS, sample, sources, now: NOW });
+    const manuscript = await investigate({ site: "store-c.example", fields: FIELDS, sample, sources, now: NOW });
     for (const n of [1, 2, 3] as const) expect(tier(manuscript, n).outcome).toBe("skipped");
     expect(tier(manuscript, 2).because).toContain("destroyed by its own repair");
     expect(manuscript.obstacles.some((obstacle) => obstacle.kind === "apology" && obstacle.blocking)).toBe(true);
@@ -866,7 +866,7 @@ describe("a blocked run — reported, never bound from", () => {
 
 // ------------------------------------------- the fourth shape, for the record
 
-describe("StoreC — four fields declared, and the list price alone reaches tier 3", () => {
+describe("Store C — four fields declared, and the list price alone reaches tier 3", () => {
   /**
    * The second sample is the first with its values substituted rather than a
    * second fixture: what is under test is the cascade's arithmetic over two
@@ -874,7 +874,7 @@ describe("StoreC — four fields declared, and the list price alone reaches tier
    * availability is changed too, because a value identical across every sample
    * is not a field and the rule would rightly refuse it.
    */
-  const first = page("storec-product");
+  const first = page("store-c-product");
   const second = first
     .replace(/Ejemplo Ibuprofeno 400 mg 20 Comprimidos/g, "Ejemplo Paracetamol 500 mg 16 Comprimidos")
     .replace(/300123/g, "300124")
@@ -886,7 +886,7 @@ describe("StoreC — four fields declared, and the list price alone reaches tier
 
   it("gives the unqualified offer price to what you pay today and leaves the list price for the DOM", async () => {
     const sources = sourcesOf({ "https://example.test/a/1": first, "https://example.test/a/2": second });
-    const manuscript = await investigate({ site: "storec.cl", fields: FIELDS, sample, sources, view: bank(), now: NOW });
+    const manuscript = await investigate({ site: "store-c.example", fields: FIELDS, sample, sources, view: bank(), now: NOW });
     expect(field(manuscript, "promoPrice").path).toBe("offers.price");
     expect(field(manuscript, "productName").path).toBe("name");
     expect(field(manuscript, "sku").path).toBe("sku");
@@ -904,7 +904,7 @@ describe("StoreC — four fields declared, and the list price alone reaches tier
 
 describe("a HAR compiles the same scraper a live render would", () => {
   /**
-   * U2e's whole argument, run end to end: StoreC serves an apology page to a
+   * U2e's whole argument, run end to end: Store C serves an apology page to a
    * datacenter IP while the same URLs read perfectly from a laptop in
    * Valdivia. A capture taken by hand on the machine the store answers is the
    * same `{url,status,body}` list the live capture makes, so the cascade

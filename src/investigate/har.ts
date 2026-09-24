@@ -11,7 +11,7 @@ import type { CapturedResponse } from "../browser/network-capture.js";
  * and `resolveDeclared` at replay) cannot tell the two apart. That is the whole
  * point of this module: one shape, two ways of filling it.
  *
- * Why it exists: StoreC serves an apology page to a datacenter IP — a run from
+ * Why it exists: Store C serves an apology page to a datacenter IP — a run from
  * Apify came back with `sku 0/111`, `stock 0/111` and `¡Lo sentimos!` sitting
  * where a product name belongs — while the same URLs read perfectly from a
  * laptop in Valdivia. Importing a capture separates *can we build this* from

@@ -1,0 +1,46 @@
+<!doctype html>
+<!--
+  Synthetic. Shape probed off a live Store C product page on
+  2026-09-22: a bare JSON-LD Product block, no @graph, with the offer nested
+  one level down.
+
+  The compiled scraper for this store read
+  `:scope > body.modal-open > … > span.value:nth-of-type(1)` — a modal-state
+  class — for the same price the page states at offers.price. The <del> below
+  is the list price, which is the encounter behind `struck-price-is-previous`.
+-->
+<html lang="es">
+  <head>
+    <title>Ejemplo Ibuprofeno 400 mg 20 Comprimidos</title>
+    <meta charset="utf-8" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org/",
+        "@type": "Product",
+        "name": "Ejemplo Ibuprofeno 400 mg 20 Comprimidos",
+        "sku": "300123",
+        "brand": { "@type": "Brand", "name": "Laboratorio Ejemplo" },
+        "offers": {
+          "@type": "Offer",
+          "price": "5490",
+          "priceCurrency": "CLP",
+          "availability": "https://schema.org/InStock",
+          "url": "https://example.test/ejemplo-ibuprofeno-400"
+        }
+      }
+    </script>
+    <script type="application/ld+json">
+      { "@context": "https://schema.org/", "@type": "BreadcrumbList", "itemListElement": [] }
+    </script>
+    <script type="application/ld+json">
+      { this is not json
+    </script>
+  </head>
+  <body class="modal-open">
+    <main>
+      <h1>Ejemplo Ibuprofeno 400 mg 20 Comprimidos</h1>
+      <del><span class="value">$ 6.990</span></del>
+      <span class="value">$ 5.490</span>
+    </main>
+  </body>
+</html>

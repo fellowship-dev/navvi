@@ -49,7 +49,7 @@ describe("merge rules (R31, R32)", () => {
    * become is this file's.
    */
   describe("promoteFieldAlternative (U9b)", () => {
-    /** The StoreC shape: the compiled selector first, the repair behind it. */
+    /** The Store C shape: the compiled selector first, the repair behind it. */
     const withThree = () => {
       const alt = (selector: string) => ({ selector, fingerprint: { samples: ["Python dev"], shape: "text" as const } });
       return appendFieldAlternative(appendFieldAlternative(loginFixture(), "title", alt("h1.title")), "title", alt("h3 a"));

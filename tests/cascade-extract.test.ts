@@ -52,7 +52,7 @@ describe("field sources", () => {
     const [network, jsonLd, dom] = scraper.fields.listPrice!.alternatives;
     expect(scraper.fields.listPrice!.alternatives).toHaveLength(3);
     expect(network).toMatchObject({ source: "network", match: "catalog-svc/products/detail", path: "productData.prices[price-list-std]" });
-    // The entity is the half that stops the StoreA Organization answering as the Product.
+    // The entity is the half that stops the Store A Organization answering as the Product.
     expect(jsonLd).toMatchObject({ source: "json-ld", path: "offers.price", entity: "Product" });
     // No source at all is a DOM selector, exactly as before.
     expect(dom!.source).toBeUndefined();
@@ -62,9 +62,9 @@ describe("field sources", () => {
 /**
  * The bug that a platform run caught and no unit test would have.
  *
- * StoreA's JSON-LD is an `@graph` holding Organization, WebSite and
+ * Store A's JSON-LD is an `@graph` holding Organization, WebSite and
  * Product. Searching it for the first node where `name` resolves finds the
- * Organization and returns "StoreA" -- as the *product name*, on all 33
+ * Organization and returns "Store A" -- as the *product name*, on all 33
  * URLs that redirect away from their product page. Those rows carried a name, a
  * SKU taken from the URL and a price from a surviving meta tag, so they passed
  * every "did it extract?" check and would have gone into a price index as real
@@ -77,8 +77,8 @@ describe("reading a value out of a JSON-LD graph", () => {
   const storeaGraph = {
     "@context": "https://schema.org",
     "@graph": [
-      { "@type": ["Organization", "OnlineStore"], name: "StoreA", url: "https://store-a.example/" },
-      { "@type": "WebSite", name: "StoreA" },
+      { "@type": ["Organization", "OnlineStore"], name: "Store A", url: "https://store-a.example/" },
+      { "@type": "WebSite", name: "Store A" },
       { "@type": "Product", name: "Norvasc (R) Amlodipino 5mg 30 Comprimidos", sku: "2562507" },
     ],
   };
@@ -100,7 +100,7 @@ describe("reading a value out of a JSON-LD graph", () => {
   });
 
   it("a page with no Product node yields nothing, which is the honest answer", () => {
-    const redirected = { "@context": "https://schema.org", "@graph": [{ "@type": "Organization", name: "StoreA" }] };
+    const redirected = { "@context": "https://schema.org", "@graph": [{ "@type": "Organization", name: "Store A" }] };
     expect(declared(redirected, "name", "Product")).toBeUndefined();
   });
 
@@ -128,7 +128,7 @@ describe("reading a value out of a JSON-LD graph", () => {
     const withRelated = {
       "@context": "https://schema.org",
       "@graph": [
-        { "@type": "Organization", name: "StoreA" },
+        { "@type": "Organization", name: "Store A" },
         {
           "@type": "WebPage",
           isSimilarTo: { "@type": "Product", name: "Losartan 50mg", offers: { price: "1990" } },

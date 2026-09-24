@@ -8,7 +8,7 @@ import type { Canary } from "../scraper/schema.js";
  * U3a and U3b: is the run broken, or is the site refusing you?
  *
  * On 2026-09-22 those two were indistinguishable and it cost a full day.
- * StoreC came back `sku 0/111, stock 0/111, prices 3/111` and **"¡Lo
+ * Store C came back `sku 0/111, stock 0/111, prices 3/111` and **"¡Lo
  * sentimos!" as the product name** — its error page, served to Apify's
  * datacenter IPs. The same URLs read perfectly from a laptop. The *legacy*
  * scraper carries the same no-proxy config and fails on 71 of 114 URLs, so a
@@ -193,7 +193,7 @@ function similarity(a: ReadonlySet<string>, b: ReadonlySet<string>): number {
  * The apology fingerprint — **a shape, never a phrase list.**
  *
  * `¡Lo sentimos!` is the example, not the rule. A list of apologetic Spanish
- * strings would have caught StoreC on 2026-09-22 and nothing else: it fails on
+ * strings would have caught Store C on 2026-09-22 and nothing else: it fails on
  * the next store, the next locale, and the same store the week it rewords its
  * error page. So the rule is the invariant underneath, which is
  * language-independent and site-independent:
@@ -208,7 +208,7 @@ function similarity(a: ReadonlySet<string>, b: ReadonlySet<string>): number {
  * (3) is the decisive one and the reason this function takes a corpus rather
  * than a page. A catalogue is per-product by construction: two product pages
  * differ because the products differ. An error page is one document served for
- * every URL you ask for. StoreC's run is exactly that — 111 URLs, one page,
+ * every URL you ask for. Store C's run is exactly that — 111 URLs, one page,
  * and its name field 111/111 filled with the apology, which is why a fill rate
  * alone called it healthy.
  *
@@ -355,7 +355,7 @@ export interface CanaryReading {
  * moment healing is what is needed. It is allowed to be wrong in the direction
  * of "resolved"; being wrong in the direction of "failed" costs a repair.
  *
- * Note what is *not* enough: a 200. StoreC served its apology page with a
+ * Note what is *not* enough: a 200. Store C served its apology page with a
  * normal status and a rendered body, so a status check alone would have called
  * the canary resolved and the run drift. A canary with no body read is
  * `unchecked`, never `resolved`.
@@ -380,7 +380,7 @@ export function checkCanary(
   /**
    * The sharpest evidence the canary has, and it is free.
    *
-   * A store's error page keeps the store's furniture — StoreC's did — so the
+   * A store's error page keeps the store's furniture — Store C's did — so the
    * word overlap below cannot separate "apology with a nav bar" from "product
    * page" on its own. What an apology never has is a declared `Product`. If the
    * canary declared one when it was recorded and declares none now, whatever
@@ -420,7 +420,7 @@ export function checkCanary(
  *
  * `group` and `note` are free for the case to fill because the measurement does
  * not generalise. Apify Proxy's default pool and `BUYPROXIES94952` recovered
- * very different fractions of the same six StoreC URLs on 2026-09-22, and
+ * very different fractions of the same six Store C URLs on 2026-09-22, and
  * neither number is advice about any other store or any other week — it is a
  * measurement the case should carry, not a constant this module should hold.
  */
@@ -461,7 +461,7 @@ export interface DriftVerdict extends VerdictBase {
   /**
    * The only place this flag exists. Healing reads the verdict, not the fill
    * counts, so "recompile against whatever the page shows now" is unreachable
-   * from a blocked run — which is the point, because the page an StoreC
+   * from a blocked run — which is the point, because the page a Store C
    * recompile would have learned from said "¡Lo sentimos!".
    */
   heal: true;
@@ -599,7 +599,7 @@ export interface RunInput {
   /**
    * Per-field values across samples. When given, the constant fields are
    * derived here by running `no-variation-no-field` rather than being declared
-   * by the caller — which is the StoreC trap closed end to end: the apology was
+   * by the caller — which is the Store C trap closed end to end: the apology was
    * 111/111 filled and identical, and only the variation check sees that.
    */
   values?: Readonly<Record<string, ReadonlyArray<string | number | null>>>;
@@ -676,7 +676,7 @@ export function classifyRun(input: RunInput): RunVerdict {
   const remedy: Remedy = { ...DEFAULT_REMEDY, ...input.remedy };
 
   // A field that filled but never varied is collapsed too, and only the
-  // variation rule can tell. StoreC's product_name is the case: 111/111.
+  // variation rule can tell. Store C's product_name is the case: 111/111.
   const constant = new Set(input.constant ?? []);
   for (const [field, values] of Object.entries(input.values ?? {})) {
     if (values.length < 2) continue;

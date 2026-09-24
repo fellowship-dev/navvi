@@ -76,16 +76,16 @@ const MAX_TYPED = 50;
  * `@graph`, and **nowhere else**. `visit` returns `true` to stop the walk.
  *
  * The refusal is the load-bearing half. A page is free to bury its Product
- * beside its Organization (StoreA does), so the walk descends through
+ * beside its Organization (Store A does), so the walk descends through
  * arrays — a page ships several blocks and a block may itself be a list — and
  * into `@graph`, one block holding several nodes.
  *
  * It deliberately descends nowhere else. A Product hanging off `isSimilarTo`,
  * `isRelatedTo`, `isAccessoryOrSparePartFor` or a `BreadcrumbList` item is a
  * *different* product, and binding to it produces a row with a real name at a
- * price that is not this page's -- the same failure as StoreA,
+ * price that is not this page's -- the same failure as Store A,
  * 2026-09-22, where a walk that kept going until something answered bound
- * `productName` to the `Organization` node and returned "StoreA" on all 33
+ * `productName` to the `Organization` node and returned "Store A" on all 33
  * URLs that redirect away from their product page. Those rows carried a name, a
  * SKU off the URL and a price from a surviving meta tag, so they passed every
  * "did it extract?" check and would have entered a price index at invented
@@ -183,7 +183,7 @@ export function declares(block: unknown, entity: string): boolean {
  * Without an `entity` the top-level object is the whole contract: a bare
  * `{"@type":"Product", ...}` block — and every captured network payload, which
  * has no schema.org typing at all — reads directly and nothing is searched.
- * Guessing is what caused the StoreA defect, so the graph walk is opt-in.
+ * Guessing is what caused the Store A defect, so the graph walk is opt-in.
  *
  * With one, the first typed node that carries the path wins. `typedNodes`
  * returns all of them and a second Product disagreeing about `name` is a real

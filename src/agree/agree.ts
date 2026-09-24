@@ -106,7 +106,7 @@ export interface AgreeOptions {
    * **Tier 2 passes `false` since 2026-09-23**, and is the only call site that
    * does. A live render that nondeterministically misses one page's
    * `products/detail` call was deleting that endpoint for every sample, and
-   * `npm run smoke:live -- "Store B"` bound nothing about one run in three
+   * a live smoke run against Store B bound nothing about one run in three
    * because of it. The argument against tolerance — "a page's own furniture
    * must not become a source for pages that never load it" — is answered at
    * that call site by the floor and by the four filters below it, not here.

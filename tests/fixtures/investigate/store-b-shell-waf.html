@@ -1,0 +1,75 @@
+<!doctype html>
+<!--
+  Synthetic. The fixture `store-b-shell.html` should have been, and the one
+  the first live run of the cascade actually met on 2026-09-22.
+
+  It is that file plus one line: the always-on Imperva resource that a store
+  sitting behind Imperva serves in the head of every page it fronts, refused or
+  not. Everything else is identical — no declared product, almost no visible
+  text, script bundles that will fetch the content later — and that is the whole
+  problem, because it is also, word for word, `blocked.ts`'s definition of a
+  challenge interstitial: "a page with no declared product and 0 characters of
+  text loads _Incapsula_Resource".
+
+  The shape is real and the numbers are the live ones: three Store B product
+  URLs, ~2,800 characters of shell each, read from a Mac the store answers
+  perfectly, rendering into 86 JSON payloads with `catalog-svc/products/detail`
+  among them. The cascade called all three refused, skipped every tier, bound no
+  field and recorded no canary.
+
+  Note what is deliberately absent: `incident_id`. Imperva stamps that on the
+  resource when it has actually mitigated a request, and `CHALLENGE_MARKERS`
+  treats it as decisive for exactly that reason. `challenge-incapsula.html` is
+  the page that carries it. This one is a healthy store wearing the same coat.
+-->
+<html lang="es">
+  <head>
+    <title>Store B</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Farmacia en linea" />
+    <meta name="robots" content="index, follow" />
+    <link rel="preconnect" href="https://api.example.test" />
+    <link rel="preconnect" href="https://cdn.example.test" />
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="stylesheet" href="/static/styles.7c21ab.css" />
+    <link rel="stylesheet" href="/static/vendor.30fb19.css" />
+    <script src="/_Incapsula_Resource?SWJIYLWA=00000000000000000000000000000000" async></script>
+    <script src="/static/runtime.8f31c0.js" defer></script>
+    <script src="/static/polyfills.b30c17.js" defer></script>
+    <script src="/static/vendor.4ab902.js" defer></script>
+    <script src="/static/main.1c77de.js" defer></script>
+    <script src="/static/analytics.66b1af.js" async></script>
+    <script>
+      window.__APP_CONFIG__ = {
+        apiBase: "https://api.example.test",
+        locale: "es-CL",
+        currency: "CLP",
+        features: { club: true, fractionalPricing: true, pickup: true },
+        services: {
+          detail: "/catalog-svc/products/detail",
+          stock: "/stock-svc/stock",
+          search: "/search-svc/search",
+          cart: "/cart-svc/carts",
+          promotions: "/promo-svc/promotions",
+        },
+        build: "2026.09.22-1",
+      };
+    </script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() {
+        window.dataLayer.push(arguments);
+      }
+      gtag("js", new Date());
+      gtag("config", "G-EXAMPLE00");
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="modal-root"></div>
+    <div id="toast-root"></div>
+    <noscript>Necesitas habilitar JavaScript.</noscript>
+  </body>
+</html>

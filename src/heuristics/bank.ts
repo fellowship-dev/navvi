@@ -8,7 +8,7 @@ import type { AnyHeuristic, Overrides, Stage, Verdict } from "./types.js";
  * a fixture in `tests/fixtures/heuristics/`.
  *
  * The measurable output of dogfooding is this list growing: not "navvi handled
- * client", but *this engagement added twelve heuristics and twelve evals, and the
+ * the client", but *this engagement added twelve heuristics and twelve evals, and the
  * next site starts from them.* The twelfth, `machine-value-is-not-a-fact`, is
  * U6c's and was for a while the only rule in the bank with no caller in `src/`
  * — a rule nothing executes is navvi's signature defect, and saying so here was

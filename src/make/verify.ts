@@ -233,7 +233,7 @@ export function measurements(card: Scorecard): string {
  * same headline; the difference between "the scraper reads nothing" and "the
  * scraper reads, and one page did not answer" was recoverable only from the
  * bullets underneath. This repository already keeps the finding that a fill
- * rate with one number in it can be believed either way: on the StoreC run
+ * rate with one number in it can be believed either way: on the Store C run
  * `product_name` was 111 of 111 filled against pages that were an apology.
  *
  * So the second fraction is every field on every URL: `0 of 9 reads` and

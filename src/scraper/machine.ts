@@ -96,7 +96,7 @@ import type { Status } from "./schema.js";
  * `rest` state can be repaired by the next run — that is drift, and healing is
  * the right answer. A run that stops in a `terminal` state cannot, and a heal
  * attempted from one recompiles against whatever the site served instead, which
- * on 2026-09-22 was StoreC's "¡Lo sentimos!" page. One word is the difference
+ * on 2026-09-22 was Store C's "¡Lo sentimos!" page. One word is the difference
  * between "your scraper broke" and "you are being refused".
  */
 export type StateKind = "start" | "progress" | "undecided" | "rest" | "terminal";
@@ -121,7 +121,7 @@ const STATE_TABLE = [
     kind: "progress",
     what: "a set of pages has been chosen to look for it on, and every page in that set was served rather than refused",
     encounter:
-      "Store B, 2026-09-22: `sample.ts` marked a 200 declaring no `Product` dead, which is right for the StoreA redirect and wrong for a JavaScript shell. Store B declares no `Product` on any URL because the HTML is a bundle loader, so a healthy store came back 100% dead and the investigation read 0 of 5 fields over 0 plain fetches.",
+      "Store B, 2026-09-22: `sample.ts` marked a 200 declaring no `Product` dead, which is right for the Store A redirect and wrong for a JavaScript shell. Store B declares no `Product` on any URL because the HTML is a bundle loader, so a healthy store came back 100% dead and the investigation read 0 of 5 fields over 0 plain fetches.",
   },
   {
     id: "offered",
@@ -172,7 +172,7 @@ const STATE_TABLE = [
     kind: "terminal",
     what: "the site is refusing you, and nothing may bind or heal against a page that was not served",
     encounter:
-      "StoreC, 2026-09-22: `sku 0/111, stock 0/111, prices 3/111` and \"¡Lo sentimos!\" as the product name, served to Apify's datacenter IPs and reading perfectly from a laptop. A store that has looked drifted for months may only ever have been blocking the datacenter it is scraped from.",
+      "Store C, 2026-09-22: `sku 0/111, stock 0/111, prices 3/111` and \"¡Lo sentimos!\" as the product name, served to Apify's datacenter IPs and reading perfectly from a laptop. A store that has looked drifted for months may only ever have been blocking the datacenter it is scraped from.",
   },
   {
     id: "absent",
@@ -282,7 +282,7 @@ const TRANSITION_TABLE = [
       {
         must: "a URL that answered 403 is excluded from the sample rather than counted dead, because a refusal is a fact about the run and not about the product",
         decidedBy: "src/investigate/sample.ts `classify`",
-        encounter: "StoreC, 2026-09-22: 71 of 114 URLs refused from a datacenter and read perfectly from a laptop.",
+        encounter: "Store C, 2026-09-22: 71 of 114 URLs refused from a datacenter and read perfectly from a laptop.",
       },
     ],
   },
@@ -310,7 +310,7 @@ const TRANSITION_TABLE = [
         must: "the page was rendered, so its emptiness is the site's answer and not a stage of loading it",
         decidedBy: "src/heuristics/rules/investigate.ts `shell-skips-tier-1`",
         encounter:
-          "Store B, 2026-09-22 (defect 1 of the live run): a 200 declaring no `Product` was read as dead. That is right for the StoreA redirect page and wrong for a JavaScript shell, and every Store B URL is a shell, so a healthy store left the binding set entirely. The rule needs `isShell === false`, and an unknown shell state cannot fire it either.",
+          "Store B, 2026-09-22 (defect 1 of the live run): a 200 declaring no `Product` was read as dead. That is right for the Store A redirect page and wrong for a JavaScript shell, and every Store B URL is a shell, so a healthy store left the binding set entirely. The rule needs `isShell === false`, and an unknown shell state cannot fire it either.",
       },
     ],
   },
@@ -424,13 +424,13 @@ const TRANSITION_TABLE = [
         must: "the value varies across the samples, because a value identical on every sample is describing the site and not the record",
         decidedBy: "src/heuristics/rules/bind.ts `no-variation-no-field`",
         encounter:
-          "StoreA, 2026-09-22: `productName` came back \"StoreA\" on all 33 samples. The graph walk kept walking until something had a `name`, found the Organization node, and bound the store's own name as the product's — with a SKU from the URL and a price from a surviving meta tag, so the row looked extracted and would have entered a price index.",
+          "Store A, 2026-09-22: `productName` came back \"Store A\" on all 33 samples. The graph walk kept walking until something had a `name`, found the Organization node, and bound the store's own name as the product's — with a SKU from the URL and a price from a surviving meta tag, so the row looked extracted and would have entered a price index.",
       },
       {
         must: "the candidate answers for the entity the field is about, rather than for whichever node in the graph answered first",
         decidedBy: "src/heuristics/rules/bind.ts `json-ld-needs-product-node`, src/declared/json.ts",
         encounter:
-          "StoreA, 2026-09-22: one `@graph` carries Organization, WebSite and Product, and `name` resolves against all three. Walking the graph is opt-in now and says what it is walking toward; see `docs/adr/0001-one-declared-json-reader.md`.",
+          "Store A, 2026-09-22: one `@graph` carries Organization, WebSite and Product, and `name` resolves against all three. Walking the graph is opt-in now and says what it is walking toward; see `docs/adr/0001-one-declared-json-reader.md`.",
       },
       {
         must: "every sample was asked, at least two answered, and a sample that asked and could not be answered is left out of the comparison rather than allowed to delete it",
@@ -462,7 +462,7 @@ const TRANSITION_TABLE = [
         must: "the field's sense is told from its opposite: a list price is not settled by a candidate whose key, markup or vocabulary says sale",
         decidedBy: "src/heuristics/rules/bind.ts `key-names-carry-the-signal` and `struck-price-is-previous`, src/investigate/roles.ts",
         encounter:
-          "Store B, 2026-09-22: three increasingly precise prompts could not make a model pick the list price out of the rendered DOM, where three prices are styled alike, and the compiled selector `p.font-semibold.leading-16.leading-22` caught the Club price. The page's own `products/detail` call names them apart — `prices: {\"price-list-std\": 3690, \"price-sale-std\": 3321}` — and no model needs to be asked. The same trap runs the other way in the declared vocabulary: schema.org's unqualified `offers.price` is what you pay *now*, which is how the committed StoreC scraper spent the list-price role on the sale sense.",
+          "Store B, 2026-09-22: three increasingly precise prompts could not make a model pick the list price out of the rendered DOM, where three prices are styled alike, and the compiled selector `p.font-semibold.leading-16.leading-22` caught the Club price. The page's own `products/detail` call names them apart — `prices: {\"price-list-std\": 3690, \"price-sale-std\": 3321}` — and no model needs to be asked. The same trap runs the other way in the declared vocabulary: schema.org's unqualified `offers.price` is what you pay *now*, which is how the committed Store C scraper spent the list-price role on the sale sense.",
       },
       {
         must: "a machine-readable attribute is preferred to rendered text when both hold the value, because the rendered form is formatted for a person",
@@ -524,7 +524,7 @@ const TRANSITION_TABLE = [
         must: "the selector survives a redesign: it does not name a season, a modal state, a utility class or a line height",
         decidedBy: "the selector gate (U7b)",
         encounter:
-          "The three committed client scrapers of 2026-09-22. StoreA read `stock` through `body.one-col.christmas-pattern`, a class that is true until the decorations come down; StoreC read `listPrice` fourteen levels deep from `body.modal-open`, a class that is true only while a dialog is open; Store B read `listPrice` from `p.font-semibold.leading-16.leading-22`, which is a line height. 27-44% product coverage, and all three extracted a value and typechecked, which is why this gate has to run before the commit rather than after the failure. A rotten selector is a recompile, not a commit.",
+          "The three committed client scrapers of 2026-09-22. Store A read `stock` through `body.one-col.christmas-pattern`, a class that is true until the decorations come down; Store C read `listPrice` fourteen levels deep from `body.modal-open`, a class that is true only while a dialog is open; Store B read `listPrice` from `p.font-semibold.leading-16.leading-22`, which is a line height. 27-44% product coverage, and all three extracted a value and typechecked, which is why this gate has to run before the commit rather than after the failure. A rotten selector is a recompile, not a commit.",
       },
       {
         must: "the alternative is appended and nothing is removed, reordered or renamed; the merge API cannot add or rename a field either",
@@ -593,12 +593,12 @@ const TRANSITION_TABLE = [
         must: "the canary still resolves, which is the one boolean separating \"your scraper broke\" from \"the site started refusing you\"",
         decidedBy: "src/investigate/blocked.ts `checkCanary`",
         encounter:
-          "The canary is deliberately insensitive to drift — an overlap threshold of 0.4, not 0.9 — because a canary that failed on every redesign would turn every drift into a false `blocked` and stop healing at exactly the moment healing is needed. StoreC's apology page keeps 0.5 of the canary's words, so the load-bearing conjunct is the declared `Product`, not the word overlap.",
+          "The canary is deliberately insensitive to drift — an overlap threshold of 0.4, not 0.9 — because a canary that failed on every redesign would turn every drift into a false `blocked` and stop healing at exactly the moment healing is needed. Store C's apology page keeps 0.5 of the canary's words, so the load-bearing conjunct is the declared `Product`, not the word overlap.",
       },
       {
         must: "the field filled with values that vary; a field that fills 111 of 111 times with the same string has collapsed, not survived",
         decidedBy: "src/heuristics/rules/bind.ts `no-variation-no-field`, via `classifyRun`",
-        encounter: "StoreC, 2026-09-22: `product_name` was \"¡Lo sentimos!\" on all 111 URLs, filled every time, and only the variation check sees it.",
+        encounter: "Store C, 2026-09-22: `product_name` was \"¡Lo sentimos!\" on all 111 URLs, filled every time, and only the variation check sees it.",
       },
     ],
   },
@@ -612,7 +612,7 @@ const TRANSITION_TABLE = [
       {
         must: "the canary was actually read, body and all; a status alone does not say the page was served",
         decidedBy: "src/investigate/blocked.ts `checkCanary`",
-        encounter: "StoreC served its apology page with a 200 and a rendered body, so a status check alone would have called the canary resolved and the run drift.",
+        encounter: "Store C served its apology page with a 200 and a rendered body, so a status check alone would have called the canary resolved and the run drift.",
       },
       {
         must: "the verdict names a remedy, because a blocked verdict that only says blocked hands the problem back to whoever read it",
@@ -630,7 +630,7 @@ const TRANSITION_TABLE = [
         must: "the run's verdict is drift: `mayHeal` is the only way to a heal, and `heal: true` exists on no other variant",
         decidedBy: "src/investigate/blocked.ts `mayHeal`",
         encounter:
-          "StoreC, 2026-09-22: a recompile against a page that said \"¡Lo sentimos!\" would have learned the apology and committed it. Note that `replay/crawler.ts` still calls `createHealer()` unconditionally — the guarantee is real in the type system and unenforced in the run until Phase F's U9c lands.",
+          "Store C, 2026-09-22: a recompile against a page that said \"¡Lo sentimos!\" would have learned the apology and committed it. Note that `replay/crawler.ts` still calls `createHealer()` unconditionally — the guarantee is real in the type system and unenforced in the run until Phase F's U9c lands.",
       },
       {
         must: "only the failing fields are re-picked, over the leaves on that page that are not already an alternative, plus none",

@@ -8,27 +8,27 @@ public knowledge the moment you open the page.
 
 ## Tier 1, what a page declares about itself (`declared.ts`)
 
-`storea-product.html` is the encounter. The page states name, sku, brand,
+`store-a-product.html` is the encounter. The page states name, sku, brand,
 list price, sale price and availability in its own `<head>` — a JSON-LD
 `@graph` holding Organization, WebSite **and** Product, plus the OpenGraph and
 `product:` meta namespaces — while the committed scraper was reading
 `body.one-col.christmas-pattern`, which is in the fixture too, fourteen levels
 from the answer.
 
-`storea-product-2.html` is the second sample of that same template, and it
-exists for the reason `storeb-detail-2.json` exists: a binding is compiled
+`store-a-product-2.html` is the second sample of that same template, and it
+exists for the reason `store-b-detail-2.json` exists: a binding is compiled
 from a *sample*, and `no-variation-no-field` cannot say anything about one
 page. Name, sku, both prices and availability vary; brand, both currencies and
 condition are deliberately constant, so a run that asks for `brand` is told it
 is describing the site rather than the record.
 
-`storea-redirect.html` is the negative case and the reason the JSON-LD gate
+`store-a-redirect.html` is the negative case and the reason the JSON-LD gate
 exists: an `@graph` with Organization and WebSite and no Product, plus a
 `product:price:amount` meta that survived the redirect. A graph walk that keeps
-walking until something has a name binds `productName` to `"StoreA"` here,
+walking until something has a name binds `productName` to `"Store A"` here,
 on all 33 such URLs. Tier 1 must return no declared Product.
 
-`storec-product.html` is a bare JSON-LD Product with the offer nested one
+`store-c-product.html` is a bare JSON-LD Product with the offer nested one
 level down, alongside a BreadcrumbList block and one block the site broke.
 
 `microdata-product.html` is the third dialect: `itemscope` / `itemtype` /
@@ -37,20 +37,20 @@ level down, alongside a BreadcrumbList block and one block the site broke.
 
 ## Tier 2, the payload a page fetches for itself (`leaves.ts`)
 
-`storeb-detail.json` mirrors `api.store-b.example/catalog-svc/products/detail/<id>`:
+`store-b-detail.json` mirrors `api.store-b.example/catalog-svc/products/detail/<id>`:
 170 leaves on the live page, of which four are prices and three name a club
 promotion. The nesting that matters is `prices` keyed by dashed currency codes
 (`price-list-std`), `appliedPromotions` keyed the same way, and a `promotions`
 array whose entries carry `isClubPromotion`.
 
-`storeb-detail-3.json` is the third sample, and it exists for the live run
+`store-b-detail-3.json` is the third sample, and it exists for the live run
 of 2026-09-22 rather than for variation: three samples are the smallest set in
 which one page can fail while the other two answer, which is the shape that
 broke tier 2's grouping. It is the *healthy* third — the tests pair it with a
 third sample whose detail call answers 401 and then 500, to prove the endpoint
 survives either way.
 
-`storeb-shell.html` is what one plain fetch against that store actually
+`store-b-shell.html` is what one plain fetch against that store actually
 returns: almost no visible text, no declaration of a product, and four script
 bundles that will fetch the content later. It is what makes
 `shell-skips-tier-1` fire, and the cascade skip tier 1 for the whole site
@@ -74,7 +74,7 @@ Five pages off one invented store, because the U3a apology rule is about a
 *corpus*: what makes an error page an error page is that it is the same document
 at every address.
 
-`apology.html` is the StoreC shape — a page that renders real text, keeps the
+`apology.html` is the Store C shape — a page that renders real text, keeps the
 store's nav and footer, declares no product, and is served for every URL asked
 for. `¡Lo sentimos!` is in it as the example, and nothing in the code looks for
 it.

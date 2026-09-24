@@ -180,7 +180,7 @@ describe("across runs is not across samples", () => {
   });
 
   it("a field identical on every URL is not this stage's problem either", () => {
-    // The StoreA defect: productName is the site's name on all of them.
+    // The Store A defect: productName is the site's name on all of them.
     // It holds still across runs, which is all U6a is entitled to say.
     const sample = healthy().map((entry) => ({ ...entry, readings: entry.readings.map((reading) => reading.map((item) => ({ ...item, productName: "Farmacia Ejemplo" }))) }));
     const determinism = judgeDeterminism(sample, { now: CLOCK });

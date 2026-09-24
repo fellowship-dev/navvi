@@ -19,7 +19,7 @@ OOM either.
 `browser-crawler.js`: on `EVENT_SESSION_RETIRED` ->
 `browserPool.retireBrowserController`). So an unconfigured run tore the browser
 down and relaunched it **every 50 requests** — which is exactly where Store B
-died twice, and why StoreC, at 10 requests, survived.
+died twice, and why Store C, at 10 requests, survived.
 
 Fixed by setting `sessionOptions.maxUsageCount` in
 `buildSessionPoolOptions` (`src/replay/crawler.ts`). A run replaying a pinned
@@ -41,7 +41,7 @@ ERROR [Status message]: Failed to launch browser. Please check the following:
 ```
 
 The crawler finished **cleanly** and the run failed 86 ms later, exit code 1.
-Store B died at 50 of 109 URLs (551 s), StoreA at 29 requests (445 s). A
+Store B died at 50 of 109 URLs (551 s), Store A at 29 requests (445 s). A
 third run that only reached 10 requests survived.
 
 ## What is established

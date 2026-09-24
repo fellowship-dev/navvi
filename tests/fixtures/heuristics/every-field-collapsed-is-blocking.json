@@ -1,9 +1,9 @@
 {
   "heuristic": "every-field-collapsed-is-blocking",
-  "encounter": "StoreC, 2026-09-22. sku 0/111, stock 0/111, prices 3/111 and \"¡Lo sentimos!\" as the product name on every row: Apify's datacenter IPs served an error page. The same URLs read perfectly from a laptop.",
+  "encounter": "Store C, 2026-09-22. sku 0/111, stock 0/111, prices 3/111 and \"¡Lo sentimos!\" as the product name on every row: Apify's datacenter IPs served an error page. The same URLs read perfectly from a laptop.",
   "cases": [
     {
-      "name": "the StoreC run: every field gone, and the filled one is the apology",
+      "name": "the Store C run: every field gone, and the filled one is the apology",
       "observation": {
         "fields": {
           "sku": {

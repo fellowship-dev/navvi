@@ -116,9 +116,9 @@ describe("specFromDraft (the deterministic half)", () => {
   });
 
   it("a brief that names its fields has no blocking field question", () => {
-    const brief = "Get the name, list price and stock of these product URLs from StoreA";
+    const brief = "Get the name, list price and stock of these product URLs from Store A";
     const spec = specFromDraft(brief, {
-      target: { site: "StoreA", pageKind: "product", briefTerm: "StoreA" },
+      target: { site: "Store A", pageKind: "product", briefTerm: "Store A" },
       entity: { name: "product", briefTerm: "product" },
       inputs: { shape: "url_list", description: "the product URLs given per run", briefTerm: "product URLs" },
       fields: [
@@ -134,9 +134,9 @@ describe("specFromDraft (the deterministic half)", () => {
   });
 
   it("drops a quote the brief does not contain, and demotes the field that leaned on it", () => {
-    const brief = "Get the name of these product URLs from StoreA";
+    const brief = "Get the name of these product URLs from Store A";
     const spec = specFromDraft(brief, {
-      target: { site: "StoreA", pageKind: "product", briefTerm: "StoreA" },
+      target: { site: "Store A", pageKind: "product", briefTerm: "Store A" },
       entity: { name: "product", briefTerm: "product" },
       inputs: { shape: "url_list", description: "product URLs", briefTerm: "product URLs" },
       fields: [
@@ -159,9 +159,9 @@ describe("specFromDraft (the deterministic half)", () => {
   });
 
   it("keeps a constraint only when the brief grounds it", () => {
-    const brief = "Scrape these product URLs from StoreA every Monday and Thursday";
+    const brief = "Scrape these product URLs from Store A every Monday and Thursday";
     const spec = specFromDraft(brief, {
-      target: { site: "StoreA", pageKind: "product", briefTerm: "StoreA" },
+      target: { site: "Store A", pageKind: "product", briefTerm: "Store A" },
       entity: { name: "product", briefTerm: "product" },
       inputs: { shape: "url_list", description: "product URLs", briefTerm: "product URLs" },
       fields: [{ name: "price", briefTerm: "price" }],
@@ -184,8 +184,8 @@ describe("specFromDraft (the deterministic half)", () => {
   });
 
   it("leaves an unknown page kind to the investigation rather than the client", () => {
-    const spec = specFromDraft("Get the list price of these product URLs from StoreA", {
-      target: { site: "StoreA", pageKind: "unknown", briefTerm: "StoreA" },
+    const spec = specFromDraft("Get the list price of these product URLs from Store A", {
+      target: { site: "Store A", pageKind: "unknown", briefTerm: "Store A" },
       entity: { name: "product", briefTerm: "product" },
       inputs: { shape: "url_list", description: "product URLs", briefTerm: "product URLs" },
       fields: [{ name: "list_price", briefTerm: "list price" }],
@@ -322,9 +322,9 @@ describe("the provenance of an answer", () => {
   });
 
   it("a field whose word really is in the brief keeps `brief`, with the quote that proves it", () => {
-    const brief = "Get the name, list price and stock of these product URLs from StoreA";
+    const brief = "Get the name, list price and stock of these product URLs from Store A";
     const base = specFromDraft(brief, {
-      target: { site: "StoreA", pageKind: "product", briefTerm: "StoreA" },
+      target: { site: "Store A", pageKind: "product", briefTerm: "Store A" },
       entity: { name: "product", briefTerm: "product" },
       inputs: { shape: "url_list", description: "the product URLs given per run", briefTerm: "product URLs" },
       fields: [{ name: "name", briefTerm: "name" }],

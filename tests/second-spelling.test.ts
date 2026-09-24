@@ -411,12 +411,12 @@ describe("recorded answers are checked against the options offered today", () =>
  * and a source guard so a fifth copy cannot grow back.
  */
 describe("a declared JSON block: one walk, one answer", () => {
-  /** StoreA's real shape: several typed nodes in an array-valued `@graph`. */
+  /** Store A's real shape: several typed nodes in an array-valued `@graph`. */
   const arrayGraph = {
     "@context": "https://schema.org",
     "@graph": [
-      { "@type": ["Organization", "OnlineStore"], name: "StoreA", url: "https://store-a.example/" },
-      { "@type": "WebSite", name: "StoreA" },
+      { "@type": ["Organization", "OnlineStore"], name: "Store A", url: "https://store-a.example/" },
+      { "@type": "WebSite", name: "Store A" },
       { "@type": "Product", name: "Norvasc (R) Amlodipino 5mg 30 Comprimidos", sku: "2562507", offers: { price: "3690" } },
     ],
   };
@@ -441,8 +441,8 @@ describe("a declared JSON block: one walk, one answer", () => {
 
   it("and a graph of either shape with no Product node is refused by all of them", () => {
     const refusals = [
-      { "@context": "https://schema.org", "@graph": [{ "@type": "Organization", name: "StoreA" }, { "@type": "WebSite", name: "StoreA" }] },
-      { "@context": "https://schema.org", "@graph": { "@type": "Organization", name: "StoreA" } },
+      { "@context": "https://schema.org", "@graph": [{ "@type": "Organization", name: "Store A" }, { "@type": "WebSite", name: "Store A" }] },
+      { "@context": "https://schema.org", "@graph": { "@type": "Organization", name: "Store A" } },
     ];
     for (const block of refusals) {
       expect(declares(block, "Product")).toBe(false);
@@ -458,7 +458,7 @@ describe("a declared JSON block: one walk, one answer", () => {
   });
 
   it("neither shape lets the walk leave the graph", () => {
-    // The refusal the StoreA encounter bought: a Product under a relation
+    // The refusal the Store A encounter bought: a Product under a relation
     // is a *different* product, whichever shape the graph takes.
     const related = {
       "@context": "https://schema.org",

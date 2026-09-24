@@ -20,7 +20,7 @@ import type { Pages } from "./pages.js";
  * ## Why this is the unit that matters
  *
  * Every stage of the pipeline existed and was tested before this file, and
- * nothing ran them as one command: `scripts/live-investigate.ts` wired
+ * nothing ran them as one command: a live smoke script wired
  * investigate to reconcile by hand for a smoke test and wrote no files, and
  * `bin/cli.ts` had `run`, `spec` and `heuristics`. `docs/architecture.md` said
  * in as many words that what was missing was the driver and not an edge.
@@ -259,8 +259,8 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
 
     /**
      * A field the *brief* named and a field the draft guessed are not the same
-     * thing, and the head line says which. On the first run all five of Cruz
-     * Verde's are guesses — "product info" names none — so reporting "5 fields"
+     * thing, and the head line says which. On the first run all five of Store
+     * B's are guesses — "product info" names none — so reporting "5 fields"
      * there would say the brief asked for exactly what the stage is about to
      * stop and ask about.
      */
@@ -761,8 +761,8 @@ async function runSpec(work: Work, options: MakeOptions, deps: MakeDeps, answers
   } else if (options.rubrics.length > 0) {
     // Rubrics are the client's domain knowledge and they reach `reconcile`
     // through the spec. Re-supplying them on a resume must update the stored
-    // spec, or U8's acceptance case — *"client's list-price rubric settles Cruz
-    // Verde's ambiguity in reconcile.md, with the rule quoted"* — would depend
+    // spec, or U8's acceptance case — *"the client's list-price rubric settles Store
+    // B's ambiguity in reconcile.md, with the rule quoted"* — would depend
     // on which run happened to carry the file.
     spec = { ...spec, rubrics: [...options.rubrics] };
   }

@@ -1,0 +1,50 @@
+<!doctype html>
+<!--
+  The negative case, and the reason the JSON-LD gate exists.
+
+  Synthetic, shape probed 2026-09-22: 33 Store A URLs redirect away from
+  their product page to something like this. The @graph declares an
+  Organization and a WebSite and no Product at all — while a product: price
+  meta tag survives the redirect, which is how the bad rows got a price to go
+  with the name the graph walk found.
+
+  A walk that keeps walking until something has a name binds productName to
+  "Store A" here. Tier 1 must return no declared Product.
+-->
+<html lang="es">
+  <head>
+    <title>Store A</title>
+    <meta charset="utf-8" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Store A" />
+    <meta property="og:url" content="https://example.test/" />
+    <meta property="product:price:amount" content="14990" />
+    <meta property="product:price:currency" content="CLP" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://example.test/#organization",
+            "name": "Store A",
+            "url": "https://example.test/"
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://example.test/#website",
+            "name": "Store A",
+            "url": "https://example.test/"
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body class="one-col christmas-pattern">
+    <main>
+      <p>No encontramos el producto que buscabas.</p>
+    </main>
+  </body>
+</html>

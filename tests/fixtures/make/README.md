@@ -2,7 +2,7 @@
 
 Synthetic, for the same reason every other fixture directory here is: navvi is
 a public repository and a client's catalogue is not test data. The *shape* is
-the one `../investigate/storea-product.html` records — a JSON-LD `@graph`
+the one `../investigate/store-a-product.html` records — a JSON-LD `@graph`
 with Organization, WebSite and Product, plus the OpenGraph and `product:` meta
 namespaces — and every value below is invented.
 

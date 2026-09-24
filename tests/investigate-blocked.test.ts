@@ -16,7 +16,7 @@ import {
 } from "../src/investigate/blocked.js";
 
 /**
- * U3a and U3b. The run that produced these: StoreC, 2026-09-22, read from
+ * U3a and U3b. The run that produced these: Store C, 2026-09-22, read from
  * Apify's datacenter IPs — `sku 0/111, stock 0/111, prices 3/111` and
  * "¡Lo sentimos!" as the product name on every row. The same URLs read
  * perfectly from a laptop, and the legacy scraper has been failing the same way
@@ -39,10 +39,10 @@ const PRODUCT = html("product");
 const PRODUCT_REDESIGN = html("product-redesign");
 const RENDERED = html("rendered-product");
 const RENDERED_2 = html("rendered-product-2");
-/** The shape the first live run met: `storeb-shell.html` plus Imperva's always-on resource. */
-const SHELL_WAF = html("storeb-shell-waf");
+/** The shape the first live run met: `store-b-shell.html` plus Imperva's always-on resource. */
+const SHELL_WAF = html("store-b-shell-waf");
 
-/** The StoreC run's fill counts, exactly as the harness printed them. */
+/** The Store C run's fill counts, exactly as the harness printed them. */
 const STORE_C_FIELDS = {
   sku: { filled: 0, total: 111 },
   stock: { filled: 0, total: 111 },
@@ -200,7 +200,7 @@ describe("checkCanary — the one boolean that separates drift from refusal", ()
 
   it("is unchecked rather than resolved when there is no page to read", () => {
     expect(checkCanary(recorded, undefined).state).toBe("unchecked");
-    // StoreC's apology came back with a normal status: a 200 alone proves nothing.
+    // Store C's apology came back with a normal status: a 200 alone proves nothing.
     expect(checkCanary(recorded, { url: recorded.url, status: 200 }).state).toBe("unchecked");
   });
 
@@ -227,7 +227,7 @@ describe("checkCanary — the one boolean that separates drift from refusal", ()
 });
 
 describe("classifyRun — blocked, drift, healthy", () => {
-  it("reports the StoreC datacenter run as blocked, not drift", () => {
+  it("reports the Store C datacenter run as blocked, not drift", () => {
     const verdict = classifyRun({
       fields: STORE_C_FIELDS,
       values: { product_name: ["¡Lo sentimos!", "¡Lo sentimos!", "¡Lo sentimos!"] },
@@ -394,7 +394,7 @@ describe("classifyRun — blocked, drift, healthy", () => {
     expect(empty.remedy.action).toBe("enable-proxy");
     expect(mayHeal(empty)).toBe(false);
 
-    // The shell filled — with the store's apology. The StoreC shape arriving
+    // The shell filled — with the store's apology. The Store C shape arriving
     // one tier later, and `apologySignals` has it.
     const apology = settleDeferred(deferred, { pages: pages(APOLOGY, "https://example.cl/p/1", "https://example.cl/p/2"), payloadLeaves: 0 });
     expect(apology.state).toBe("blocked");

@@ -107,14 +107,14 @@ const CORPUS: readonly Row[] = [
   },
   {
     name: "a JS shell",
-    path: "investigate/storeb-shell.html",
+    path: "investigate/store-b-shell.html",
     status: 200,
     prestep: null,
     challenge: null,
   },
   {
     name: "a JS shell behind a WAF: the same bytes as an interstitial to a plain fetch",
-    path: "investigate/storeb-shell-waf.html",
+    path: "investigate/store-b-shell-waf.html",
     status: 200,
     prestep: null,
     challenge: "corroborated",

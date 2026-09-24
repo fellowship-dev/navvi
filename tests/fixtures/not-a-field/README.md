@@ -1,13 +1,13 @@
 # "Not a field" fixtures
 
 Synthetic, like everything under `tests/fixtures/`. The *shape* is the one
-StoreA's redirect URLs had on 2026-09-22 — a store landing page served for a
+Store A's redirect URLs had on 2026-09-22 — a store landing page served for a
 product address, with the `product:` meta namespace of the page you asked for
 still attached to it — and every value in them is invented. navvi is a public
 repository and a client's catalogue is not test data.
 
 `store-landing-883052.html` and `store-landing-883099.html` are **two different
-addresses answering with the same page**. On 33 of StoreA's URLs that is
+addresses answering with the same page**. On 33 of Store A's URLs that is
 what a scrape got: the product had gone, the store answered with itself, and
 what came back still looked like a product row —
 
