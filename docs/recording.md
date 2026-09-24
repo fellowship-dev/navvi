@@ -127,3 +127,56 @@ remain alongside both clips.
 Use a source checkout for this recording. npm 3.0.0 predates separate
 writer/decider flags and the highlighted-word extraction correction. No npm
 patch release is implied by a main-branch capture.
+
+## Decision race: the same questions to Haiku and Jev
+
+`scripts/record-decisions.ts` isolates the step where Navvi asks a model to
+pick among code-enumerated candidates. It does not time browsing, prompt
+parsing or extraction. Output: `docs/decisions-race.gif`, `.mp4` and
+`docs/decisions-race-provenance.json`.
+
+```sh
+set -a; . /path/to/.env; set +a   # AI_GATEWAY_API_KEY, TYPESAFE_API_KEY
+DECISIONS_OUT=/tmp/navvi-decisions npx tsx scripts/record-decisions.ts                 # capture + race + render
+DECISIONS_MODE=race DECISIONS_CAPTURE=/tmp/navvi-decisions/navvi-decisions-XXXX \
+  DECISIONS_OUT=/tmp/navvi-decisions npx tsx scripts/record-decisions.ts               # re-race an existing capture
+DECISIONS_MODE=render DECISIONS_SOURCE=/tmp/navvi-decisions/navvi-decisions-YYYY \
+  DECISIONS_PUBLISH=1 npx tsx scripts/record-decisions.ts                              # re-render, copy to docs/
+```
+
+Other variables: `DECISIONS_URL` / `DECISIONS_PROMPT` (default: Hacker News
+search on `https://hn.algolia.com/`), `DECISIONS_REFERENCE_MODEL` (default
+`claude-sonnet-4-6`), `DECISIONS_HAIKU_MODEL` (default `claude-haiku-4-5`) and
+`DECISIONS_RUNS` (default 3). Every mode creates a new `navvi-decisions-*`
+directory that holds `capture/`, `race.json`, `provenance.json`, the frames and
+the media.
+
+- **Capture.** One real `run()` (the CLI entry point) on the public site, with
+  a reference decider that is in neither lane: Sonnet over the AI Gateway. The
+  chooser is wrapped in `RecordingChooser` (`capture/recorded/`) and a logger
+  that saves every batch in full (`capture/questions.jsonl`). The capture must
+  succeed with rows, or nothing is raced.
+- **Race.** Every captured choice and boolean batch, grouped exactly as Navvi
+  asked it. Text questions (prompt parsing and the typed query) are dropped
+  because Jev cannot write text. Haiku uses `ModelChooser` over the AI Gateway
+  (`ANTHROPIC_API_KEY` is removed from the environment). Jev uses `JevChooser`
+  over the TypeSafe API. Each lane gets one untimed warm-up call, then runs its
+  batches sequentially with wall-clock timing per batch. The lanes never run
+  concurrently, and their order alternates between runs.
+- **Haiku lane caveat.** Haiku returns the right index on the navigation
+  batches, but it also fills the optional `text` field with an explanation.
+  Navvi's validator rejects that twice, so the stock `ModelChooser` fails
+  batch 3. The lane subclass drops `text` on non-text answers before
+  validation and never changes an index. The provenance counts these drops per
+  run.
+- **Render.** The run with the median Haiku/Jev ratio. Answers appear at their
+  measured batch end times. If the slower lane exceeds 15 s, both lanes are
+  compressed by the same factor and the frame says so. A ✓ means the lane
+  matched the reference decider's capture answer; ≠ means it did not.
+
+September 24 result: HN search, 19 decisions (18 choice, 1 boolean) in 7
+batches. Haiku took 11.0 / 13.3 / 11.7 s and Jev 3.2 / 2.6 / 3.5 s: 3.4× in the
+median run, with a range of 3.4 to 5.0×. Both lanes matched the reference
+19/19 in every run. This is a decision-latency measurement from one network
+location on one task. It does not measure end-to-end compile time and does not
+support a general accuracy claim.
