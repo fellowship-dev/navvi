@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants } from "node:fs";
+import { tmpdir } from "node:os";
 import { delimiter, isAbsolute, join } from "node:path";
 import { ModelUnavailableError } from "../billing/budget.js";
 import { isRecord } from "../util/text.js";
@@ -81,10 +82,24 @@ export function harnessEnv(harness: CliHarness, env: NodeJS.ProcessEnv): NodeJS.
 }
 
 /** The default runner: a child process with a kill-on-timeout, stdin closed unless `input` is given (codex reads a piped stdin). */
-export function processRunner(timeoutMs: number, env: NodeJS.ProcessEnv = process.env): CliRunner {
+/**
+ * Where the harness runs: a neutral directory, never the user's project.
+ *
+ * Found by the Hacker News recording, 2026-09-24: started inside a repository,
+ * Claude Code loads that project's CLAUDE.md and hooks with the question, and
+ * answered 2 of 6 prompt questions with "I need clarification…" instead of the
+ * JSON asked for; the same questions from a neutral directory, 6 of 6. navvi
+ * sends the harness everything it needs; the project around the user's shell
+ * is not part of the question.
+ */
+export function harnessCwd(): string {
+  return tmpdir();
+}
+
+export function processRunner(timeoutMs: number, env: NodeJS.ProcessEnv = process.env, cwd?: string): CliRunner {
   return (cmd, args, input) =>
     new Promise<CliRunResult>((resolve, reject) => {
-      const child = spawn(cmd, args, { stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"], env });
+      const child = spawn(cmd, args, { stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"], env, ...(cwd !== undefined ? { cwd } : {}) });
       let stdout = "";
       let stderr = "";
       let settled = false;
@@ -336,7 +351,7 @@ export class CliChooser extends BaseChooser {
     const override = Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : undefined;
     this.timeoutMs = options.timeoutMs ?? override ?? CLI_TIMEOUT_MS;
     this.textTimeoutMs = options.textTimeoutMs ?? override ?? Math.max(this.timeoutMs, CLI_TEXT_TIMEOUT_MS);
-    this.runner = options.runner ?? processRunner(Math.max(this.timeoutMs, this.textTimeoutMs), harnessEnv(harness, env));
+    this.runner = options.runner ?? processRunner(Math.max(this.timeoutMs, this.textTimeoutMs), harnessEnv(harness, env), harnessCwd());
   }
 
   usage(): ChooserUsage {
@@ -441,7 +456,7 @@ export function probeCli(harness: CliHarness, runnerOrOptions?: CliRunner | Prob
 async function runProbe(harness: CliHarness, options: ProbeOptions): Promise<CliProbe> {
   const env = options.env ?? process.env;
   const timeoutMs = options.timeoutMs ?? PROBE_TIMEOUT_MS;
-  const runner = options.runner ?? processRunner(timeoutMs, env);
+  const runner = options.runner ?? processRunner(timeoutMs, env, harnessCwd());
   const installed = options.runner ? await whichViaRunner(harness, runner) : findOnPath(harness, env) !== undefined;
   if (!installed) return { installed: false, signedIn: false, detail: `\`${harness}\` not found on PATH` };
   const probe: CliProbe = { installed: true, signedIn: "unknown" };

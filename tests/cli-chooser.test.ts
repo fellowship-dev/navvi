@@ -1,11 +1,11 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Actor } from "apify";
 import { MemoryStorage } from "crawlee";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ConfigurationError, InvalidAnswerError, type Question } from "../src/chooser/chooser.js";
-import { CliChooser, extractJsonObject, harnessEnv, probeCli, readCodexEvents, renderPrompt, resetProbeCache, type CliRunResult, type CliRunner } from "../src/chooser/cli.js";
+import { CliChooser, extractJsonObject, harnessCwd, harnessEnv, processRunner, probeCli, readCodexEvents, renderPrompt, resetProbeCache, type CliRunResult, type CliRunner } from "../src/chooser/cli.js";
 import { createChooser, resolveDefaultChooser } from "../src/chooser/index.js";
 import { Budget, ModelUnavailableError } from "../src/billing/budget.js";
 import { defaultChooser } from "../src/input/schema.js";
@@ -206,6 +206,16 @@ describe("claude chooser", () => {
     const err = await new CliChooser("claude", { runner: slow, env: { NAVVI_CLI_TIMEOUT_MS: "20" }, backoffMs: [0] }).ask(text).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ModelUnavailableError);
     expect((err as Error).message).toContain("no reply within 20 ms");
+  });
+
+  it("the harness runs from a neutral directory, not the user's project", async () => {
+    // Found by the Hacker News recording, 2026-09-24: run inside a repository, Claude Code
+    // loaded that project's CLAUDE.md and hooks and answered 2 of 6 prompt questions with
+    // "I need clarification…" instead of JSON; from a neutral directory, 6 of 6.
+    const dir = harnessCwd();
+    expect(realpathSync(dir)).not.toBe(realpathSync(process.cwd()));
+    const run = await processRunner(5_000, process.env, dir)("pwd", []);
+    expect(realpathSync(run.stdout.trim())).toBe(realpathSync(dir));
   });
 
   it("Claude Code answers without extended thinking unless the user asked for it", () => {
