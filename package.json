@@ -29,6 +29,7 @@
   "scripts": {
     "start": "node dist/src/main.js",
     "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "prepublishOnly": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:tests": "tsc -p tsconfig.test.json --noEmit",
     "check:architecture": "node scripts/check-architecture.mjs",
