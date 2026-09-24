@@ -11,6 +11,8 @@ import { toCsv } from "../src/cli/output.js";
 import { runCrawl } from "../src/replay/crawler.js";
 import { coerceRow, coerceValues, extractPage, fingerprintMatches } from "../src/scraper/extract.js";
 import { SCRAPER_VERSION, validateScraper, type CompiledScraper } from "../src/scraper/schema.js";
+import { ScraperStore } from "../src/scraper/store.js";
+import { exitCodeFor } from "../bin/cli.js";
 import { datasetItems, fixtureInput, makeActor, makeDeps } from "./helpers.js";
 import { startFixtureServer, type FixtureServer } from "./server.js";
 
@@ -110,8 +112,8 @@ describe("list mode: a repeated element within one item", () => {
       // ...and a field left unbound is then offered every list on the rows: the tag texts and the tag links
       const list = chooser.questions().find((q) => q.id === "list.tags")!;
       expect(list.options!.map((o) => o.split(" = ")[0])).toEqual(["div.tags/a.tag (every match, as a list)", "div.tags/a.tag/@href (every match, as a list)"]);
-      expect(list.options![0]).toContain('4 values: "light", …');
-      expect(list.options![0]).toContain('2 values: "maps", …');
+      expect(list.options![0]).toContain('4 values: "light", "honesty", "night", …');
+      expect(list.options![0]).toContain('2 values: "maps", "travel"');
       expect(list.premise).toContain("tags reads as several values");
       // fields that bound a one-value node are asked nothing more
       expect(chooser.questions().map((q) => q.id)).toEqual(["group", "field.text", "field.author", "field.tags", "list.tags"]);
@@ -312,6 +314,40 @@ describe("crawl: status and replay", () => {
     expect(summary.fieldsNotFound).toEqual(["tags"]);
     expect(summary.status).toBe("partial");
     expect(summary.message).toContain("fields not found: tags");
+    expect(exitCodeFor(summary.status)).toBe(1);
+  }, 60_000);
+
+  it("the replay of a scraper compiled without a field is `partial` too, with the same line and exit 1", async () => {
+    const actor = makeActor(dir);
+    const chooser = new ScriptedChooser({ group: /div\.quote/, text: /span\.text = /, author: /small\.author = / });
+    const first = await runCrawl(fixtureInput(quotes()), makeDeps(dir, actor, chooser));
+    expect(first.status).toBe("partial");
+    const store = await ScraperStore.open({ actor });
+    const stored = await store.get(first.scriptId!);
+    expect(stored!.fieldsNotFound).toEqual(["tags"]);
+
+    const silent = new ScriptedChooser({});
+    const again = await runCrawl(fixtureInput(quotes()), makeDeps(dir, actor, silent));
+    expect(again.cacheHit).toBe(true);
+    expect(silent.usage().questions).toBe(0);
+    expect(again.items).toBe(10);
+    expect(again.status).toBe("partial");
+    expect(again.fieldsNotFound).toEqual(["tags"]);
+    expect(again.message).toBe(first.message);
+    expect(exitCodeFor(again.status)).toBe(1);
+  }, 60_000);
+
+  it("a scraper written before fieldsNotFound existed replays as it always did", async () => {
+    const actor = makeActor(dir);
+    const chooser = new ScriptedChooser({ group: /div\.quote/, text: /span\.text = /, author: /small\.author = / });
+    const first = await runCrawl(fixtureInput(quotes()), makeDeps(dir, actor, chooser));
+    const store = await ScraperStore.open({ actor });
+    const { fieldsNotFound: _dropped, ...old } = (await store.get(first.scriptId!))!;
+    await store.put(validateScraper(old));
+    const again = await runCrawl(fixtureInput(quotes()), makeDeps(dir, actor, new ScriptedChooser({})));
+    expect(again.cacheHit).toBe(true);
+    expect(again.status).toBe("succeeded");
+    expect(again.fieldsNotFound).toEqual([]);
   }, 60_000);
 
   it("lists go out as arrays, and the second run replays them with no chooser call", async () => {
@@ -320,6 +356,8 @@ describe("crawl: status and replay", () => {
     const first = await runCrawl(fixtureInput(quotes()), makeDeps(dir, actor, chooser));
     expect(first.status).toBe("succeeded");
     expect(first.fieldsNotFound).toEqual([]);
+    // Every field bound: the scraper is written exactly as before the key existed.
+    expect(Object.keys((await (await ScraperStore.open({ actor })).get(first.scriptId!))!)).not.toContain("fieldsNotFound");
     const items = await datasetItems(actor);
     expect(items.map((item) => (item.tags as string[]).length)).toEqual(TAG_COUNTS);
 

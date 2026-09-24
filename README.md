@@ -205,7 +205,8 @@ the TypeSafe API if the Gateway is unavailable, saying so in the summary.
   the scraper JSON.
 - The run stays on the start URLs' domains (`--allow-domain` widens it); private
   hosts need `--allow-private-host`; destructive-looking clicks need `--allow-mutation`.
-- Defaults: 10 pages, 1000 items (`--max-pages`, `--max-items`).
+- Defaults: 10 pages, 1000 items, or the limit the prompt states ("up to 10",
+  "the first 3 pages"); `--max-pages` and `--max-items` win over both.
 - Validate what you extract, not just that it is non-empty: a filled form is not
   always a finished search.
 

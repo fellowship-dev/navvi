@@ -478,6 +478,17 @@ interface ReplayUserData {
 
 type UserData = CompileUserData | ReplayUserData;
 
+/**
+ * The scraper's record of requested fields it never bound: what it already
+ * carried plus `names`, less any field bound since. Empty is undefined, which
+ * JSON drops, so a scraper that bound everything is written exactly as before.
+ */
+function withFieldsNotFound(scraper: CompiledScraper, names: readonly string[]): { fieldsNotFound: string[] | undefined } {
+  const bound = (name: string) => name in scraper.fields || (scraper.detail !== null && name in scraper.detail.fields);
+  const missing = [...new Set([...(scraper.fieldsNotFound ?? []), ...names])].filter((name) => !bound(name)).sort();
+  return { fieldsNotFound: missing.length > 0 ? missing : undefined };
+}
+
 function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePlan[], chooser: Chooser | null, charger: Charger): RunSummary {
   const usage = chooser?.usage();
   const clean: Status = state.items > 0 && !(state.unhealed > 0 && state.failedItems >= state.items) ? "succeeded" : state.unhealed > 0 ? "drift" : "no_items_found";
@@ -514,7 +525,10 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
     charges: { ...charger.counts },
     zeroDataRetention: usage?.zeroDataRetention ?? null,
   };
-  if (partial) summary.message = `fields not found: ${fieldsNotFound.join(", ")} — every row carries them as null`;
+  // The remedy is --force-recompile on the compiling run and its replays
+  // alike: the scraper is stored either way, and every later run replays it
+  // without asking the chooser again.
+  if (partial) summary.message = `fields not found: ${fieldsNotFound.join(", ")} — every row carries them as null, and so will every replay of this scraper; --force-recompile compiles it again`;
   if (state.stop) {
     summary.message = state.stop.message;
     if (state.stop.needsHuman) summary.needsHuman = state.stop.needsHuman;
@@ -725,6 +739,9 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
         tally: {},
         healedFields: new Set(),
       });
+      // A stored scraper compiled without a requested field replays without
+      // it: the run is as `partial` as the one that compiled it.
+      for (const name of loaded.scraper?.fieldsNotFound ?? []) state.fieldsNotFound.add(name);
     }
   } catch (error) {
     if (error instanceof ScraperStoreError) return fail(error.status, error.message);
@@ -940,6 +957,8 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     let compiled: CompiledScraper;
     /** Record mode: what the compile core kept, for `--work`. */
     let core: CompiledTemplate["core"];
+    /** Requested and never bound: written into the scraper so its replays say so too. */
+    let unbound: string[] = [];
     try {
       if (mode === "record") {
         // the other samples are independent pages of one context: open them together
@@ -956,6 +975,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
         );
         const outcome = await compileRecord(plan, data, [{ page, status: response?.status() }, ...extra]);
         for (const name of outcome.fieldsNotFound) state.fieldsNotFound.add(name);
+        unbound = outcome.fieldsNotFound;
         if (outcome.stop) {
           stopWith(state, crawler, outcome.stop);
           return;
@@ -980,6 +1000,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
           context: page.context(),
         });
         for (const name of result.fieldsNotFound) state.fieldsNotFound.add(name);
+        unbound = result.fieldsNotFound;
         if (!result.ok) {
           ctxLog(`template ${plan.templateKey}: ${result.status}`);
           return;
@@ -999,7 +1020,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     // It goes into the document rather than beside it, so a recompile that
     // fails cannot leave yesterday's canary next to today's scraper.
     const canary = await recordPageCanary(request.url, response?.status(), page, ctxLog);
-    const scraper = validateScraper({ ...compiled, trace, entry, canary });
+    const scraper = validateScraper({ ...compiled, trace, entry, canary, ...withFieldsNotFound(compiled, unbound) });
     await store.put(scraper);
     await deps.onCompiled?.({ templateKey: plan.templateKey, mode, spec: specFor(plan), scraper, ...(core === undefined ? {} : { core }) });
     plan.scraper = scraper;
@@ -1576,7 +1597,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       const counted = await countPages(result.pagesOpened, `detail samples of ${ctx.page.url()}`);
       for (const name of result.fieldsNotFound) state.fieldsNotFound.add(name);
       if (!counted || !result.ok) return items.map((item) => mergeDetail(item, null, detailFieldNames));
-      live = result.scraper;
+      live = validateScraper({ ...result.scraper, ...withFieldsNotFound(result.scraper, result.fieldsNotFound) });
       await store.put(live);
       plan.scraper = live;
       for (const [url, sample] of result.samples) samples.set(url, sample);

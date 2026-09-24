@@ -237,8 +237,12 @@ export async function intersectCandidates(samples: ReadonlyArray<readonly LeafCa
   return out;
 }
 
-/** How many values a list shows per sample in its label. */
-const LIST_LABEL_VALUES = 1;
+/**
+ * How many values a list shows per sample in its label. Three, not one: with
+ * one, `4 values: "change", …` read the same as the positional single it was
+ * asked against, and the label never showed that the elements are the field.
+ */
+const LIST_LABEL_VALUES = 3;
 const LIST_VALUE_CHARS = 20;
 
 function listSample(values: readonly string[]): string {
@@ -262,12 +266,17 @@ export function fieldQuestionId(name: string, suffix = ""): string {
 
 /** The facts behind a candidate option, for structured backends. */
 export function candidateContext(candidate: FieldCandidate, samePath = 1): JsonValue {
-  const out: { [key: string]: JsonValue } = { path: candidate.path, shape: candidate.shape, values: candidate.values.map((v) => clip(v, LABEL_VALUE_CHARS)) };
-  if (candidate.attr) out.attribute = candidate.attr;
+  const out: { [key: string]: JsonValue } = { path: candidate.path, shape: candidate.shape };
   if (candidate.multiple && candidate.lists) {
+    // A list's values are its elements per record. `values` would be the first
+    // element of each, which is what a positional single reads as.
     out.multiple = true;
     out.values_per_sample = candidate.lists.map((l) => l.map((v) => clip(v, LABEL_VALUE_CHARS)));
+    out.count_per_sample = candidate.lists.map((l) => l.length);
+  } else {
+    out.values = candidate.values.map((v) => clip(v, LABEL_VALUE_CHARS));
   }
+  if (candidate.attr) out.attribute = candidate.attr;
   // Several candidates on one path are the rows of a list (related products, a menu), not the page's own value.
   if (samePath > 1) out.candidates_on_same_path = samePath;
   return out;

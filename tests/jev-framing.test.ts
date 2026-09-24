@@ -4,6 +4,7 @@ import type { Experimental_EvaluationModelV4CallOptions } from "@ai-sdk/provider
 import { gateId, JevChooser, toEvaluationQuestion, toEvaluationState } from "../src/chooser/jev.js";
 import { jevFraming, premises } from "../src/chooser/questions.js";
 import type { Question } from "../src/chooser/chooser.js";
+import { buildListQuestions, type FieldCandidate } from "../src/compile/index.js";
 import { familyOf } from "../tools/measure/bank.js";
 
 /**
@@ -130,6 +131,55 @@ describe("Jev framing: structured state, instructions and criteria", () => {
     expect(["group", "field.title", "heal.step.2", "heal.price", "link.next", "nav.0.op", "nav.3.done", "nav.1.click", "text.0"].map(familyOf)).toEqual([
       "group", "field", "heal.step", "heal.field", "link", "nav.op", "nav.done", "nav.target", "text",
     ]);
+  });
+});
+
+/**
+ * The list follow-up as the quotes run of 2026-09-24 asked it: tags answered
+ * none, and the follow-up offers every tag of each quote as one list.
+ */
+function listFollowUp(): Question {
+  const lists = [["change", "deep-thoughts", "thinking", "world"], ["abilities", "choices"], ["inspirational", "life", "live", "miracle", "miracles"]];
+  const tags: FieldCandidate = { key: "list:div.tags a.tag", path: "div.tags/a.tag", selector: "div.tags > a.tag", values: lists.map((l) => l[0]!), shape: "text", multiple: true, lists };
+  const hrefs: FieldCandidate = { ...tags, key: "list:div.tags a.tag@href", path: "div.tags/a.tag/@href", attr: "href", shape: "url", values: lists.map((l) => `/tag/${l[0]}/`), lists: lists.map((l) => l.map((t) => `/tag/${t}/`)) };
+  const fields = [{ name: "quote" }, { name: "author" }, { name: "tags", description: "Tags associated with the quote" }];
+  const mapped = new Map<string, FieldCandidate | null>([["quote", null], ["author", null], ["tags", null]]);
+  const shared = { records: "quotes", fields, samples: ["q1", "q2", "q3"], mode: "list" as const };
+  const followUps = buildListQuestions(fields, mapped, [tags, hrefs], "state", "", shared).filter((f) => f.field === "tags");
+  return followUps[0]!.question;
+}
+
+describe("Jev framing: the list follow-up (field_list)", () => {
+  it("carries its own rule and its own none, not the generic 'None of the options is right.'", () => {
+    const { question, keys } = toEvaluationQuestion(listFollowUp());
+    if (question.type !== "choice") throw new Error("choice expected");
+    const instructions = question.instructions as Record<string, unknown>;
+    expect(instructions.decision).toBe("field_list");
+    expect(instructions.rule).toBe(jevFraming.rule("field_list"));
+    // What the rule has to tell Jev: several values per record are one list,
+    // counts differ, and link targets are not the tag text.
+    expect(instructions.rule).toMatch(/several values per record/);
+    expect(instructions.rule).toMatch(/count differs per record/);
+    expect(instructions.rule).toMatch(/@href/);
+    expect(question.criteria.none).toEqual(jevFraming.none("field_list"));
+    expect(question.criteria.none).toMatchObject({ what: expect.stringContaining("No offered list"), not_for: expect.stringContaining("pick it") });
+    expect(keys).toEqual(["option_0", "option_1", "none"]);
+  });
+
+  it("each option is its elements per record and their counts, not the first element of each", () => {
+    const { question } = toEvaluationQuestion(listFollowUp());
+    if (question.type !== "choice") throw new Error("choice expected");
+    expect(question.criteria.option_0).toEqual({
+      path: "div.tags/a.tag",
+      shape: "text",
+      multiple: true,
+      values_per_sample: [["change", "deep-thoughts", "thinking", "world"], ["abilities", "choices"], ["inspirational", "life", "live", "miracle", "miracles"]],
+      count_per_sample: [4, 2, 5],
+    });
+  });
+
+  it("the option label shows several values per item", () => {
+    expect(listFollowUp().options![0]).toBe('div.tags/a.tag (every match, as a list) = 4 values: "change", "deep-thoughts", "thinking", … | 2 values: "abilities", "choices" | 5 values: "inspirational", "life", "live", …');
   });
 });
 

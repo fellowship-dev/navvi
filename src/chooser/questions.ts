@@ -47,11 +47,12 @@ export const premises = {
   promptToInput: (errors: readonly string[] = []): string => {
     const base = [
       "Parse the prompt into the structured run input as JSON matching the schema. Use only what the prompt states; never invent URLs.",
-      'Schema: {"mode":"list"|"record","description":string,"fields":[{"name":string,"description"?:string}],"goal"?:string,"profile"?:"store"|"local","followDetailPages"?:boolean,"paginate"?:boolean,"secretsExpected"?:string[]}.',
+      'Schema: {"mode":"list"|"record","description":string,"fields":[{"name":string,"description"?:string}],"goal"?:string,"profile"?:"store"|"local","followDetailPages"?:boolean,"paginate"?:boolean,"maxItems"?:number,"maxPages"?:number,"secretsExpected"?:string[]}.',
       "mode: list when the prompt wants many rows from listing pages, record when it wants the values of each given page.",
       "description: one sentence naming the records. fields: the values to extract, in prompt order, each with a short description when the prompt gives one.",
       "goal: required when the prompt asks to search, filter, navigate, log in or act before extracting. Preserve the query and requested action. Example: search for Python jobs means goal: search for Python jobs. Omit goal only for extraction from the given page. profile: local when the goal needs an account or secrets, else omit.",
       "followDetailPages: true when fields live on linked detail pages. paginate: false when the prompt says this page only.",
+      "maxItems: the most records the prompt asks for, as a number (up to 10, the first 5, top 3); omit when it states no count. maxPages: the most pages the prompt allows (the first 3 pages); omit when it states none.",
       "secretsExpected: the secret names a login or form will need (e.g. username, password); names only, never values.",
       "Answer with the JSON object only.",
     ];
@@ -152,6 +153,8 @@ export const jevFraming = {
         return { what: "No candidate holds this field's value at all", not_for: "Two candidates both hold the value: pick the one whose values are exactly the field, not the breadcrumb, a related item or a label" };
       case "field_reading":
         return { what: "No offered reading is this field", not_for: "Two readings both look right: follow the quoted rule, then the field's description, and pick one" };
+      case "field_list":
+        return { what: "No offered list is this field: its elements are labels, another field's values or the page's furniture", not_for: "A list whose every element is one value of the field, even when a record has only one: pick it" };
       case "list_group":
         return { what: "No candidate group is the list of records", not_for: "A single candidate that does hold one record per item: pick it" };
       case "next_page_link":
@@ -207,6 +210,11 @@ export const jevFraming = {
         return "The right candidate shows the field's value and nothing else on every sample. A candidate showing a label (such as 'Price:'), a related record, a breadcrumb or a longer text that merely contains the value is not it.";
       case "field_reading":
         return "Each option is a value the site itself states on every sample, read from its own declaration or payload key. The right reading is the one the field and the case's rules describe. Another fact of the same record (a second price, a laboratory, an ingredient, a title written for search engines, a unit) is not it however alike the values look. A quoted rule outranks every other signal.";
+      case "field_list":
+        // 2026-09-24: without it Jev read the list question with the generic
+        // none ("None of the options is right.") and split the quotes run's
+        // tags 0.50 list to 0.44 none -- one run in two compiled no tags.
+        return "Each option is every element one selector matches in a record, as one list: values_per_sample is that list on each sample record and count_per_sample its length. A field that holds several values per record (tags, categories, authors, images) is the list whose every element is one value of the field; the count differs per record and a record may have a single one. A field bound to one chosen element of such a list is the whole list when the field names several values. Element text is the value; the list of link targets (an @href attribute) is the field only when the field asks for links or URLs.";
       case "heal_field_value":
         return "The page was redesigned; the field may still be shown. Earlier values come from other pages: they show the kind and shape of value to look for, not the value to find. The right candidate shows this page's own value of the field, not a label, a breadcrumb, or a value from a list of other records (several candidates on one path).";
       case "list_group":

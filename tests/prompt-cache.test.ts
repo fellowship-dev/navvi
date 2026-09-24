@@ -78,3 +78,79 @@ describe("persisted prompt interpretation", () => {
    expect(s.ask).toHaveBeenCalledTimes(1);
    expect(s.store.setValue).toHaveBeenCalledTimes(1);
  });
+
+/**
+ * The limits a prompt states (2026-09-24): "up to 10" was read as nothing and
+ * a quotes run returned 100 rows. The interpretation carries them; the
+ * caller's explicit --max-items / --max-pages still win, and never enter the
+ * cached record.
+ */
+describe("limits the prompt states", () => {
+  const quotes = "Extract the quote text, author and tags of each quote, up to 10";
+  const answer = { mode: "list", description: "quotes", fields: [{ name: "quote" }, { name: "author" }, { name: "tags" }], maxItems: 10 };
+  function scripted(structured: object) {
+    const s = setup();
+    s.ask.mockImplementation(async (qs) => qs.map((q: { id: string }) => ({ id: q.id, index: null, text: JSON.stringify(structured) })));
+    return s;
+  }
+
+  it("the parse premise asks for them", () => {
+    const s = setup();
+    return promptToInput(quotes, {}, s.chooser, s.actor).then(() => {
+      const premise = (s.ask.mock.calls[0]![0] as Array<{ premise: string }>)[0]!.premise;
+      expect(premise).toContain('"maxItems"?:number');
+      expect(premise).toMatch(/maxItems: the most records the prompt asks for/);
+      expect(premise).toContain('"maxPages"?:number');
+    });
+  });
+
+  it("'up to 10' becomes maxItems 10, on the parse and on a cache hit", async () => {
+    const s = scripted(answer);
+    expect((await promptToInput(quotes, {}, s.chooser, s.actor)).input.maxItems).toBe(10);
+    expect((await promptToInput(quotes, {}, s.chooser, s.actor)).input.maxItems).toBe(10);
+    expect(s.ask).toHaveBeenCalledTimes(1);
+  });
+
+  it("an explicit --max-items wins, and never enters the record", async () => {
+    const s = scripted(answer);
+    expect((await promptToInput(quotes, { maxItems: 3 }, s.chooser, s.actor)).input.maxItems).toBe(3);
+    // the cached interpretation is the prompt's: a later run without the flag reads 10
+    expect((await promptToInput(quotes, {}, s.chooser, s.actor)).input.maxItems).toBe(10);
+    expect(s.ask).toHaveBeenCalledTimes(1);
+    const record = JSON.stringify([...s.records.values()]);
+    expect(record).toContain('"maxItems":10');
+    expect(record).not.toContain('"maxItems":3');
+  });
+
+  it("maxPages is read too; paginate false still means one page, and --max-pages wins", async () => {
+    const pages = scripted({ ...answer, maxItems: undefined, maxPages: 3 });
+    expect((await promptToInput("quotes from the first 3 pages", {}, pages.chooser, pages.actor)).input.maxPages).toBe(3);
+    expect((await promptToInput("quotes from the first 3 pages", { maxPages: 5 }, pages.chooser, pages.actor)).input.maxPages).toBe(5);
+    const one = scripted({ ...answer, paginate: false, maxPages: 3 });
+    expect((await promptToInput("quotes on this page only", {}, one.chooser, one.actor)).input.maxPages).toBe(1);
+  });
+
+  it("no stated limit leaves the defaults", async () => {
+    const s = scripted({ ...answer, maxItems: undefined });
+    const { input } = await promptToInput(quotes, {}, s.chooser, s.actor);
+    expect(input.maxItems).toBe(1000);
+    expect(input.maxPages).toBe(10);
+  });
+
+  it("an out-of-range limit is a rejected parse, retried with the problem named", async () => {
+    const s = setup();
+    s.ask
+      .mockImplementationOnce(async (qs) => qs.map((q: { id: string }) => ({ id: q.id, index: null, text: JSON.stringify({ ...answer, maxItems: 0 }) })))
+      .mockImplementationOnce(async (qs) => qs.map((q: { id: string }) => ({ id: q.id, index: null, text: JSON.stringify(answer) })));
+    expect((await promptToInput(quotes, {}, s.chooser, s.actor)).input.maxItems).toBe(10);
+    expect((s.ask.mock.calls[1]![0] as Array<{ premise: string }>)[0]!.premise).toContain("maxItems");
+  });
+
+  it("a version-1 record, which never read the limits, is a miss", async () => {
+    const s = scripted(answer);
+    const key = promptCacheKey(quotes, "store");
+    s.records.set(key, { version: 1, key, structured: { ...answer, maxItems: undefined } });
+    expect((await promptToInput(quotes, {}, s.chooser, s.actor)).input.maxItems).toBe(10);
+    expect(s.ask).toHaveBeenCalledTimes(1);
+  });
+});

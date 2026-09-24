@@ -246,6 +246,15 @@ export const CompiledScraperSchema = z
      * things. The store keeps the two together by writing one record.
      */
     canary: CanarySchema.nullish(),
+    /**
+     * Fields the run asked for that the compile never bound: they are not in
+     * `fields`, so every row carries them as null. Recorded so a replay ends
+     * `partial` with the same `fields not found` line the compiling run
+     * printed; on 2026-09-24 the quotes scraper compiled without `tags`
+     * replayed as `succeeded`, tags null on every row. Absent on scrapers
+     * written before then, which replay as they always did.
+     */
+    fieldsNotFound: z.array(fieldName).optional(),
   })
   .superRefine((doc, ctx) => {
     if (doc.mode === "list" && !doc.item) {
@@ -253,6 +262,9 @@ export const CompiledScraperSchema = z
     }
     if (Object.keys(doc.fields).length === 0) {
       ctx.addIssue({ code: "custom", path: ["fields"], message: "a scraper needs at least one field" });
+    }
+    for (const name of doc.fieldsNotFound ?? []) {
+      if (name in doc.fields) ctx.addIssue({ code: "custom", path: ["fieldsNotFound"], message: `"${name}" is bound, so it is not a field not found` });
     }
     if (doc.detail && !(doc.detail.linkField in doc.fields)) {
       ctx.addIssue({ code: "custom", path: ["detail", "linkField"], message: `detail.linkField "${doc.detail.linkField}" is not a field` });

@@ -6,7 +6,7 @@ import { premises } from "../chooser/questions.js";
 import { isRecord } from "../util/text.js";
 import type { ActorLike } from "../scraper/store.js";
 import { credentialMessage, findCredential, looksLikeCredential } from "./credentials.js";
-import { MODES, PROFILES, parseInput, type RunInput } from "./schema.js";
+import { LIMITS, MODES, PROFILES, parseInput, type RunInput } from "./schema.js";
 
 /**
  * U16 / R1 / KTD11: `prompt` is the only required input. A cache miss asks a
@@ -28,6 +28,14 @@ export const StructuredFromPromptSchema = z.object({
   followDetailPages: z.boolean().optional(),
   /** false when the prompt asks for this page only; true or absent follows next-page links. */
   paginate: z.boolean().optional(),
+  /**
+   * The most records the prompt asks for ("up to 10", "the first 5"). Without
+   * it "up to 10" was read as nothing and a quotes run returned 100 rows
+   * (2026-09-24). An explicit --max-items still wins.
+   */
+  maxItems: z.number().int().min(1).max(LIMITS.maxItems).optional(),
+  /** The most listing pages the prompt allows ("the first 3 pages"). An explicit --max-pages still wins. */
+  maxPages: z.number().int().min(1).max(LIMITS.maxPages).optional(),
   /** Secret names the goal will need, e.g. ["username", "password"]. Names, never values. */
   secretsExpected: z.array(z.string().min(1)).optional(),
 });
@@ -199,13 +207,21 @@ function merge(prompt: string, structured: StructuredFromPrompt, base: Partial<R
     goal: structured.goal,
     profile: structured.profile ?? (needsSecrets ? "local" : undefined),
     followDetailPages: structured.followDetailPages,
-    maxPages: structured.paginate === false ? 1 : undefined,
+    maxItems: structured.maxItems,
+    maxPages: structured.paginate === false ? 1 : structured.maxPages,
   });
   return parseInput({ ...fromPrompt, ...defined(base), prompt });
 }
 
-/** Bump when normalization/merge semantics change. The schema and parsing premise are hashed too. */
-const PROMPT_CACHE_VERSION = 1;
+/**
+ * Bump when normalization/merge semantics change. The schema and parsing
+ * premise are hashed too. 2: the limits the prompt states (`maxItems`,
+ * `maxPages`) are part of the interpretation, so a version-1 record, which
+ * never read them, is a miss. They are keyed by the prompt like the rest of
+ * it; the caller's own --max-items and --max-pages never enter the record and
+ * win on merge, cache hit or not.
+ */
+const PROMPT_CACHE_VERSION = 2;
 export function promptCacheKey(prompt: string, profile: string): string {
   return "prompt-" + createHash("sha256").update(JSON.stringify({
     version: PROMPT_CACHE_VERSION, prompt, profile,
