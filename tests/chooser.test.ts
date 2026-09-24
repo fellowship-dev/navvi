@@ -26,7 +26,7 @@ import { AgentChooser, QUESTIONS_START, QUESTIONS_END, loadAnswersFile } from ".
 import { JevChooser, JEV_MAX_STATE_TOKENS, JEV_PRICE_PER_MILLION_INPUT_USD, TypeSafeEvaluationModel } from "../src/chooser/jev.js";
 import { ModelChooser, DEFAULT_MODEL_ID, DEFAULT_MODEL_STATE_CHARS, MODEL_PRICES } from "../src/chooser/model.js";
 import { RecordedChooser, RecordingChooser } from "../src/chooser/recorded.js";
-import type { CliRunner, CliRunResult } from "../src/chooser/cli.js";
+import { CliUnavailableError, type CliRunner, type CliRunResult } from "../src/chooser/cli.js";
 import { TextFallbackChain, createChooser } from "../src/chooser/index.js";
 import { Budget, BudgetExhaustedError, ModelUnavailableError, NavviError, NeedsHumanError } from "../src/billing/budget.js";
 
@@ -820,6 +820,20 @@ describe("text fallback precedence: subscription before metered", () => {
     const answers = await chain.ask([textQuestion()]);
     expect(answers[0]?.text).toBe("from the next writer");
     expect(chain.name).toBe("codex");
+  });
+
+  it("a signed-in CLI that failed never reaches a metered model, even through a signed-out CLI", async () => {
+    // Found by the Hacker News recording, 2026-09-24: Claude Code failed the prompt
+    // question, the chain moved to Codex (installed, signed out), and Codex's
+    // CliUnavailableError moved it on to the metered model, which answered and billed.
+    const usage = (name: ChooserName) => ({ chooser: name, questions: 0, textQuestions: 0, batches: 0, inputTokens: 0, outputTokens: 0, waitMs: 0, costUsd: 0, zeroDataRetention: "not_applicable" as const });
+    const failed: Chooser = { name: "claude", ask: () => Promise.reject(new ModelUnavailableError("Claude Code gave no usable answer")), usage: () => usage("claude") };
+    const signedOut: Chooser = { name: "codex", ask: () => Promise.reject(new CliUnavailableError("Codex is installed but not signed in")), usage: () => usage("codex") };
+    let metered = 0;
+    const model: Chooser = { name: "model", ask: async (b) => { metered += 1; return b.map((q) => ({ id: q.id, index: null, text: "billed" })); }, usage: () => usage("model") };
+    const chain = new TextFallbackChain([{ name: "claude", build: () => failed }, { name: "codex", build: () => signedOut }, { name: "model", build: () => model }]);
+    await expect(chain.ask([textQuestion()])).rejects.toBeInstanceOf(ModelUnavailableError);
+    expect(metered).toBe(0);
   });
 
   it("the last writer's timeout still ends the run model_unavailable", async () => {

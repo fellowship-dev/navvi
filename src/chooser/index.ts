@@ -174,6 +174,8 @@ export class TextFallbackChain implements Chooser {
   private readonly candidates: TextFallbackCandidate[];
   private readonly built: (Chooser | undefined)[];
   private index = 0;
+  /** The first failure of a signed-in CLI; once set, the chain never reaches a metered model. */
+  private signedInFailure: ModelUnavailableError | undefined;
 
   constructor(candidates: TextFallbackCandidate[]) {
     this.candidates = candidates;
@@ -191,11 +193,15 @@ export class TextFallbackChain implements Chooser {
         return await this.member().ask(batch);
       } catch (err) {
         // A missing or signed-out writer hands over to the next one. A signed-in one that
-        // runs out of time hands over only to another subscription CLI: a busy Claude Code
-        // is a reason to try Codex, never a reason to start spending on an API.
+        // failed hands over only to another subscription CLI: a busy Claude Code is a
+        // reason to try Codex, never a reason to start spending on an API — and a
+        // signed-out Codex after it is not a side door to one either (found by the
+        // Hacker News recording, 2026-09-24, which billed the metered model that way).
+        if (err instanceof ModelUnavailableError) this.signedInFailure ??= err;
         const next = this.candidates[this.index + 1];
         const movesOn = err instanceof CliUnavailableError || (err instanceof ModelUnavailableError && next !== undefined && next.name !== "model");
-        if (!movesOn || next === undefined) throw err;
+        if (!movesOn || next === undefined) throw this.signedInFailure ?? err;
+        if (next.name === "model" && this.signedInFailure !== undefined) throw this.signedInFailure;
         this.index += 1;
       }
     }
