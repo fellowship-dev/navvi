@@ -713,7 +713,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   const guard = makeRequestGuard(input.allowPrivateHosts, urls);
 
   // Cache lookup per template (R5, R38) before any browser work.
-  const store = deps.store ?? (await ScraperStore.open({ actor }));
+  const store = deps.store ?? (await ScraperStore.open({ actor, ...(env.NAVVI_SCRAPER_STORE ? { storeName: env.NAVVI_SCRAPER_STORE } : {}) }));
   const grouped = groupByTemplate(urls);
   try {
     for (const [templateKey, templateUrls] of grouped) {

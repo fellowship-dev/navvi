@@ -325,7 +325,7 @@
     "scraperStore": {
       "title": "Scraper store",
       "type": "string",
-      "description": "The key-value store holding the pinned scraper; defaults to the named store scraper-cache in your account. Used when scriptId is a bare key.",
+      "description": "The key-value store this run reads and writes its scrapers in; defaults to the named store scraper-cache in your account. Set it to keep a trial run's scrapers out of the shared cache. A bare scriptId is read from it.",
       "resourceType": "keyValueStore",
       "editor": "resourcePicker"
     },

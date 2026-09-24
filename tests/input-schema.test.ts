@@ -100,7 +100,7 @@ describe("actorInput (R23)", () => {
   it("moves the caller keys into the run env, strips them from the input and qualifies a bare scriptId with the store", () => {
     const raw = { startUrls: ["https://example.org/"], typesafeApiKey: " ts-key ", gatewayApiKey: "", anthropicApiKey: "ant", scraperStore: "my-store", scriptId: "python-jobs-abc" };
     const { input, env } = actorInput(raw, { TYPESAFE_API_KEY: "operator", PATH: "/bin" });
-    expect(env).toEqual({ TYPESAFE_API_KEY: "ts-key", ANTHROPIC_API_KEY: "ant", PATH: "/bin" });
+    expect(env).toEqual({ TYPESAFE_API_KEY: "ts-key", ANTHROPIC_API_KEY: "ant", PATH: "/bin", NAVVI_SCRAPER_STORE: "my-store" });
     expect(input).toEqual({ startUrls: ["https://example.org/"], scriptId: "my-store/python-jobs-abc" });
     for (const key of ACTOR_ONLY_KEYS) expect(key in input, key).toBe(false);
     // the raw object is untouched
@@ -146,3 +146,17 @@ describe("actorInput: the U16 retirement knobs", () => {
   // them from the input" (PATH survives); "ignores a nonsensical threshold"
   // asserts that no NAVVI_* var is invented when none is set.
 });
+
+describe("scraperStore names where a run keeps its scrapers", () => {
+  it("routes reads and writes to the named store, so a trial run never touches scraper-cache", () => {
+    // A gate run against a client's list must not write a scraper into the account's
+    // shared scraper-cache (2026-09-23 mission). Before this, scraperStore only
+    // qualified a bare scriptId for reading; every put still landed in scraper-cache.
+    const { input, env } = actorInput({ startUrls: [{ url: "https://example.test/p/1" }], scraperStore: "navvi-trial" }, {});
+    expect(env.NAVVI_SCRAPER_STORE).toBe("navvi-trial");
+    expect(input.scraperStore).toBeUndefined();
+    expect(actorInput({ scriptId: "abc", scraperStore: "navvi-trial" }, {}).input.scriptId).toBe("navvi-trial/abc");
+    expect(actorInput({ startUrls: [] }, {}).env.NAVVI_SCRAPER_STORE).toBeUndefined();
+  });
+});
+

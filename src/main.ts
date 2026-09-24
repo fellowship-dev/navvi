@@ -170,8 +170,11 @@ export function actorInput(raw: unknown, base: NodeJS.ProcessEnv = process.env):
     delete input[key];
     if (typeof value === "number" && Number.isInteger(value) && value >= 1) env[DEBUG_KEY_ENV[key]!] = String(value);
   }
-  if (typeof scraperStore === "string" && scraperStore.length > 0 && typeof input.scriptId === "string" && input.scriptId.length > 0 && !input.scriptId.includes("/")) {
-    input.scriptId = `${scraperStore}/${input.scriptId}`;
+  if (typeof scraperStore === "string" && scraperStore.length > 0) {
+    // The run keeps its scrapers there too, reads and writes: a trial against a
+    // client's list must not put a scraper into the account's shared scraper-cache.
+    env.NAVVI_SCRAPER_STORE = scraperStore;
+    if (typeof input.scriptId === "string" && input.scriptId.length > 0 && !input.scriptId.includes("/")) input.scriptId = `${scraperStore}/${input.scriptId}`;
   }
   return { input, env };
 }
