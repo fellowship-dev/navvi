@@ -92,7 +92,7 @@ export function summarize(reconciliation: Reconciliation, dataLine = ""): string
   lines.push(`  ${pad("obtainable")}${reconciliation.obtainable.length - split.length} of ${requested}${extra}${from}`);
 
   for (const field of reconciliation.notObtainable) {
-    lines.push(`  ${pad(field.kind === "type-gap" ? "type gap" : "not obtainable")}${field.field}: ${field.because}`);
+    lines.push(`  ${pad(field.kind === "type-gap" ? "type gap" : field.kind === "shared-path" ? "shared path" : "not obtainable")}${field.field}: ${field.because}`);
   }
 
   if (reconciliation.available.length > 0) {

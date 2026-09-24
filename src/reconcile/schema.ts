@@ -87,8 +87,12 @@ export interface ObtainableField {
  * `type-gap` — something *was* stated and the declared type refused it. Never
  * reported as a plain absence: the site answered, the column did not fit, and
  * that is a decision the client owns rather than a hole in the site.
+ * `shared-path` — the manuscript bound this field and another to one reading.
+ * One leaf is one fact, so neither is obtainable from it; `investigate` has
+ * refused to write such a manuscript since 2026-09-23, and this is what an
+ * older or edited one reads as.
  */
-export type NotObtainableKind = "no-candidate" | "type-gap";
+export type NotObtainableKind = "no-candidate" | "type-gap" | "shared-path";
 
 export interface NotObtainableField {
   field: string;

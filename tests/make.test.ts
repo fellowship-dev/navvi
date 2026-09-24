@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Writable } from "node:stream";
@@ -596,6 +596,57 @@ describe("re-running", () => {
 
     const scraper = JSON.parse(readFileSync(join(work(), "scraper.json"), "utf8")) as CompiledScraper;
     expect(Object.keys(scraper.fields)).not.toContain("sku");
+  });
+
+  /**
+   * U3 (R4): an open reconciliation does not compile.
+   *
+   * A live run on 2026-09-23 compiled a field whose reconciliation said eight
+   * readings compete, verdict `open`, "a person decides before this compiles"
+   * — because the driver never read `reconciliation.verdict`. The edit below
+   * is the smallest honest way to reach that state from these fixtures: a
+   * second declared reading of `listPrice` that disagrees with the bound one,
+   * with no rubric in the spec to settle it.
+   */
+  it("stops at reconcile with needs_answers when the reconciliation is open, and writes no scraper", async () => {
+    await seeded();
+    const file = join(work(), "investigation.json");
+    const manuscript = JSON.parse(readFileSync(file, "utf8")) as Manuscript;
+    const listPrice = manuscript.fields.find((entry) => entry.field === "listPrice")!;
+    expect(listPrice.path, "the fixtures bind listPrice at tier 1").toBeDefined();
+    listPrice.rejected.push({ tier: 1, path: "offers.priceSpecification.price", values: (listPrice.values ?? []).map(() => 1), because: "another declaration" });
+    writeFileSync(file, JSON.stringify(manuscript, null, 2) + "\n");
+    rmSync(join(work(), "scraper.json"));
+
+    const result = await make(
+      options({ answers: ["fields=productName,sku,listPrice:money,promoPrice:money,stock", "inputs=url_list"], urls: URLS }),
+      deps({ openPages: () => Promise.resolve(fixturePages()) }),
+    );
+
+    const reconciliation = JSON.parse(readFileSync(join(work(), "reconcile.json"), "utf8")) as Reconciliation;
+    expect(reconciliation.verdict).toBe("open");
+    expect(result.status, transcript()).toBe("needs_answers");
+    expect(result.stoppedAt).toBe("reconcile");
+    expect(result.because).toContain("listPrice");
+    expect(outcome(result, "reconcile")).toBe("ran");
+    for (const stage of ["schema", "determinism", "compile", "verify"] as const) expect(outcome(result, stage), stage).toBe("not reached");
+    expect(existsSync(join(work(), "scraper.json")), "an open reconciliation must not reach the compile").toBe(false);
+    expect(transcript()).toContain("! listPrice/competing-values");
+  });
+
+  it("through the binary, an open reconciliation exits 3 like any unanswered question", async () => {
+    await seeded();
+    const file = join(work(), "investigation.json");
+    const manuscript = JSON.parse(readFileSync(file, "utf8")) as Manuscript;
+    const listPrice = manuscript.fields.find((entry) => entry.field === "listPrice")!;
+    listPrice.rejected.push({ tier: 1, path: "offers.priceSpecification.price", values: (listPrice.values ?? []).map(() => 1), because: "another declaration" });
+    writeFileSync(file, JSON.stringify(manuscript, null, 2) + "\n");
+
+    const stderr = new Capture();
+    // The same URLs as the seeded run, so the sample is current and `--offline` reaches reconcile.
+    const code = await main(["make", "--work", work(), "--offline", ...URLS], io({ stderr }));
+    expect(code, stderr.text).toBe(3);
+    expect(stderr.text).toContain("stopped at reconcile");
   });
 
   /**

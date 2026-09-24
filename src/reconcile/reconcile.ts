@@ -226,13 +226,14 @@ function catalogue(manuscript: Manuscript): { leaves: InventoryRecord[]; evidenc
  * rule nothing executes is navvi's signature defect" is the bank's own sentence
  * about it.
  *
- * It is asked here and not at bind time on purpose. This stage is the one that
- * has the whole leaf catalogue with `anchored` already answered, and the
- * artifact that needs the sentence is this one: the client reads
- * `available` and has to be able to dismiss a row *for a reason*. The rule's
+ * It is asked here as well as at bind time, and the two answer different
+ * readers. This stage has the whole leaf catalogue with `anchored` already
+ * answered, and the artifact that needs the sentence is this one: the client
+ * reads `available` and has to be able to dismiss a row *for a reason*. The
  * other wiring point — refusing a leaf as a **binding** candidate, which is
- * what its `decides` line is about — is `catalogueOf` in
- * `src/investigate/investigate.ts` and is still open.
+ * what its `decides` line is about — is `bindField` in
+ * `src/investigate/bind.ts` since 2026-09-23, and a leaf it refused arrives
+ * here as a rejection carrying the rule's id.
  */
 const MACHINERY_RULE = "machine-value-is-not-a-fact";
 
@@ -663,9 +664,30 @@ export function reconcile(manuscript: Manuscript, spec: Spec, options: Reconcile
 
   // ------------------------------------------------------------- obtainable
 
+  /**
+   * R4 at the artifact the compile reads: one reading is one fact.
+   *
+   * `investigate` refuses to bind two fields to one path since 2026-09-23, and
+   * this is the same rule asked again of whatever manuscript arrived — one
+   * written before that, or one a person edited — because `make` reuses an
+   * `investigation.json` that is current, and a stale one carrying the
+   * `sku`/`stock` collision would otherwise compile it. Both fields are named
+   * as not obtainable, with the path they shared; neither is picked.
+   */
+  const readingOf = (record: FieldRecord): string =>
+    [record.source, record.match ?? "", record.selector ?? "", record.attr ?? "", record.entity ?? "", record.path].join("\u0000");
+  const boundTo = new Map<string, string[]>();
+  for (const record of manuscript.fields) {
+    if (record.path === undefined || record.tier === undefined || record.source === undefined) continue;
+    const reading = readingOf(record);
+    boundTo.set(reading, [...(boundTo.get(reading) ?? []), record.field]);
+  }
+  const sharedWith = (record: FieldRecord): string[] => (boundTo.get(readingOf(record)) ?? []).filter((name) => name !== record.field);
+
   const obtainable: ObtainableField[] = [];
   for (const record of manuscript.fields) {
     if (record.path === undefined || record.tier === undefined || record.source === undefined) continue;
+    if (sharedWith(record).length > 0) continue;
     const values = record.values ?? [];
     const declared = record.type;
     obtainable.push({
@@ -715,7 +737,20 @@ export function reconcile(manuscript: Manuscript, spec: Spec, options: Reconcile
   const notObtainable: NotObtainableField[] = [];
   for (const field of manuscript.requested) {
     const record = manuscript.fields.find((entry) => entry.field === field.name);
-    if (record === undefined || record.path !== undefined) continue;
+    if (record === undefined) continue;
+    if (record.path !== undefined) {
+      const others = record.source === undefined || record.tier === undefined ? [] : sharedWith(record);
+      if (others.length > 0) {
+        notObtainable.push({
+          field: field.name,
+          ...(field.type === undefined ? {} : { type: field.type }),
+          kind: "shared-path",
+          because: `shared path: ${record.match === undefined ? "" : `${record.match}:`}${record.path} is bound to ${field.name} and to ${others.join(" and ")}; one leaf cannot be ${others.length + 1} facts, so none of them is obtainable from it`,
+          stillAsked: stillAsked.has(field.name),
+        });
+      }
+      continue;
+    }
     const gap = typeGaps.get(field.name);
     notObtainable.push({
       field: field.name,
@@ -808,6 +843,10 @@ export function reconcile(manuscript: Manuscript, spec: Spec, options: Reconcile
           if (split === undefined) return rejection.tier === 1 && record.match === undefined;
           return split.match === (record.match ?? "");
         })
+        // A leaf a bank rule refused lost to the rule, not to the binding:
+        // offering it as a second reading would ask a person to choose a
+        // request id as a price.
+        .filter((rejection) => rejection.heuristic === undefined)
         .filter((rejection) => rejection.values.length > 0 && !sameValues(rejection.values, bound))
         .sort((a, b) => a.path.localeCompare(b.path));
       for (const rejection of competing) {

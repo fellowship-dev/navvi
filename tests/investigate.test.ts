@@ -404,3 +404,158 @@ describe("tier 2 — an endpoint one render never asked for", () => {
     });
   });
 });
+
+// -------------------------- tier 2: a payload must be this page's, and one path is one fact
+
+/**
+ * U3, from a live run on 2026-09-23: on a real pharmacy site `make` bound `sku`
+ * **and** `stock` to one leaf — `total` on a *recommendations* endpoint, the
+ * count of other products the page suggested — and every gate downstream
+ * passed, because every gate asks "did it extract?" and it did.
+ *
+ * Two defects, and this fixture carries both. The endpoint describes other
+ * products, and nothing asked whether the payload was about *this* page at all;
+ * and two fields settled on one path, and nothing asked whether that path had
+ * already been spent. The mechanism is exactly the live one: the product
+ * endpoint names `productName` and leaves `sku` and `stock` to a model (several
+ * survivors, no key naming them), while the recommendations endpoint has one
+ * anchored, varying leaf — `total` — and a lone survivor is accepted without a
+ * rule, for any text field that asks.
+ *
+ * Synthetic: Store A, `example.test`, invented values.
+ */
+describe("tier 2 — the payload has to be this page's, and one path is one fact", () => {
+  const ids = ["200001", "200002"] as const;
+  const urls = ids.map((id) => `https://example.test/p/${id}`);
+  const sample = chooseSample(
+    urls.map((url) => ({ url, status: 200, hasDeclaredProduct: undefined, priceCount: 1, inStock: true }) satisfies UrlProbe),
+    { size: 2 },
+  );
+  const pages = Object.fromEntries(urls.map((url) => [url, readFileSync(join(DIR, "store-b-shell.html"), "utf8")]));
+
+  const FIELDS: RequestedField[] = [
+    { name: "productName", type: "text" },
+    { name: "sku", type: "text" },
+    { name: "stock", type: "text" },
+  ];
+
+  const API = "https://api.example.test";
+  const NAMES = ["Ejemplo Gel Frio 30 g", "Otro Jarabe Infantil 60 ml"];
+  const PRICES = [5990, 8490];
+  /** The count of *suggested* products: a number the page shows, about other products. */
+  const TOTALS = [8, 12];
+  /** A request id per render: shaped like a token, varying, and shown to nobody. */
+  const TRACES = ["k3x9q2m7z4w8p1v6", "a7f2c9e4b1d8g5h3"];
+  /**
+   * The id is deliberately **not** in the page text. That keeps `productData.id`
+   * out of every text field's candidates, so the product endpoint leaves `sku`
+   * and `stock` unsettled — which is what hands them to the recommendations
+   * endpoint's lone survivor today — while it still anchors the payload to the
+   * page through the URL.
+   */
+  const TEXT = [
+    `${NAMES[0]} $ 5.990 Tambien te puede interesar ${TOTALS[0]} productos`,
+    `${NAMES[1]} $ 8.490 Tambien te puede interesar ${TOTALS[1]} productos`,
+  ];
+
+  const detailOf = (index: number): unknown => ({ productData: { id: ids[index], name: NAMES[index], price: PRICES[index] }, meta: { trace: TRACES[index] } });
+  const recommendationsOf = (index: number): unknown => ({
+    total: TOTALS[index],
+    products: [
+      { id: `30010${index}`, name: `Sugerido Uno ${index}`, price: 1990 + index },
+      { id: `30020${index}`, name: `Sugerido Dos ${index}`, price: 2990 + index },
+    ],
+  });
+
+  async function runWith(extra: (index: number) => Capture["responses"]): Promise<Manuscript> {
+    const captures = Object.fromEntries(
+      urls.map((url, index) => [
+        url,
+        {
+          responses: [{ url: `${API}/catalog-svc/products/detail/${ids[index]}`, status: 200, body: detailOf(index) }, ...extra(index)],
+          text: TEXT[index]!,
+        } satisfies Capture,
+      ]),
+    );
+    const sources: Sources = {
+      fetch: (url: string) => Promise.resolve({ url, status: 200, body: pages[url] ?? "" }),
+      capture: (url: string) => Promise.resolve(captures[url] ?? { responses: [] }),
+    };
+    return investigate({ site: "store-a.example", fields: FIELDS, sample, sources, now: new Date("2026-09-23T18:00:00.000Z") });
+  }
+
+  const withRecommendations = (): Promise<Manuscript> =>
+    runWith((index) => [{ url: `${API}/catalog-svc/products/recommendations/${ids[index]}`, status: 200, body: recommendationsOf(index) }]);
+  const field = (manuscript: Manuscript, name: string): Manuscript["fields"][number] => manuscript.fields.find((entry) => entry.field === name)!;
+  const tier2 = (manuscript: Manuscript): Manuscript["tiers"][number] => manuscript.tiers.find((entry) => entry.tier === 2)!;
+
+  it("binds nothing from a recommendations endpoint that never names this page", async () => {
+    const manuscript = await withRecommendations();
+    for (const name of ["sku", "stock"]) {
+      expect(field(manuscript, name).match, `${name} came out of ${field(manuscript, name).match}:${field(manuscript, name).path}`).toBeUndefined();
+      expect(field(manuscript, name).path, name).toBeUndefined();
+    }
+    expect(manuscript.fields.some((entry) => entry.match?.includes("recommendations"))).toBe(false);
+    // Recorded, not silently dropped: the rejection says why the endpoint was refused.
+    const refused = field(manuscript, "sku").rejected.find((rejection) => rejection.path === "catalog-svc/products/recommendations:total");
+    expect(refused?.because).toContain("not this page's");
+    expect(tier2(manuscript).because).toContain("catalog-svc/products/recommendations");
+    expect(manuscript.uncovered).toEqual(["sku", "stock"]);
+  });
+
+  it("still binds from the product endpoint whose id is the URL's id", async () => {
+    const manuscript = await withRecommendations();
+    expect(field(manuscript, "productName").tier).toBe(2);
+    expect(field(manuscript, "productName").match).toBe("catalog-svc/products/detail");
+    expect(field(manuscript, "productName").path).toBe("productData.name");
+    expect(field(manuscript, "productName").values).toEqual(NAMES);
+  });
+
+  it("unbinds both fields when their best readings are one path, and says which path", async () => {
+    // An endpoint that *is* this page's — its `productId` is the URL's id — and
+    // whose one anchored, varying leaf is the best reading for two fields at
+    // once. Being the right endpoint does not make one leaf two facts.
+    const manuscript = await runWith((index) => [
+      { url: `${API}/inventory-svc/availability/${ids[index]}`, status: 200, body: { productId: ids[index], units: TOTALS[index] } },
+    ]);
+    for (const name of ["sku", "stock"]) {
+      const record = field(manuscript, name);
+      expect(record.path, name).toBeUndefined();
+      expect(record.because, name).toContain("shared path");
+      expect(record.because, name).toContain("inventory-svc/availability:units");
+      const rejection = record.rejected.find((entry) => entry.path === "inventory-svc/availability:units");
+      expect(rejection?.because, name).toContain("shared path");
+    }
+    expect(field(manuscript, "sku").because).toContain("stock");
+    expect(field(manuscript, "stock").because).toContain("sku");
+    expect(manuscript.uncovered).toEqual(["sku", "stock"]);
+    expect(manuscript.tiers.find((entry) => entry.tier === 3)!.asked).toEqual(["sku", "stock"]);
+  });
+
+  it("rejects a machine value at bind, naming the rule that refused it", async () => {
+    const manuscript = await withRecommendations();
+    const record = field(manuscript, "sku");
+    const rejection = record.rejected.find((entry) => entry.path === "catalog-svc/products/detail:meta.trace");
+    expect(rejection, JSON.stringify(record.rejected, null, 2)).toBeDefined();
+    expect(rejection!.heuristic).toBe("machine-value-is-not-a-fact");
+    expect(record.verdicts.some((entry) => entry.id === "machine-value-is-not-a-fact" && entry.verdict.fires)).toBe(true);
+  });
+});
+
+describe("bindField — machine-value-is-not-a-fact runs at bind", () => {
+  it("refuses a token no page showed, by rule id, and leaves the real value bound", () => {
+    const leaves: Leaf[][] = [
+      [{ path: "a.name", value: "Ejemplo Gel Frio 30 g" }, { path: "a.requestId", value: "k3x9q2m7z4w8p1v6" }],
+      [{ path: "a.name", value: "Otro Jarabe Infantil 60 ml" }, { path: "a.requestId", value: "a7f2c9e4b1d8g5h3" }],
+    ];
+    const binding = bindField("productName", leaves, { type: "text", pageText: ["Ejemplo Gel Frio 30 g", "Otro Jarabe Infantil 60 ml"] });
+    expect(binding.path).toBe("a.name");
+    expect(binding.machinery.map((entry) => entry.path)).toEqual(["a.requestId"]);
+    expect(binding.verdicts.find((entry) => entry.id === "machine-value-is-not-a-fact")?.verdict.fires).toBe(true);
+  });
+
+  it("stays silent without rendered text: nobody looked, which is not the same as nobody was shown", () => {
+    const leaves: Leaf[][] = [[{ path: "a.requestId", value: "k3x9q2m7z4w8p1v6" }], [{ path: "a.requestId", value: "a7f2c9e4b1d8g5h3" }]];
+    expect(bindField("productName", leaves, { type: "text" }).machinery).toEqual([]);
+  });
+});

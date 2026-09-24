@@ -941,10 +941,21 @@ describe("a HAR compiles the same scraper a live render would", () => {
     expect(field(manuscript, "listPrice").path).toBe("productData.prices[price-list-std]");
     expect(field(manuscript, "listPrice").match).toBe("catalog-svc/products/detail");
     expect(field(manuscript, "promoPrice").path).toBe("productData.prices[price-sale-std]");
-    // A second endpoint entirely, and the cascade does not care.
-    expect(field(manuscript, "stock").match).toBe("stock-svc/stock");
-    expect(manuscript.verdict).toBe("covered");
-    expect(tier(manuscript, 3).outcome).toBe("skipped");
+    // The detail endpoint binds because it says whose it is: `productData.id`
+    // is the sku the page declares, and `productData.name` is its slug.
+    //
+    // `stock` used to come out of `stock-svc/stock/1234` too, and since
+    // 2026-09-23 (KTD4) it does not. That payload is `{stock: {available: 7,
+    // storeId, updatedAt}}` — nothing in it says which product it is about, and
+    // "the request URL names the product" is equally true of the
+    // recommendations call beside it. An endpoint that cannot show it is this
+    // page's binds nothing, so the field goes to the DOM compiler, which reads
+    // "7 disponibles" off the page. A coverage cost, paid knowingly: see
+    // `src/investigate/identity.ts`.
+    expect(field(manuscript, "stock").match).toBeUndefined();
+    expect(field(manuscript, "stock").rejected.some((rejection) => rejection.path === "stock-svc/stock:stock.available" && rejection.because.includes("not this page's"))).toBe(true);
+    expect(manuscript.verdict).toBe("partial");
+    expect(tier(manuscript, 3).asked).toEqual(["stock"]);
 
     // The HAR's headers, cookies and query string carry SECRET- strings on
     // purpose. None of them has a field to live in, and the URLs are amputated.

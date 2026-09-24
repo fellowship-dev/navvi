@@ -98,6 +98,15 @@ export interface RejectionRecord {
   /** The value on each binding sample, in sample order. */
   values: TypedValue[];
   because: string;
+  /**
+   * The bank rule that refused this leaf, when one did.
+   *
+   * A rejection with a rule behind it is not a competing reading: the leaf lost
+   * because a rule said what it is, not because another leaf named the field
+   * better. `src/reconcile/` reads the difference — it does not offer a leaf
+   * the bank called machinery as a second reading of a bound field.
+   */
+  heuristic?: string;
 }
 
 /**

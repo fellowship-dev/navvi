@@ -91,6 +91,65 @@ import type { Pages } from "./pages.js";
  */
 const DETERMINISM_READING = "resolved";
 
+// ------------------------------------------------------------ open decisions
+
+/** One thing a reconciliation left for a person, as the stop block names it. */
+export interface OpenItem {
+  /** The ambiguity id, `<field>/disagreement`, or `obstacle/<kind>`. */
+  id: string;
+  because: string;
+}
+
+export type OpenDecision =
+  | { action: "proceed" }
+  | { action: "stop"; status: MakeStatus; because: string; items: OpenItem[] };
+
+/**
+ * What the driver does with a reconciliation's open items.
+ *
+ * Today there is exactly one answer — stop — and it is written as a function
+ * anyway because it is about to have a second. KTD5 turns an open ambiguity
+ * into a choice question for the chooser, with the case's rubrics as premise;
+ * when that lands, this is where it is asked, and a chooser answer becomes
+ * `proceed` with the answer recorded. Until then an unanswered choice is a
+ * stop, never a silent pick: the compile used to bind one reading of an open
+ * field and write "the compile bound one reading anyway" in the rationale,
+ * which is the defect saying out loud that it happened.
+ *
+ * Two kinds of open item, two statuses. A reading nothing settles is a
+ * question a person answers — `needs_answers`, exit 3, like the spec's
+ * blocking questions — and a rubric for that field settles it on the next run.
+ * A blocking obstacle is not a question at all, and nothing typed at the
+ * prompt removes it, so a run held only by one is `short`.
+ */
+export function openDecision(reconciliation: Reconciliation): OpenDecision {
+  if (reconciliation.verdict !== "open") return { action: "proceed" };
+  const questions: OpenItem[] = [
+    ...reconciliation.ambiguities
+      .filter((ambiguity) => ambiguity.settledBy.length === 0)
+      .map((ambiguity) => ({ id: ambiguity.id, because: ambiguity.decision ?? ambiguity.because })),
+    ...(reconciliation.disagreements ?? [])
+      .filter((record) => record.decision !== undefined)
+      .map((record) => ({ id: `${record.field}/disagreement`, because: record.decision! })),
+  ];
+  const obstacles: OpenItem[] = reconciliation.obstacles
+    .filter((obstacle) => obstacle.blocking)
+    .map((obstacle) => ({ id: `obstacle/${obstacle.kind}`, because: obstacle.cost }));
+  const items = [...questions, ...obstacles];
+  if (items.length === 0) {
+    // `open` with nothing to name is a reconciliation this function cannot
+    // read; stopping on it is the conservative reading, and the sentence is
+    // the reconciliation's own.
+    return { action: "stop", status: "needs_answers", because: `the reconciliation is open: ${reconciliation.because}`, items: [] };
+  }
+  const fields = [...new Set(questions.map((item) => item.id.split("/")[0]!))];
+  const because =
+    questions.length > 0
+      ? `${questions.length} open decision${questions.length === 1 ? "" : "s"} (${fields.join(", ")}) — nothing in the spec settles ${questions.length === 1 ? "it" : "them"}; add a rubric for ${fields.length === 1 ? "that field" : "those fields"} and re-run`
+      : `${obstacles.length} blocking obstacle${obstacles.length === 1 ? "" : "s"} (${obstacles.map((item) => item.id).join(", ")})`;
+  return { action: "stop", status: questions.length > 0 ? "needs_answers" : "short", because, items };
+}
+
 // ----------------------------------------------------------------- the report
 
 /**
@@ -396,6 +455,24 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
       work.record("reconcile", ["spec.json", "investigation.json"], {});
       say(summarizeReconcile(reconciliation, work.path("reconcile.md")));
       record("reconcile", "ran", reconciliation.because, [...ARTIFACTS.reconcile]);
+    }
+
+    /**
+     * R4, the third half: an open reconciliation does not compile.
+     *
+     * `reconcile` says `open` — "a person decides before this compiles" — and
+     * until 2026-09-23 nothing read it: the driver checked the manuscript for
+     * `blocked` and the reconciliation for an empty `obtainable`, and a field
+     * with eight competing readings and no rule compiled one of them anyway.
+     * `openDecision` is the one place that says what happens to open items, so
+     * the chooser that answers them (KTD5) has one function to change.
+     */
+    const decision = openDecision(reconciliation);
+    if (decision.action === "stop") {
+      const width = bulletWidth(decision.items.map((item) => item.id));
+      for (const item of decision.items) say(makeBullet(item.id, item.because, "!", width));
+      for (const later of STAGES.slice(STAGES.indexOf("reconcile") + 1)) record(later, "not reached", "the reconciliation is open: a person decides before this compiles");
+      return { status: decision.status, stoppedAt: "reconcile", because: decision.because, stages, work: work.dir };
     }
 
     // ---------------------------------------------------------------- schema

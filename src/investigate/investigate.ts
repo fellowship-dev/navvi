@@ -2,11 +2,12 @@ import { isUsableResponse, newestUsableResponse } from "../browser/network-captu
 import { bank, type Bank } from "../heuristics/index.js";
 import { declaresProduct } from "../heuristics/index.js";
 import type { TypedValue } from "../scraper/extract.js";
-import { bindField } from "./bind.js";
+import { MACHINERY_RULE, bindField } from "./bind.js";
 import { classifyRun, recordCanary, settleDeferred, type ApologyOptions, type CanaryFingerprint, type PageResponse, type RunVerdict } from "./blocked.js";
 import { coversSpec, readDeclared, type DeclaredSource } from "./declared.js";
 import { UNASKED, agree, answered, unservable, type Agreement, type Observation } from "../agree/agree.js";
 import { safeUrl, type CapturedResponse } from "./har.js";
+import { headlineOf, identityAnchor, pageIdentities, type IdentityAnchor, type PageIdentity } from "./identity.js";
 import { anchors, flatten, type Leaf } from "./leaves.js";
 import type { FieldAlias, FieldRecord, InventoryRecord, Manuscript, Obstacle, RejectionRecord, RequestedField, SamplePickRecord, SourceRecord, TierRecord, VerdictLog } from "./manuscript.js";
 import { KIND_PRECEDENCE, acceptedRoles, resolutionOrder, roleOfDeclared, type DeclaredRole } from "./roles.js";
@@ -798,15 +799,46 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
     }
     const keys = [...answering.keys()].sort();
 
+    /**
+     * What each sample page says it is, for KTD4's question below: the id or
+     * slug in its URL, the sku and name it declared about itself (read by tier
+     * 1 whether or not the spec asked for them), and its rendered headline.
+     * Indexed like `captures`, which is `bindingUrls` order.
+     */
+    const identities: PageIdentity[] = pageIdentities(
+      bindingUrls.map((url, index) => ({
+        url,
+        declared: (declaredSamples.find((entry) => entry.url === url)?.sources ?? [])
+          .filter((source) => {
+            const role = roleOfDeclared(source);
+            return role === "sku" || role === "name";
+          })
+          .map((source) => source.value),
+        headline: headlineOf(captures[index]?.html),
+      })),
+    );
+
     const leavesByKey = new Map<string, Leaf[][]>();
     /** The rendered text of *this endpoint's* samples, in its own order — anchoring compares like with like. */
     const textByKey = new Map<string, string[] | undefined>();
+    /**
+     * The leaf that shows each endpoint is about the page it was captured on,
+     * or `undefined` when none does. An endpoint without one binds nothing.
+     */
+    const anchorByKey = new Map<string, IdentityAnchor | undefined>();
     for (const key of keys) {
       const agreement = answering.get(key)!;
       const responses = agreement.values;
       const leaves = responses.map((response) => flatten(response.body));
       leavesByKey.set(key, leaves);
       textByKey.set(key, pageText === undefined ? undefined : agreement.contributors.map((index) => pageText[index]!));
+      anchorByKey.set(
+        key,
+        identityAnchor(
+          leaves,
+          agreement.contributors.map((index) => identities[index] ?? { exact: [], slugs: [] }),
+        ),
+      );
       for (const [position, response] of responses.entries()) {
         tier2Sources.push({
           url: safeUrl(response.url),
@@ -840,38 +872,114 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
       for (const field of uncovered1) perField.set(field.name, bindField(field.name, leavesByKey.get(key)!, { type: field.type, pageText: textByKey.get(key), view }));
       bindings.set(key, perField);
     }
-    const named = (binding: ReturnType<typeof bindField> | undefined): boolean =>
-      binding !== undefined && binding.path !== undefined && !binding.askModel && binding.verdicts.some((entry) => entry.verdict.fires && entry.verdict.pick === binding.path);
-    const settled = (binding: ReturnType<typeof bindField> | undefined): boolean => binding !== undefined && binding.path !== undefined && !binding.askModel;
+    /**
+     * KTD4, the identity half: an endpoint that never says which product it is
+     * about cannot be the source of a fact about this one. Its candidates are
+     * still read and recorded — a reader deciding whether the refusal was right
+     * needs to see what was refused — but nothing is chosen from it.
+     */
+    const anchored = (key: string): boolean => anchorByKey.get(key) !== undefined;
+    const notThisPage = (key: string): string =>
+      `${endpointMatch(key)} is not this page's: none of its leaves is the page's own identity (the id or slug in its URL, the sku or name it declares, its headline) on every sample, so nothing it offers can be a fact about this product — a recommendations or basket payload varies with the page and describes other products`;
+    const named = (key: string, binding: ReturnType<typeof bindField> | undefined): boolean =>
+      anchored(key) && binding !== undefined && binding.path !== undefined && !binding.askModel && binding.verdicts.some((entry) => entry.verdict.fires && entry.verdict.pick === binding.path);
+    const settled = (key: string, binding: ReturnType<typeof bindField> | undefined): boolean => anchored(key) && binding !== undefined && binding.path !== undefined && !binding.askModel;
 
     /**
      * Which endpoint first. A site answers several calls and only one of them
      * is the product; the one that *names* the most uncovered fields is it.
      * Ties break on the key, so the choice is reproducible.
+     *
+     * This ordering is a preference and not an identity test, and for a while
+     * it was the only one: an endpoint that named nothing still won any field
+     * whose lone survivor it held. `anchored` above is the identity test now,
+     * and an endpoint that fails it never names or settles anything.
      */
     const namedCount = new Map<string, number>();
-    for (const key of keys) namedCount.set(key, uncovered1.filter((field) => named(bindings.get(key)!.get(field.name))).length);
+    for (const key of keys) namedCount.set(key, uncovered1.filter((field) => named(key, bindings.get(key)!.get(field.name))).length);
     const ordered = [...keys].sort((a, b) => (namedCount.get(b) ?? 0) - (namedCount.get(a) ?? 0) || a.localeCompare(b));
+
+    /** Each field's pick, before any of them is committed. */
+    const picks = new Map<string, string | undefined>();
+    for (const field of uncovered1) {
+      picks.set(field.name, ordered.find((key) => named(key, bindings.get(key)!.get(field.name))) ?? ordered.find((key) => settled(key, bindings.get(key)!.get(field.name))));
+    }
+
+    /**
+     * KTD4, the uniqueness half: one `(match, path)` is one fact.
+     *
+     * Each field above picked on its own, and nothing asked whether the leaf it
+     * picked had already been spent — which is how `sku` and `stock` both came
+     * out of one `total` on 2026-09-23. Two fields settling on one path is not
+     * two answers that agree; it is one leaf that was the least-bad reading for
+     * both, and at most one of them can be right. Picking which is a guess, so
+     * neither is bound here: both go on to the next tier, and each says which
+     * path it shared and with whom.
+     */
+    const pathOf = (name: string): string | undefined => {
+      const key = picks.get(name);
+      return key === undefined ? undefined : `${endpointMatch(key)}:${bindings.get(key)!.get(name)!.path!}`;
+    };
+    const sharers = new Map<string, string[]>();
+    for (const field of uncovered1) {
+      const path = pathOf(field.name);
+      if (path === undefined) continue;
+      const list = sharers.get(path);
+      if (list) list.push(field.name);
+      else sharers.set(path, [field.name]);
+    }
+    const sharedBy = (name: string): { path: string; others: string[] } | undefined => {
+      const path = pathOf(name);
+      const list = path === undefined ? undefined : sharers.get(path);
+      return list === undefined || list.length < 2 ? undefined : { path: path!, others: list.filter((other) => other !== name) };
+    };
 
     /** The endpoints a field actually came out of — the catalogue's whole scope. */
     const boundKeys = new Set<string>();
 
     for (const field of uncovered1) {
       const record = records.get(field.name)!;
-      const chosen = ordered.find((key) => named(bindings.get(key)!.get(field.name))) ?? ordered.find((key) => settled(bindings.get(key)!.get(field.name)));
+      const shared = sharedBy(field.name);
+      const sharedBecause =
+        shared === undefined
+          ? undefined
+          : `shared path: ${shared.path} was the best reading for ${field.name} and for ${shared.others.join(" and ")}; one leaf cannot be ${shared.others.length + 1} facts and choosing between them would be a guess, so none of them is bound at tier 2 and each goes on to the next tier`;
+      const chosen = shared === undefined ? picks.get(field.name) : undefined;
 
       for (const key of ordered) {
         const binding = bindings.get(key)!.get(field.name)!;
+        const match = endpointMatch(key);
         record.verdicts.push(...binding.verdicts);
         for (const candidate of binding.candidates) {
           if (key === chosen && candidate.path === binding.path) continue;
+          const path = `${match}:${candidate.path}`;
           record.rejected.push({
             tier: 2,
-            path: `${endpointMatch(key)}:${candidate.path}`,
+            path,
             values: candidate.values,
-            because: key === chosen ? `${binding.path ?? "another leaf"} was bound instead` : chosen === undefined ? binding.because : `${endpointMatch(chosen)} named ${field.name} and this endpoint did not`,
+            because:
+              shared !== undefined && path === shared.path
+                ? sharedBecause!
+                : !anchored(key)
+                  ? notThisPage(key)
+                  : key === chosen
+                    ? `${binding.path ?? "another leaf"} was bound instead`
+                    : chosen === undefined
+                      ? binding.because
+                      : `${endpointMatch(chosen)} named ${field.name} and this endpoint did not`,
           });
         }
+        // The leaves the bank called machinery, refused by rule id — the
+        // reason `narrow`'s anchor filter used to give silently.
+        for (const refused of binding.machinery) {
+          record.rejected.push({ tier: 2, path: `${match}:${refused.path}`, values: refused.values, because: `${MACHINERY_RULE}: ${refused.because}`, heuristic: MACHINERY_RULE });
+        }
+      }
+
+      if (sharedBecause !== undefined) {
+        record.because = sharedBecause;
+        record.askModel = false;
+        continue;
       }
 
       if (chosen === undefined) {
@@ -945,9 +1053,21 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
         : `; ${partial.length} endpoint(s) were not called by every sample and were compared over the ones that did, rather than deleted for all of them: ` +
           partial.map((key) => `${endpointMatch(key)} (${neverAsked.get(key)!.map((index) => `sample ${index + 1}`).join(", ")} never asked it)`).join("; ");
 
+    /**
+     * The two KTD4 refusals, said at the tier. A run that bound fewer fields
+     * than it used to should say which endpoints it stopped trusting and which
+     * paths it stopped spending twice, not leave a reader to diff rejections.
+     */
+    const strangers = keys.filter((key) => !anchored(key));
+    const identityBecause =
+      strangers.length === 0 ? "" : `; ${strangers.length} endpoint(s) refused as not this page's, because no leaf is the page's own identity: ${[...new Set(strangers.map(endpointMatch))].join(", ")}`;
+    const collisions = [...sharers.entries()].filter(([, names]) => names.length > 1);
+    const sharedPathBecause =
+      collisions.length === 0 ? "" : `; ${collisions.map(([path, names]) => `shared path ${path} left ${names.join(" and ")} unbound`).join("; ")}`;
+
     tier2 = {
       outcome: "ran",
-      because: `${keys.length} endpoint(s) the page fetched for itself, over ${captures.length} rendered sample(s)${pageText === undefined ? "; unanchored, because no rendered text was supplied" : ""}${askedBecause}${inventoryBecause}`,
+      because: `${keys.length} endpoint(s) the page fetched for itself, over ${captures.length} rendered sample(s)${pageText === undefined ? "; unanchored, because no rendered text was supplied" : ""}${identityBecause}${sharedPathBecause}${askedBecause}${inventoryBecause}`,
     };
   }
 

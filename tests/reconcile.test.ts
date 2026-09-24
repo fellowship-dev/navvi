@@ -219,6 +219,66 @@ describe("reconcile: obtainable and not obtainable", () => {
   });
 });
 
+/**
+ * U3 (R4) at the artifact the compile reads. `investigate` no longer writes a
+ * manuscript that binds two fields to one path, but `make` reuses a current
+ * `investigation.json`, and one written before 2026-09-23 — the live run that
+ * bound `sku` and `stock` both to a recommendations `total` — would otherwise
+ * compile the collision it recorded.
+ */
+describe("reconcile: one reading is one fact", () => {
+  const collided = (): Manuscript => {
+    const base = manuscript();
+    const shared = { tier: 2 as const, source: "network" as const, match: "catalog-svc/products/recommendations", path: "total", values: [8, 12, 9] };
+    return {
+      ...base,
+      fields: base.fields.map((entry) =>
+        entry.field === "sku" || entry.field === "stock" ? record({ field: entry.field, type: entry.type!, ...shared, because: "total is the only value that survived the filter" }) : entry,
+      ),
+    };
+  };
+
+  it("names both fields not obtainable, with the path they shared, and binds neither", () => {
+    const result = reconcile(collided(), SPEC, { now: AT });
+    expect(result.obtainable.map((field) => field.field)).toEqual(["productName", "listPrice", "promoPrice"]);
+    for (const [name, other] of [
+      ["sku", "stock"],
+      ["stock", "sku"],
+    ] as const) {
+      const field = result.notObtainable.find((entry) => entry.field === name)!;
+      expect(field.kind, name).toBe("shared-path");
+      expect(field.because, name).toContain("catalog-svc/products/recommendations:total");
+      expect(field.because, name).toContain(other);
+    }
+    expect(render(result)).toContain("shared path");
+  });
+
+  it("does not offer a leaf a bank rule refused as a second reading of a bound field", () => {
+    const base = manuscript();
+    const withMachinery: Manuscript = {
+      ...base,
+      fields: base.fields.map((entry) =>
+        entry.field === "productName"
+          ? {
+              ...entry,
+              rejected: [
+                {
+                  tier: 2,
+                  path: `${MATCH}:meta.trace`,
+                  values: ["k3x9q2m7z4w8p1v6", "a7f2c9e4b1d8g5h3", "m4n8p2q6r1s5t9v3"],
+                  because: "machine-value-is-not-a-fact: no page showed productName at meta.trace to a reader",
+                  heuristic: "machine-value-is-not-a-fact",
+                },
+              ],
+            }
+          : entry,
+      ),
+    };
+    const result = reconcile(withMachinery, SPEC, { now: AT });
+    expect(result.ambiguities.some((ambiguity) => ambiguity.field === "productName")).toBe(false);
+  });
+});
+
 describe("reconcile: available but not requested", () => {
   it("names laboratory, activeIngredient, bioequivalence and pum, none of which was asked for", () => {
     const result = reconcile(manuscript(), SPEC, { now: AT });
