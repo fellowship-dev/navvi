@@ -318,3 +318,21 @@ compile's Jev calls fell back from the AI Gateway to the TypeSafe API after
 three `Service temporarily unavailable` responses. On one take, the fixture
 compile ended `no_items_found`, and the script refused to render it. Neither
 problem affected this capture.
+
+### Hacker News cut
+
+`PRODUCT_SITE=hn` records the same three beats on https://news.ycombinator.com/
+into `docs/product-hn.gif`, `docs/product-hn.mp4` and
+`docs/product-hn-provenance.json`.
+
+    npm run build
+    set -a; . /path/to/.env; set +a
+    PRODUCT_SITE=hn PRODUCT_OUT=/tmp/navvi-product-hn npx tsx scripts/record-product.ts
+    PRODUCT_SITE=hn PRODUCT_SOURCE=/tmp/navvi-product-hn/navvi-product-XXXX PRODUCT_PUBLISH=1 \
+      npx tsx scripts/record-product.ts
+
+- **Compile and re-run** use `navvi "front page stories with title, link, points and comments, up to 10" https://news.ycombinator.com/` on the live page; the re-run is the same command and storage (cache hit, 0 decisions).
+- **Self-heal is a simulated redesign, and the frames say so.** For the heal and replay runs, `CrawlDeps.onPage` puts a `BrowserContext.route` on the crawler's own context that fetches the real HN document and rewrites its markup before the crawler reads it: `titleline`→`storyhead` with the story link wrapped in a new `span.headline`, `score`→`votes`, `subline`→`byline`, `subtext`→`story-meta`, `age`→`posted`, `hnuser`→`author`. The item anchor `tr.athing.submission` is left alone. The provenance records each rule, its match count and the stored selectors after every run.
+- The script refuses to render when the compile leaves a field unbound or when the text question was not answered by Claude Code; every take, kept or refused, is appended to `takes.jsonl` and copied into the provenance.
+
+September 24 capture (take 4 of 4, commit and `dist/` at `685aa9f`). Compile: 12.7 s, cache miss, Jev 7 decisions (1.5 s waiting, $0.0004), Claude Code answered the text question on the subscription ($0.0000). Re-run: 2.8 s, cache hit, 0 decisions. Heal: 4.0 s, Jev 4 decisions, 1 field event covering `title`, `link`, `points` and `comments`, 0 unhealed. Replay: 4.8 s, 0 decisions, 4 promotion events. On screen the live sections run at 4×, 3×, 2× and 4×. Take 1 was refused: "Extract the title, link, points and comment count of each story on the front page, up to 10" compiled `status partial` because Jev chose the one-row `tr.athing` group. Takes 2 and 3 (at `05b4e46`) passed every beat, but Claude Code, run from inside the repository, answered the prompt question with a clarification request and the fallback reached the metered model ($0.0016); fixed in `1f30b65` and `685aa9f`.

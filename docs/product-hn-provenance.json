@@ -1,0 +1,1534 @@
+{
+  "asset": "docs/product-hn.gif, docs/product-hn.mp4",
+  "script": "scripts/record-product.ts",
+  "commit": "685aa9fe12ee7533c6cad0887795912a50a111d4",
+  "workingTreeAtCapture": "M scripts/record-decisions.ts\n M scripts/record-product.ts\n?? docs/product-hn-provenance.json\n?? docs/product-hn.gif\n?? docs/product-hn.mp4",
+  "recordedAt": "2026-09-24T12:15:59.676Z",
+  "how": "Each run is main() from the built dist/bin/cli.js, in-process, with the real argv; stderr is captured with timestamps. io.run wraps the built run() only to add CrawlDeps.onPage (actual crawler page screenshots) and to keep the RunSummary. Crawler log lines (deps.log) are kept here but not shown on screen.",
+  "chooser": "default chooser resolution (no --chooser flag): Jev decides, a signed-in Claude Code answers the text question (prompt parsing)",
+  "display": {
+    "width": 1280,
+    "height": 720,
+    "fps": 6,
+    "note": "Clocks show real elapsed time. Each run's live section is sped up uniformly by displaySpeedup, which is printed on screen when > 1. Command typing and result holds are untimed."
+  },
+  "beat3": "simulated redesign of the live Hacker News front page: in the heal and replay runs a BrowserContext.route, installed through CrawlDeps.onPage, fetched the real document from news.ycombinator.com and rewrote its markup (see redesign) before the crawler read it; compile and re-run were not rewritten. Live Jev decisions for compile and heal.",
+  "redesign": [
+    {
+      "rule": "span.titleline > a  →  span.storyhead > span.headline > a (class renamed, link wrapped in a new span)",
+      "pattern": "/<span class=\"titleline\"><a ([^>]*)>(.*?)<\\/a>/g",
+      "replacement": "<span class=\"storyhead\"><span class=\"headline\"><a $1>$2</a></span>"
+    },
+    {
+      "rule": "span.score  →  span.votes",
+      "pattern": "/class=\"score\"/g",
+      "replacement": "class=\"votes\""
+    },
+    {
+      "rule": "span.subline  →  span.byline",
+      "pattern": "/class=\"subline\"/g",
+      "replacement": "class=\"byline\""
+    },
+    {
+      "rule": "td.subtext  →  td.story-meta",
+      "pattern": "/class=\"subtext\"/g",
+      "replacement": "class=\"story-meta\""
+    },
+    {
+      "rule": "span.age  →  span.posted",
+      "pattern": "/class=\"age\"/g",
+      "replacement": "class=\"posted\""
+    },
+    {
+      "rule": "a.hnuser  →  a.author",
+      "pattern": "/class=\"hnuser\"/g",
+      "replacement": "class=\"author\""
+    }
+  ],
+  "notes": [
+    "Prompt: the brief's wording, \"Extract the title, link, points and comment count of each story on the front page, up to 10\", compiled status partial twice (an exploratory run and take 1): Jev chose the one-row tr.athing group, so points and comment count were never bound. The shown prompt is the wording scripts/record-live.ts uses; it bound all four fields.",
+    "Writer: takes 2 and 3 (dist built from 05b4e46) reported writer model ($0.0016): Claude Code, run from inside the repo, replied to the prompt question with a clarification request instead of JSON and the fallback chain reached the metered AI Gateway model. Fixed on navvi main in 1f30b65 (a failing signed-in CLI no longer reaches the metered model through a signed-out Codex) and 685aa9f (Claude Code and Codex run from a neutral temp directory). Take 4, the published one, is on 685aa9f and shows writer claude, $0.0000; the script now refuses a compile whose writer is not claude.",
+    "Redesign scope: the item anchor (tr.athing.submission) was left intact; the rewrite targets the field markup. Healing re-found all four fields (one field event: title, link, points, comments) with 4 live Jev decisions and no text question."
+  ],
+  "takes": [
+    {
+      "take": "navvi-product-mk0xIg",
+      "site": "hn",
+      "at": "2026-09-24T12:02:08.469Z",
+      "kept": false,
+      "refusedBecause": "hn-compile: exit 1",
+      "runs": [
+        {
+          "run": "hn-compile",
+          "startedAt": "2026-09-24T12:01:55.898Z",
+          "wallMs": 12414,
+          "exitCode": 1,
+          "stderr": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\nnavvi: status partial — fields not found: commentcount, points — every row carries them as null, and so will every replay of this scraper; --force-recompile compiles it again\n  items 10  pages 1  templates 1  cache hit no\n  decider jev: 6 decisions, 5250 input tokens, 1.3s waiting, $0.0002\n  writer claude: 1 text question, 19579 input tokens, 4.6s waiting, $0.0000\n  healing events 0  unmapped candidates 0  unhealed 0\n  fields not found: commentcount, points\n  data: 10 records on stdout\n",
+          "status": "partial",
+          "items": 10,
+          "cacheHit": false,
+          "questions": 7,
+          "healingEvents": [],
+          "unhealed": 0,
+          "fieldsNotFound": [
+            "commentcount",
+            "points"
+          ],
+          "healedFields": [],
+          "storedScraperAfterRun": {
+            "item": {
+              "anchorSelector": "#bigbox tbody > tr.athing.submission",
+              "span": 1
+            },
+            "fields": {
+              "title": [
+                "span.titleline > a"
+              ],
+              "link": [
+                "span.titleline > a @href"
+              ]
+            },
+            "fieldsNotFound": [
+              "commentcount",
+              "points"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "take": "navvi-product-aJNFFu",
+      "site": "hn",
+      "at": "2026-09-24T12:03:39.981Z",
+      "kept": true,
+      "runs": [
+        {
+          "run": "hn-compile",
+          "startedAt": "2026-09-24T12:03:03.397Z",
+          "wallMs": 26966,
+          "exitCode": 0,
+          "stderr": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\nnavvi: status succeeded\n  items 10  pages 1  templates 1  cache hit no\n  decider jev: 7 decisions, 9443 input tokens, 1.2s waiting, $0.0004\n  writer model: 1 text question, 40222 input tokens, 19.7s waiting, $0.0016\n  healing events 0  unmapped candidates 0  unhealed 0\n  data: 10 records on stdout\n",
+          "status": "succeeded",
+          "items": 10,
+          "cacheHit": false,
+          "questions": 8,
+          "healingEvents": [],
+          "unhealed": 0,
+          "fieldsNotFound": [],
+          "healedFields": [],
+          "storedScraperAfterRun": {
+            "item": {
+              "anchorSelector": "#bigbox tbody > tr.athing.submission",
+              "span": 3
+            },
+            "fields": {
+              "title": [
+                "span.titleline > a"
+              ],
+              "link": [
+                "span.titleline > a @href"
+              ],
+              "points": [
+                "span.score"
+              ],
+              "comments": [
+                ":scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)"
+              ]
+            },
+            "fieldsNotFound": []
+          }
+        },
+        {
+          "run": "hn-rerun",
+          "startedAt": "2026-09-24T12:03:30.633Z",
+          "wallMs": 2409,
+          "exitCode": 0,
+          "stderr": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\nnavvi: status succeeded\n  items 10  pages 1  templates 1  cache hit yes\n  decider jev: 0 decisions, 0 input tokens, 0ms waiting, $0.0000\n  healing events 0  unmapped candidates 0  unhealed 0\n  data: 10 records on stdout\n",
+          "status": "succeeded",
+          "items": 10,
+          "cacheHit": true,
+          "questions": 0,
+          "healingEvents": [],
+          "unhealed": 0,
+          "fieldsNotFound": [],
+          "healedFields": [],
+          "storedScraperAfterRun": {
+            "item": {
+              "anchorSelector": "#bigbox tbody > tr.athing.submission",
+              "span": 3
+            },
+            "fields": {
+              "title": [
+                "span.titleline > a"
+              ],
+              "link": [
+                "span.titleline > a @href"
+              ],
+              "points": [
+                "span.score"
+              ],
+              "comments": [
+                ":scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)"
+              ]
+            },
+            "fieldsNotFound": []
+          }
+        },
+        {
+          "run": "hn-heal",
+          "startedAt": "2026-09-24T12:03:33.049Z",
+          "wallMs": 3619,
+          "exitCode": 0,
+          "stderr": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\nnavvi: status succeeded\n  items 10  pages 1  templates 1  cache hit yes\n  decider jev: 4 decisions, 6861 input tokens, 586ms waiting, $0.0003\n  healing events 1  unmapped candidates 0  unhealed 0\n  data: 10 records on stdout\n",
+          "status": "succeeded",
+          "items": 10,
+          "cacheHit": true,
+          "questions": 4,
+          "healingEvents": [
+            {
+              "kind": "field",
+              "fields": [
+                "title",
+                "link",
+                "points",
+                "comments"
+              ],
+              "at": "2026-09-24T12:03:36.608Z",
+              "url": "https://news.ycombinator.com/"
+            }
+          ],
+          "unhealed": 0,
+          "fieldsNotFound": [],
+          "healedFields": [
+            "comments",
+            "link",
+            "points",
+            "title"
+          ],
+          "inFlightRewrites": [
+            {
+              "atMs": 1375.4527769999986,
+              "url": "https://news.ycombinator.com/",
+              "counts": {
+                "span.titleline > a  →  span.storyhead > span.headline > a (class renamed, link wrapped in a new span)": 30,
+                "span.score  →  span.votes": 30,
+                "span.subline  →  span.byline": 30,
+                "td.subtext  →  td.story-meta": 30,
+                "span.age  →  span.posted": 30,
+                "a.hnuser  →  a.author": 30
+              }
+            }
+          ],
+          "storedScraperAfterRun": {
+            "item": {
+              "anchorSelector": "#bigbox tbody > tr.athing.submission",
+              "span": 3
+            },
+            "fields": {
+              "title": [
+                "span.titleline > a",
+                "span.headline > a"
+              ],
+              "link": [
+                "span.titleline > a @href",
+                "span.headline > a @href"
+              ],
+              "points": [
+                "span.score",
+                "span.votes"
+              ],
+              "comments": [
+                ":scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)",
+                ":scope > td.story-meta:nth-of-type(2) > span.byline > a:nth-of-type(3)"
+              ]
+            },
+            "fieldsNotFound": []
+          }
+        },
+        {
+          "run": "hn-replay",
+          "startedAt": "2026-09-24T12:03:36.717Z",
+          "wallMs": 3168,
+          "exitCode": 0,
+          "stderr": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\nnavvi: status succeeded\n  items 10  pages 1  templates 1  cache hit yes\n  decider jev: 0 decisions, 0 input tokens, 0ms waiting, $0.0000\n  healing events 4  unmapped candidates 0  unhealed 0\n  data: 10 records on stdout\n",
+          "status": "succeeded",
+          "items": 10,
+          "cacheHit": true,
+          "questions": 0,
+          "healingEvents": [
+            {
+              "kind": "promotion",
+              "field": "title",
+              "from": 1,
+              "observations": 30,
+              "at": "2026-09-24T12:03:39.878Z",
+              "because": "title resolved through alternative 1 (dom span.headline > a) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom span.titleline > a). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+            },
+            {
+              "kind": "promotion",
+              "field": "link",
+              "from": 1,
+              "observations": 30,
+              "at": "2026-09-24T12:03:39.878Z",
+              "because": "link resolved through alternative 1 (dom span.headline > a@href) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom span.titleline > a@href). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+            },
+            {
+              "kind": "promotion",
+              "field": "points",
+              "from": 1,
+              "observations": 30,
+              "at": "2026-09-24T12:03:39.878Z",
+              "because": "points resolved through alternative 1 (dom span.votes) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom span.score). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+            },
+            {
+              "kind": "promotion",
+              "field": "comments",
+              "from": 1,
+              "observations": 30,
+              "at": "2026-09-24T12:03:39.878Z",
+              "because": "comments resolved through alternative 1 (dom :scope > td.story-meta:nth-of-type(2) > span.byline > a:nth-of-type(3)) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom :scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+            }
+          ],
+          "unhealed": 0,
+          "fieldsNotFound": [],
+          "healedFields": [],
+          "inFlightRewrites": [
+            {
+              "atMs": 1379.4484940000038,
+              "url": "https://news.ycombinator.com/",
+              "counts": {
+                "span.titleline > a  →  span.storyhead > span.headline > a (class renamed, link wrapped in a new span)": 30,
+                "span.score  →  span.votes": 30,
+                "span.subline  →  span.byline": 30,
+                "td.subtext  →  td.story-meta": 30,
+                "span.age  →  span.posted": 30,
+                "a.hnuser  →  a.author": 30
+              }
+            }
+          ],
+          "storedScraperAfterRun": {
+            "item": {
+              "anchorSelector": "#bigbox tbody > tr.athing.submission",
+              "span": 3
+            },
+            "fields": {
+              "title": [
+                "span.headline > a",
+                "span.titleline > a"
+              ],
+              "link": [
+                "span.headline > a @href",
+                "span.titleline > a @href"
+              ],
+              "points": [
+                "span.votes",
+                "span.score"
+              ],
+              "comments": [
+                ":scope > td.story-meta:nth-of-type(2) > span.byline > a:nth-of-type(3)",
+                ":scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)"
+              ]
+            },
+            "fieldsNotFound": []
+          }
+        }
+      ]
+    },
+    {
+      "take": "navvi-product-H2t5Dy",
+      "site": "hn",
+      "at": "2026-09-24T12:06:17.158Z",
+      "kept": true,
+      "runs": [
+        {
+          "run": "hn-compile",
+          "startedAt": "2026-09-24T12:05:36.195Z",
+          "wallMs": 26325,
+          "exitCode": 0,
+          "stderr": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\nnavvi: status succeeded\n  items 10  pages 1  templates 1  cache hit no\n  decider jev: 7 decisions, 9443 input tokens, 5.0s waiting, $0.0004\n  writer model: 1 text question, 40222 input tokens, 15.0s waiting, $0.0016\n  healing events 0  unmapped candidates 0  unhealed 0\n  data: 10 records on stdout\n",
+          "status": "succeeded",
+          "items": 10,
+          "cacheHit": false,
+          "questions": 8,
+          "healingEvents": [],
+          "unhealed": 0,
+          "fieldsNotFound": [],
+          "healedFields": [],
+          "storedScraperAfterRun": {
+            "item": {
+              "anchorSelector": "#bigbox tbody > tr.athing.submission",
+              "span": 3
+            },
+            "fields": {
+              "title": [
+                "span.titleline > a"
+              ],
+              "link": [
+                "span.titleline > a @href"
+              ],
+              "points": [
+                "span.score"
+              ],
+              "comments": [
+                ":scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)"
+              ]
+            },
+            "fieldsNotFound": []
+          }
+        },
+        {
+          "run": "hn-rerun",
+          "startedAt": "2026-09-24T12:06:02.563Z",
+          "wallMs": 2490,
+          "exitCode": 0,
+          "stderr": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\nnavvi: status succeeded\n  items 10  pages 1  templates 1  cache hit yes\n  decider jev: 0 decisions, 0 input tokens, 0ms waiting, $0.0000\n  healing events 0  unmapped candidates 0  unhealed 0\n  data: 10 records on stdout\n",
+          "status": "succeeded",
+          "items": 10,
+          "cacheHit": true,
+          "questions": 0,
+          "healingEvents": [],
+          "unhealed": 0,
+          "fieldsNotFound": [],
+          "healedFields": [],
+          "storedScraperAfterRun": {
+            "item": {
+              "anchorSelector": "#bigbox tbody > tr.athing.submission",
+              "span": 3
+            },
+            "fields": {
+              "title": [
+                "span.titleline > a"
+              ],
+              "link": [
+                "span.titleline > a @href"
+              ],
+              "points": [
+                "span.score"
+              ],
+              "comments": [
+                ":scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)"
+              ]
+            },
+            "fieldsNotFound": []
+          }
+        },
+        {
+          "run": "hn-heal",
+          "startedAt": "2026-09-24T12:06:05.056Z",
+          "wallMs": 8404,
+          "exitCode": 0,
+          "stderr": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\nchooser: jev fell back from the AI Gateway to the TypeSafe API (AI Gateway failed after 3 attempt(s): Service temporarily unavailable. Please try again shortly.); staying on TypeSafe for the rest of the run\nnavvi: status succeeded\n  items 10  pages 1  templates 1  cache hit yes\n  decider jev: 4 decisions, 6861 input tokens, 5.3s waiting, $0.0003\n  decider transport: fell back from gateway to typesafe (AI Gateway failed after 3 attempt(s): Service temporarily unavailable. Please try again shortly.)\n  healing events 1  unmapped candidates 0  unhealed 0\n  data: 10 records on stdout\n",
+          "status": "succeeded",
+          "items": 10,
+          "cacheHit": true,
+          "questions": 4,
+          "healingEvents": [
+            {
+              "kind": "field",
+              "fields": [
+                "title",
+                "link",
+                "points",
+                "comments"
+              ],
+              "at": "2026-09-24T12:06:13.370Z",
+              "url": "https://news.ycombinator.com/"
+            }
+          ],
+          "unhealed": 0,
+          "fieldsNotFound": [],
+          "healedFields": [
+            "comments",
+            "link",
+            "points",
+            "title"
+          ],
+          "inFlightRewrites": [
+            {
+              "atMs": 1390.575875999999,
+              "url": "https://news.ycombinator.com/",
+              "counts": {
+                "span.titleline > a  →  span.storyhead > span.headline > a (class renamed, link wrapped in a new span)": 30,
+                "span.score  →  span.votes": 30,
+                "span.subline  →  span.byline": 30,
+                "td.subtext  →  td.story-meta": 30,
+                "span.age  →  span.posted": 30,
+                "a.hnuser  →  a.author": 30
+              }
+            }
+          ],
+          "storedScraperAfterRun": {
+            "item": {
+              "anchorSelector": "#bigbox tbody > tr.athing.submission",
+              "span": 3
+            },
+            "fields": {
+              "title": [
+                "span.titleline > a",
+                "span.headline > a"
+              ],
+              "link": [
+                "span.titleline > a @href",
+                "span.headline > a @href"
+              ],
+              "points": [
+                "span.score",
+                "span.votes"
+              ],
+              "comments": [
+                ":scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)",
+                ":scope > td.story-meta:nth-of-type(2) > span.byline > a:nth-of-type(3)"
+              ]
+            },
+            "fieldsNotFound": []
+          }
+        },
+        {
+          "run": "hn-replay",
+          "startedAt": "2026-09-24T12:06:13.566Z",
+          "wallMs": 3227,
+          "exitCode": 0,
+          "stderr": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\nnavvi: status succeeded\n  items 10  pages 1  templates 1  cache hit yes\n  decider jev: 0 decisions, 0 input tokens, 0ms waiting, $0.0000\n  healing events 4  unmapped candidates 0  unhealed 0\n  data: 10 records on stdout\n",
+          "status": "succeeded",
+          "items": 10,
+          "cacheHit": true,
+          "questions": 0,
+          "healingEvents": [
+            {
+              "kind": "promotion",
+              "field": "title",
+              "from": 1,
+              "observations": 30,
+              "at": "2026-09-24T12:06:16.786Z",
+              "because": "title resolved through alternative 1 (dom span.headline > a) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom span.titleline > a). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+            },
+            {
+              "kind": "promotion",
+              "field": "link",
+              "from": 1,
+              "observations": 30,
+              "at": "2026-09-24T12:06:16.786Z",
+              "because": "link resolved through alternative 1 (dom span.headline > a@href) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom span.titleline > a@href). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+            },
+            {
+              "kind": "promotion",
+              "field": "points",
+              "from": 1,
+              "observations": 30,
+              "at": "2026-09-24T12:06:16.786Z",
+              "because": "points resolved through alternative 1 (dom span.votes) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom span.score). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+            },
+            {
+              "kind": "promotion",
+              "field": "comments",
+              "from": 1,
+              "observations": 30,
+              "at": "2026-09-24T12:06:16.786Z",
+              "because": "comments resolved through alternative 1 (dom :scope > td.story-meta:nth-of-type(2) > span.byline > a:nth-of-type(3)) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom :scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+            }
+          ],
+          "unhealed": 0,
+          "fieldsNotFound": [],
+          "healedFields": [],
+          "inFlightRewrites": [
+            {
+              "atMs": 1522.5223190000033,
+              "url": "https://news.ycombinator.com/",
+              "counts": {
+                "span.titleline > a  →  span.storyhead > span.headline > a (class renamed, link wrapped in a new span)": 30,
+                "span.score  →  span.votes": 30,
+                "span.subline  →  span.byline": 30,
+                "td.subtext  →  td.story-meta": 30,
+                "span.age  →  span.posted": 30,
+                "a.hnuser  →  a.author": 30
+              }
+            }
+          ],
+          "storedScraperAfterRun": {
+            "item": {
+              "anchorSelector": "#bigbox tbody > tr.athing.submission",
+              "span": 3
+            },
+            "fields": {
+              "title": [
+                "span.headline > a",
+                "span.titleline > a"
+              ],
+              "link": [
+                "span.headline > a @href",
+                "span.titleline > a @href"
+              ],
+              "points": [
+                "span.votes",
+                "span.score"
+              ],
+              "comments": [
+                ":scope > td.story-meta:nth-of-type(2) > span.byline > a:nth-of-type(3)",
+                ":scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)"
+              ]
+            },
+            "fieldsNotFound": []
+          }
+        }
+      ]
+    },
+    {
+      "take": "navvi-product-S0bsQX",
+      "site": "hn",
+      "at": "2026-09-24T12:15:59.677Z",
+      "kept": true,
+      "runs": [
+        {
+          "run": "hn-compile",
+          "startedAt": "2026-09-24T12:15:34.681Z",
+          "wallMs": 12716,
+          "exitCode": 0,
+          "stderr": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\nnavvi: status succeeded\n  items 10  pages 1  templates 1  cache hit no\n  decider jev: 7 decisions, 9569 input tokens, 1.5s waiting, $0.0004\n  writer claude: 1 text question, 18628 input tokens, 4.0s waiting, $0.0000\n  healing events 0  unmapped candidates 0  unhealed 0\n  data: 10 records on stdout\n",
+          "status": "succeeded",
+          "items": 10,
+          "cacheHit": false,
+          "questions": 8,
+          "healingEvents": [],
+          "unhealed": 0,
+          "fieldsNotFound": [],
+          "healedFields": [],
+          "storedScraperAfterRun": {
+            "item": {
+              "anchorSelector": "#bigbox tbody > tr.athing.submission",
+              "span": 3
+            },
+            "fields": {
+              "title": [
+                "span.titleline > a"
+              ],
+              "link": [
+                "span.titleline > a @href"
+              ],
+              "points": [
+                "span.score"
+              ],
+              "comments": [
+                ":scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)"
+              ]
+            },
+            "fieldsNotFound": []
+          }
+        },
+        {
+          "run": "hn-rerun",
+          "startedAt": "2026-09-24T12:15:47.555Z",
+          "wallMs": 2767,
+          "exitCode": 0,
+          "stderr": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\nnavvi: status succeeded\n  items 10  pages 1  templates 1  cache hit yes\n  decider jev: 0 decisions, 0 input tokens, 0ms waiting, $0.0000\n  healing events 0  unmapped candidates 0  unhealed 0\n  data: 10 records on stdout\n",
+          "status": "succeeded",
+          "items": 10,
+          "cacheHit": true,
+          "questions": 0,
+          "healingEvents": [],
+          "unhealed": 0,
+          "fieldsNotFound": [],
+          "healedFields": [],
+          "storedScraperAfterRun": {
+            "item": {
+              "anchorSelector": "#bigbox tbody > tr.athing.submission",
+              "span": 3
+            },
+            "fields": {
+              "title": [
+                "span.titleline > a"
+              ],
+              "link": [
+                "span.titleline > a @href"
+              ],
+              "points": [
+                "span.score"
+              ],
+              "comments": [
+                ":scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)"
+              ]
+            },
+            "fieldsNotFound": []
+          }
+        },
+        {
+          "run": "hn-heal",
+          "startedAt": "2026-09-24T12:15:50.511Z",
+          "wallMs": 3959,
+          "exitCode": 0,
+          "stderr": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\nnavvi: status succeeded\n  items 10  pages 1  templates 1  cache hit yes\n  decider jev: 4 decisions, 6861 input tokens, 598ms waiting, $0.0003\n  healing events 1  unmapped candidates 0  unhealed 0\n  data: 10 records on stdout\n",
+          "status": "succeeded",
+          "items": 10,
+          "cacheHit": true,
+          "questions": 4,
+          "healingEvents": [
+            {
+              "kind": "field",
+              "fields": [
+                "title",
+                "link",
+                "points",
+                "comments"
+              ],
+              "at": "2026-09-24T12:15:54.397Z",
+              "url": "https://news.ycombinator.com/"
+            }
+          ],
+          "unhealed": 0,
+          "fieldsNotFound": [],
+          "healedFields": [
+            "comments",
+            "link",
+            "points",
+            "title"
+          ],
+          "inFlightRewrites": [
+            {
+              "atMs": 1458.1478289999977,
+              "url": "https://news.ycombinator.com/",
+              "counts": {
+                "span.titleline > a  →  span.storyhead > span.headline > a (class renamed, link wrapped in a new span)": 30,
+                "span.score  →  span.votes": 30,
+                "span.subline  →  span.byline": 30,
+                "td.subtext  →  td.story-meta": 30,
+                "span.age  →  span.posted": 30,
+                "a.hnuser  →  a.author": 30
+              }
+            }
+          ],
+          "storedScraperAfterRun": {
+            "item": {
+              "anchorSelector": "#bigbox tbody > tr.athing.submission",
+              "span": 3
+            },
+            "fields": {
+              "title": [
+                "span.titleline > a",
+                "span.headline > a"
+              ],
+              "link": [
+                "span.titleline > a @href",
+                "span.headline > a @href"
+              ],
+              "points": [
+                "span.score",
+                "span.votes"
+              ],
+              "comments": [
+                ":scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)",
+                ":scope > td.story-meta:nth-of-type(2) > span.byline > a:nth-of-type(3)"
+              ]
+            },
+            "fieldsNotFound": []
+          }
+        },
+        {
+          "run": "hn-replay",
+          "startedAt": "2026-09-24T12:15:54.483Z",
+          "wallMs": 4768,
+          "exitCode": 0,
+          "stderr": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\nnavvi: status succeeded\n  items 10  pages 1  templates 1  cache hit yes\n  decider jev: 0 decisions, 0 input tokens, 0ms waiting, $0.0000\n  healing events 4  unmapped candidates 0  unhealed 0\n  data: 10 records on stdout\n",
+          "status": "succeeded",
+          "items": 10,
+          "cacheHit": true,
+          "questions": 0,
+          "healingEvents": [
+            {
+              "kind": "promotion",
+              "field": "title",
+              "from": 1,
+              "observations": 30,
+              "at": "2026-09-24T12:15:59.237Z",
+              "because": "title resolved through alternative 1 (dom span.headline > a) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom span.titleline > a). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+            },
+            {
+              "kind": "promotion",
+              "field": "link",
+              "from": 1,
+              "observations": 30,
+              "at": "2026-09-24T12:15:59.237Z",
+              "because": "link resolved through alternative 1 (dom span.headline > a@href) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom span.titleline > a@href). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+            },
+            {
+              "kind": "promotion",
+              "field": "points",
+              "from": 1,
+              "observations": 30,
+              "at": "2026-09-24T12:15:59.237Z",
+              "because": "points resolved through alternative 1 (dom span.votes) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom span.score). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+            },
+            {
+              "kind": "promotion",
+              "field": "comments",
+              "from": 1,
+              "observations": 30,
+              "at": "2026-09-24T12:15:59.237Z",
+              "because": "comments resolved through alternative 1 (dom :scope > td.story-meta:nth-of-type(2) > span.byline > a:nth-of-type(3)) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom :scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+            }
+          ],
+          "unhealed": 0,
+          "fieldsNotFound": [],
+          "healedFields": [],
+          "inFlightRewrites": [
+            {
+              "atMs": 1781.8657080000012,
+              "url": "https://news.ycombinator.com/",
+              "counts": {
+                "span.titleline > a  →  span.storyhead > span.headline > a (class renamed, link wrapped in a new span)": 30,
+                "span.score  →  span.votes": 30,
+                "span.subline  →  span.byline": 30,
+                "td.subtext  →  td.story-meta": 30,
+                "span.age  →  span.posted": 30,
+                "a.hnuser  →  a.author": 30
+              }
+            }
+          ],
+          "storedScraperAfterRun": {
+            "item": {
+              "anchorSelector": "#bigbox tbody > tr.athing.submission",
+              "span": 3
+            },
+            "fields": {
+              "title": [
+                "span.headline > a",
+                "span.titleline > a"
+              ],
+              "link": [
+                "span.headline > a @href",
+                "span.titleline > a @href"
+              ],
+              "points": [
+                "span.votes",
+                "span.score"
+              ],
+              "comments": [
+                ":scope > td.story-meta:nth-of-type(2) > span.byline > a:nth-of-type(3)",
+                ":scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)"
+              ]
+            },
+            "fieldsNotFound": []
+          }
+        }
+      ]
+    }
+  ],
+  "frames": 151,
+  "distBuild": {
+    "builtAt": "2026-09-24T12:15:16.271Z",
+    "headAtBuild": "685aa9fe12ee7533c6cad0887795912a50a111d4",
+    "srcBinChangesSinceBuild": "none"
+  },
+  "runs": [
+    {
+      "run": "hn-compile",
+      "beat": 1,
+      "command": [
+        "front page stories with title, link, points and comments, up to 10",
+        "https://news.ycombinator.com/",
+        "--browser",
+        "chromium",
+        "--storage",
+        "storage-hn"
+      ],
+      "displayCommand": "navvi \"front page stories with title, link, points and comments, up to 10\" https://news.ycombinator.com/",
+      "startedAt": "2026-09-24T12:15:34.681Z",
+      "wallMs": 12716,
+      "exitCode": 0,
+      "displaySpeedup": 4,
+      "frames": [
+        0,
+        41
+      ],
+      "stderr": [
+        {
+          "atMs": 3,
+          "text": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\n"
+        },
+        {
+          "atMs": 12716,
+          "text": "navvi: status succeeded\n  items 10  pages 1  templates 1  cache hit no\n  decider jev: 7 decisions, 9569 input tokens, 1.5s waiting, $0.0004\n  writer claude: 1 text question, 18628 input tokens, 4.0s waiting, $0.0000\n  healing events 0  unmapped candidates 0  unhealed 0\n  data: 10 records on stdout\n"
+        }
+      ],
+      "crawlerLog": [],
+      "summary": {
+        "status": "succeeded",
+        "items": 10,
+        "pages": 1,
+        "templates": 1,
+        "cacheHit": false,
+        "chooser": {
+          "name": "jev",
+          "questions": 8,
+          "inputTokens": 28197,
+          "waitMs": 5516.484093999999,
+          "costUsd": 0.00040189800000000003,
+          "textQuestions": 1,
+          "writer": {
+            "name": "claude",
+            "textQuestions": 1,
+            "inputTokens": 18628,
+            "waitMs": 3988.312411,
+            "costUsd": 0
+          }
+        },
+        "healingEvents": [],
+        "unhealed": 0,
+        "unmappedCandidates": 0,
+        "fieldsNotFound": []
+      },
+      "healedFields": [],
+      "records": [
+        {
+          "title": "Nokia Design Archive (2025)",
+          "link": "https://nokiadesignarchive.aalto.fi/index.html",
+          "points": "86 points",
+          "comments": "43 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Linux support is coming to Snapdragon X2 Series",
+          "link": "https://www.qualcomm.com/news/onq/2026/09/snapdragon-summit-agentic-ai-pcs-linux",
+          "points": "466 points",
+          "comments": "195 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Claude discovers a novel enzyme system with CRISPR-like repeats",
+          "link": "https://www.anthropic.com/news/claude-discovers-novel-enzyme-system",
+          "points": "682 points",
+          "comments": "695 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Ideas on modernizing the open-source desktop",
+          "link": "https://lwn.net/SubscriberLink/1095425/2d9f411252325784/",
+          "points": "181 points",
+          "comments": "205 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Meta takes down a critical video about meta AI Glasses after filming at Meta",
+          "link": "https://www.reddit.com/r/facebook/comments/1wotwrk/meta_takes_down_a_critical_video_about_meta_ai/",
+          "points": "246 points",
+          "comments": "115 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "RAM: the forgotten history (2024)",
+          "link": "https://blog.coredump.cx/p/memory-the-forgotten-history",
+          "points": "38 points",
+          "comments": "discuss",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "ArXiv receives multiyear commitments to support it as an independent nonprofit",
+          "link": "https://blog.arxiv.org/2026/09/23/arxiv-receives-multiyear-investment/",
+          "points": "209 points",
+          "comments": "26 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "VSCode's SSH Agent Is Bananas (2025)",
+          "link": "https://fly.io/blog/vscode-ssh-wtf/",
+          "points": "254 points",
+          "comments": "160 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Contrastive Language Models",
+          "link": "https://contrastive-lm.notion.site/",
+          "points": "94 points",
+          "comments": "22 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Two-Tier Encryption in the UK – Identical Apple Devices, Different Protection",
+          "link": "https://macanorak.com/two-tier-encryption-in-the-uk/",
+          "points": "6 points",
+          "comments": "discuss",
+          "_source": "https://news.ycombinator.com/"
+        }
+      ],
+      "storedScraperAfterRun": {
+        "item": {
+          "anchorSelector": "#bigbox tbody > tr.athing.submission",
+          "span": 3
+        },
+        "fields": {
+          "title": [
+            "span.titleline > a"
+          ],
+          "link": [
+            "span.titleline > a @href"
+          ],
+          "points": [
+            "span.score"
+          ],
+          "comments": [
+            ":scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)"
+          ]
+        },
+        "fieldsNotFound": []
+      },
+      "pageScreenshots": 19,
+      "screenshotErrors": 0,
+      "screenshotBorrowedFromPreviousRun": null
+    },
+    {
+      "run": "hn-rerun",
+      "beat": 2,
+      "command": [
+        "front page stories with title, link, points and comments, up to 10",
+        "https://news.ycombinator.com/",
+        "--browser",
+        "chromium",
+        "--storage",
+        "storage-hn"
+      ],
+      "displayCommand": "navvi \"front page stories with title, link, points and comments, up to 10\" https://news.ycombinator.com/",
+      "startedAt": "2026-09-24T12:15:47.555Z",
+      "wallMs": 2767,
+      "exitCode": 0,
+      "displaySpeedup": 3,
+      "frames": [
+        42,
+        60
+      ],
+      "stderr": [
+        {
+          "atMs": 1,
+          "text": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\n"
+        },
+        {
+          "atMs": 2767,
+          "text": "navvi: status succeeded\n  items 10  pages 1  templates 1  cache hit yes\n  decider jev: 0 decisions, 0 input tokens, 0ms waiting, $0.0000\n  healing events 0  unmapped candidates 0  unhealed 0\n  data: 10 records on stdout\n"
+        }
+      ],
+      "crawlerLog": [],
+      "summary": {
+        "status": "succeeded",
+        "items": 10,
+        "pages": 1,
+        "templates": 1,
+        "cacheHit": true,
+        "chooser": {
+          "name": "jev",
+          "questions": 0,
+          "inputTokens": 0,
+          "waitMs": 0,
+          "costUsd": 0,
+          "textQuestions": 0
+        },
+        "healingEvents": [],
+        "unhealed": 0,
+        "unmappedCandidates": 0,
+        "fieldsNotFound": []
+      },
+      "healedFields": [],
+      "records": [
+        {
+          "title": "Nokia Design Archive (2025)",
+          "link": "https://nokiadesignarchive.aalto.fi/index.html",
+          "points": "86 points",
+          "comments": "43 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Linux support is coming to Snapdragon X2 Series",
+          "link": "https://www.qualcomm.com/news/onq/2026/09/snapdragon-summit-agentic-ai-pcs-linux",
+          "points": "466 points",
+          "comments": "195 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Claude discovers a novel enzyme system with CRISPR-like repeats",
+          "link": "https://www.anthropic.com/news/claude-discovers-novel-enzyme-system",
+          "points": "682 points",
+          "comments": "695 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Ideas on modernizing the open-source desktop",
+          "link": "https://lwn.net/SubscriberLink/1095425/2d9f411252325784/",
+          "points": "181 points",
+          "comments": "205 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Meta takes down a critical video about meta AI Glasses after filming at Meta",
+          "link": "https://www.reddit.com/r/facebook/comments/1wotwrk/meta_takes_down_a_critical_video_about_meta_ai/",
+          "points": "246 points",
+          "comments": "115 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "RAM: the forgotten history (2024)",
+          "link": "https://blog.coredump.cx/p/memory-the-forgotten-history",
+          "points": "38 points",
+          "comments": "discuss",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "ArXiv receives multiyear commitments to support it as an independent nonprofit",
+          "link": "https://blog.arxiv.org/2026/09/23/arxiv-receives-multiyear-investment/",
+          "points": "209 points",
+          "comments": "26 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "VSCode's SSH Agent Is Bananas (2025)",
+          "link": "https://fly.io/blog/vscode-ssh-wtf/",
+          "points": "254 points",
+          "comments": "160 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Contrastive Language Models",
+          "link": "https://contrastive-lm.notion.site/",
+          "points": "94 points",
+          "comments": "22 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Two-Tier Encryption in the UK – Identical Apple Devices, Different Protection",
+          "link": "https://macanorak.com/two-tier-encryption-in-the-uk/",
+          "points": "6 points",
+          "comments": "discuss",
+          "_source": "https://news.ycombinator.com/"
+        }
+      ],
+      "storedScraperAfterRun": {
+        "item": {
+          "anchorSelector": "#bigbox tbody > tr.athing.submission",
+          "span": 3
+        },
+        "fields": {
+          "title": [
+            "span.titleline > a"
+          ],
+          "link": [
+            "span.titleline > a @href"
+          ],
+          "points": [
+            "span.score"
+          ],
+          "comments": [
+            ":scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)"
+          ]
+        },
+        "fieldsNotFound": []
+      },
+      "pageScreenshots": 4,
+      "screenshotErrors": 0,
+      "screenshotBorrowedFromPreviousRun": null
+    },
+    {
+      "run": "hn-heal",
+      "beat": 3,
+      "command": [
+        "front page stories with title, link, points and comments, up to 10",
+        "https://news.ycombinator.com/",
+        "--browser",
+        "chromium",
+        "--storage",
+        "storage-hn"
+      ],
+      "displayCommand": "navvi \"front page stories with title, link, points and comments, up to 10\" https://news.ycombinator.com/",
+      "startedAt": "2026-09-24T12:15:50.511Z",
+      "wallMs": 3959,
+      "exitCode": 0,
+      "displaySpeedup": 2,
+      "frames": [
+        61,
+        106
+      ],
+      "stderr": [
+        {
+          "atMs": 1,
+          "text": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\n"
+        },
+        {
+          "atMs": 3959,
+          "text": "navvi: status succeeded\n  items 10  pages 1  templates 1  cache hit yes\n  decider jev: 4 decisions, 6861 input tokens, 598ms waiting, $0.0003\n  healing events 1  unmapped candidates 0  unhealed 0\n  data: 10 records on stdout\n"
+        }
+      ],
+      "crawlerLog": [
+        {
+          "atMs": 3274,
+          "text": "healing licensed on https://news.ycombinator.com/: the field is in \"replayed\" (the alternative resolved on a later run and produced a value of the recorded shape) and classifyRun answered \"drift\", which licenses \"stop-filling\" (replayed -> drifted): title, link, points, comments stopped filling — every field collapsed, but the canary page still resolves: the site is serving you and the template is what changed — the canary still resolves: 24 of 24 recorded words and 3981 characters of text.",
+          "shownOnScreen": false
+        }
+      ],
+      "summary": {
+        "status": "succeeded",
+        "items": 10,
+        "pages": 1,
+        "templates": 1,
+        "cacheHit": true,
+        "chooser": {
+          "name": "jev",
+          "questions": 4,
+          "inputTokens": 6861,
+          "waitMs": 598.4030600000006,
+          "costUsd": 0.000288162,
+          "textQuestions": 0
+        },
+        "healingEvents": [
+          {
+            "kind": "field",
+            "fields": [
+              "title",
+              "link",
+              "points",
+              "comments"
+            ],
+            "at": "2026-09-24T12:15:54.397Z",
+            "url": "https://news.ycombinator.com/"
+          }
+        ],
+        "unhealed": 0,
+        "unmappedCandidates": 0,
+        "fieldsNotFound": []
+      },
+      "healedFields": [
+        "comments",
+        "link",
+        "points",
+        "title"
+      ],
+      "records": [
+        {
+          "title": "Nokia Design Archive (2025)",
+          "link": "https://nokiadesignarchive.aalto.fi/index.html",
+          "points": "86 points",
+          "comments": "43 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Linux support is coming to Snapdragon X2 Series",
+          "link": "https://www.qualcomm.com/news/onq/2026/09/snapdragon-summit-agentic-ai-pcs-linux",
+          "points": "466 points",
+          "comments": "195 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Claude discovers a novel enzyme system with CRISPR-like repeats",
+          "link": "https://www.anthropic.com/news/claude-discovers-novel-enzyme-system",
+          "points": "682 points",
+          "comments": "695 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Ideas on modernizing the open-source desktop",
+          "link": "https://lwn.net/SubscriberLink/1095425/2d9f411252325784/",
+          "points": "181 points",
+          "comments": "205 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Meta takes down a critical video about meta AI Glasses after filming at Meta",
+          "link": "https://www.reddit.com/r/facebook/comments/1wotwrk/meta_takes_down_a_critical_video_about_meta_ai/",
+          "points": "246 points",
+          "comments": "115 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "RAM: the forgotten history (2024)",
+          "link": "https://blog.coredump.cx/p/memory-the-forgotten-history",
+          "points": "38 points",
+          "comments": "discuss",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "ArXiv receives multiyear commitments to support it as an independent nonprofit",
+          "link": "https://blog.arxiv.org/2026/09/23/arxiv-receives-multiyear-investment/",
+          "points": "209 points",
+          "comments": "26 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "VSCode's SSH Agent Is Bananas (2025)",
+          "link": "https://fly.io/blog/vscode-ssh-wtf/",
+          "points": "254 points",
+          "comments": "160 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Contrastive Language Models",
+          "link": "https://contrastive-lm.notion.site/",
+          "points": "94 points",
+          "comments": "22 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Two-Tier Encryption in the UK – Identical Apple Devices, Different Protection",
+          "link": "https://macanorak.com/two-tier-encryption-in-the-uk/",
+          "points": "6 points",
+          "comments": "discuss",
+          "_source": "https://news.ycombinator.com/"
+        }
+      ],
+      "inFlightRewrites": [
+        {
+          "atMs": 1458.1478289999977,
+          "url": "https://news.ycombinator.com/",
+          "counts": {
+            "span.titleline > a  →  span.storyhead > span.headline > a (class renamed, link wrapped in a new span)": 30,
+            "span.score  →  span.votes": 30,
+            "span.subline  →  span.byline": 30,
+            "td.subtext  →  td.story-meta": 30,
+            "span.age  →  span.posted": 30,
+            "a.hnuser  →  a.author": 30
+          }
+        }
+      ],
+      "storedScraperAfterRun": {
+        "item": {
+          "anchorSelector": "#bigbox tbody > tr.athing.submission",
+          "span": 3
+        },
+        "fields": {
+          "title": [
+            "span.titleline > a",
+            "span.headline > a"
+          ],
+          "link": [
+            "span.titleline > a @href",
+            "span.headline > a @href"
+          ],
+          "points": [
+            "span.score",
+            "span.votes"
+          ],
+          "comments": [
+            ":scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)",
+            ":scope > td.story-meta:nth-of-type(2) > span.byline > a:nth-of-type(3)"
+          ]
+        },
+        "fieldsNotFound": []
+      },
+      "pageScreenshots": 6,
+      "screenshotErrors": 0,
+      "screenshotBorrowedFromPreviousRun": null
+    },
+    {
+      "run": "hn-replay",
+      "beat": 3,
+      "command": [
+        "front page stories with title, link, points and comments, up to 10",
+        "https://news.ycombinator.com/",
+        "--browser",
+        "chromium",
+        "--storage",
+        "storage-hn"
+      ],
+      "displayCommand": "navvi \"front page stories with title, link, points and comments, up to 10\" https://news.ycombinator.com/",
+      "startedAt": "2026-09-24T12:15:54.483Z",
+      "wallMs": 4768,
+      "exitCode": 0,
+      "displaySpeedup": 4,
+      "frames": [
+        107,
+        129
+      ],
+      "stderr": [
+        {
+          "atMs": 1,
+          "text": "chooser: jev (AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude)\n"
+        },
+        {
+          "atMs": 4768,
+          "text": "navvi: status succeeded\n  items 10  pages 1  templates 1  cache hit yes\n  decider jev: 0 decisions, 0 input tokens, 0ms waiting, $0.0000\n  healing events 4  unmapped candidates 0  unhealed 0\n  data: 10 records on stdout\n"
+        }
+      ],
+      "crawlerLog": [
+        {
+          "atMs": 4761,
+          "text": "promoted title on news.ycombinator.com/: title resolved through alternative 1 (dom span.headline > a) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom span.titleline > a). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn.",
+          "shownOnScreen": false
+        },
+        {
+          "atMs": 4761,
+          "text": "promoted link on news.ycombinator.com/: link resolved through alternative 1 (dom span.headline > a@href) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom span.titleline > a@href). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn.",
+          "shownOnScreen": false
+        },
+        {
+          "atMs": 4761,
+          "text": "promoted points on news.ycombinator.com/: points resolved through alternative 1 (dom span.votes) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom span.score). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn.",
+          "shownOnScreen": false
+        },
+        {
+          "atMs": 4761,
+          "text": "promoted comments on news.ycombinator.com/: comments resolved through alternative 1 (dom :scope > td.story-meta:nth-of-type(2) > span.byline > a:nth-of-type(3)) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom :scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn.",
+          "shownOnScreen": false
+        }
+      ],
+      "summary": {
+        "status": "succeeded",
+        "items": 10,
+        "pages": 1,
+        "templates": 1,
+        "cacheHit": true,
+        "chooser": {
+          "name": "jev",
+          "questions": 0,
+          "inputTokens": 0,
+          "waitMs": 0,
+          "costUsd": 0,
+          "textQuestions": 0
+        },
+        "healingEvents": [
+          {
+            "kind": "promotion",
+            "field": "title",
+            "from": 1,
+            "observations": 30,
+            "at": "2026-09-24T12:15:59.237Z",
+            "because": "title resolved through alternative 1 (dom span.headline > a) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom span.titleline > a). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+          },
+          {
+            "kind": "promotion",
+            "field": "link",
+            "from": 1,
+            "observations": 30,
+            "at": "2026-09-24T12:15:59.237Z",
+            "because": "link resolved through alternative 1 (dom span.headline > a@href) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom span.titleline > a@href). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+          },
+          {
+            "kind": "promotion",
+            "field": "points",
+            "from": 1,
+            "observations": 30,
+            "at": "2026-09-24T12:15:59.237Z",
+            "because": "points resolved through alternative 1 (dom span.votes) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom span.score). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+          },
+          {
+            "kind": "promotion",
+            "field": "comments",
+            "from": 1,
+            "observations": 30,
+            "at": "2026-09-24T12:15:59.237Z",
+            "because": "comments resolved through alternative 1 (dom :scope > td.story-meta:nth-of-type(2) > span.byline > a:nth-of-type(3)) on all 30 items this run, and the alternative ahead of it answered none of them (0: dom :scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)). An alternative that keeps working outranks one that keeps failing, so it moves first; nothing is removed, so the ordering is a claim the next run can overturn."
+          }
+        ],
+        "unhealed": 0,
+        "unmappedCandidates": 0,
+        "fieldsNotFound": []
+      },
+      "healedFields": [],
+      "records": [
+        {
+          "title": "Nokia Design Archive (2025)",
+          "link": "https://nokiadesignarchive.aalto.fi/index.html",
+          "points": "86 points",
+          "comments": "43 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Linux support is coming to Snapdragon X2 Series",
+          "link": "https://www.qualcomm.com/news/onq/2026/09/snapdragon-summit-agentic-ai-pcs-linux",
+          "points": "466 points",
+          "comments": "195 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Claude discovers a novel enzyme system with CRISPR-like repeats",
+          "link": "https://www.anthropic.com/news/claude-discovers-novel-enzyme-system",
+          "points": "682 points",
+          "comments": "695 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Ideas on modernizing the open-source desktop",
+          "link": "https://lwn.net/SubscriberLink/1095425/2d9f411252325784/",
+          "points": "181 points",
+          "comments": "205 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Meta takes down a critical video about meta AI Glasses after filming at Meta",
+          "link": "https://www.reddit.com/r/facebook/comments/1wotwrk/meta_takes_down_a_critical_video_about_meta_ai/",
+          "points": "246 points",
+          "comments": "115 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "RAM: the forgotten history (2024)",
+          "link": "https://blog.coredump.cx/p/memory-the-forgotten-history",
+          "points": "38 points",
+          "comments": "discuss",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "ArXiv receives multiyear commitments to support it as an independent nonprofit",
+          "link": "https://blog.arxiv.org/2026/09/23/arxiv-receives-multiyear-investment/",
+          "points": "209 points",
+          "comments": "26 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "VSCode's SSH Agent Is Bananas (2025)",
+          "link": "https://fly.io/blog/vscode-ssh-wtf/",
+          "points": "254 points",
+          "comments": "160 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Contrastive Language Models",
+          "link": "https://contrastive-lm.notion.site/",
+          "points": "94 points",
+          "comments": "22 comments",
+          "_source": "https://news.ycombinator.com/"
+        },
+        {
+          "title": "Two-Tier Encryption in the UK – Identical Apple Devices, Different Protection",
+          "link": "https://macanorak.com/two-tier-encryption-in-the-uk/",
+          "points": "6 points",
+          "comments": "discuss",
+          "_source": "https://news.ycombinator.com/"
+        }
+      ],
+      "inFlightRewrites": [
+        {
+          "atMs": 1781.8657080000012,
+          "url": "https://news.ycombinator.com/",
+          "counts": {
+            "span.titleline > a  →  span.storyhead > span.headline > a (class renamed, link wrapped in a new span)": 30,
+            "span.score  →  span.votes": 30,
+            "span.subline  →  span.byline": 30,
+            "td.subtext  →  td.story-meta": 30,
+            "span.age  →  span.posted": 30,
+            "a.hnuser  →  a.author": 30
+          }
+        }
+      ],
+      "storedScraperAfterRun": {
+        "item": {
+          "anchorSelector": "#bigbox tbody > tr.athing.submission",
+          "span": 3
+        },
+        "fields": {
+          "title": [
+            "span.headline > a",
+            "span.titleline > a"
+          ],
+          "link": [
+            "span.headline > a @href",
+            "span.titleline > a @href"
+          ],
+          "points": [
+            "span.votes",
+            "span.score"
+          ],
+          "comments": [
+            ":scope > td.story-meta:nth-of-type(2) > span.byline > a:nth-of-type(3)",
+            ":scope > td.subtext:nth-of-type(2) > span.subline > a:nth-of-type(3)"
+          ]
+        },
+        "fieldsNotFound": []
+      },
+      "pageScreenshots": 8,
+      "screenshotErrors": 0,
+      "screenshotBorrowedFromPreviousRun": null
+    }
+  ]
+}
