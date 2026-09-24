@@ -206,20 +206,43 @@ export interface LaunchCounter {
   onPostLaunch(pageId: string, controller: unknown): void;
 }
 
+/** The debug switch the CLI already reads for Crawlee's own log level. */
+export const LOG_LEVEL_ENV = "NAVVI_LOG";
+
+/**
+ * The line a launch leaves in the run log. It names the browser actually
+ * launched: under Camoufox the executable is the one camoufox-js put in the
+ * launch options, and `chromium.executablePath()` is not the binary that runs,
+ * so quoting it -- as this line used to, on every run -- read as if navvi had
+ * launched Chrome for Testing while naming Camoufox.
+ */
+export function describeLaunch(launches: number, launchContext: unknown, env: NodeJS.ProcessEnv = process.env): string {
+  // Crawlee's pre-launch context carries the Playwright browser type as `browserPlugin.library`.
+  const context = launchContext as { browserPlugin?: { library?: { name?: () => string } }; launchOptions?: { executablePath?: string } } | undefined;
+  const family = context?.browserPlugin?.library?.name?.();
+  const configured = context?.launchOptions?.executablePath;
+  if (family === "firefox") {
+    const exists = configured ? existsSync(configured) : "unknown";
+    return `browser launch #${launches}: camoufox executable=${configured ?? "(camoufox-js default)"} exists=${exists}`;
+  }
+  if (configured) return `browser launch #${launches}: chromium executable=${configured} exists=${existsSync(configured)}`;
+  const facts = describeBrowserFacts(env);
+  return `browser launch #${launches}: chromium executable=${facts.playwrightExecutablePath ?? "(unresolved)"} (playwright default) exists=${facts.playwrightExecutableExists ?? "unknown"}`;
+}
+
 export function createLaunchCounter(log: (message: string) => void, env: NodeJS.ProcessEnv = process.env): LaunchCounter {
   let launches = 0;
+  // The first launch is only worth a line when someone is looking for it: a
+  // debug run, or a forced repro whose whole point is the launch sequence. A
+  // relaunch is logged always, since a healthy run has none.
+  const verbose = env[LOG_LEVEL_ENV] === "debug" || isForcedRepro(resolveRelaunchKnobs(env));
   return {
     get launches() {
       return launches;
     },
     onPreLaunch(_pageId: string, launchContext: unknown) {
       launches += 1;
-      const options = (launchContext as { launchOptions?: { executablePath?: string } } | undefined)?.launchOptions;
-      const facts = describeBrowserFacts(env);
-      log(
-        `browser launch #${launches}: launchOptions.executablePath=${options?.executablePath ?? "(unset)"} ` +
-          `resolved=${facts.playwrightExecutablePath ?? "(unresolved)"} exists=${facts.playwrightExecutableExists ?? "unknown"}`,
-      );
+      if (launches > 1 || verbose) log(describeLaunch(launches, launchContext, env));
     },
     onPostLaunch(_pageId: string, _controller: unknown) {
       // Only relaunches are logged on success. The first launch working is not

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   causeChain,
   createLaunchCounter,
+  describeLaunch,
   DEFAULT_SESSION_MAX_USAGE_COUNT,
   formatLaunchFailure,
   isForcedRepro,
@@ -129,7 +130,7 @@ describe("launch failure evidence", () => {
 
   it("counts every launch, so the second one is identifiable as a relaunch", () => {
     const lines: string[] = [];
-    const counter = createLaunchCounter((m) => lines.push(m), {});
+    const counter = createLaunchCounter((m) => lines.push(m), { NAVVI_LOG: "debug" });
     counter.onPreLaunch("p1", { launchOptions: { executablePath: "/pw-browsers/chrome" } });
     counter.onPostLaunch("p1", {});
     counter.onPreLaunch("p2", { launchOptions: {} });
@@ -141,6 +142,25 @@ describe("launch failure evidence", () => {
     // A healthy first launch is not the question, so it is not logged; a
     // relaunch that works is a finding in its own right.
     expect(lines.filter((l) => l.includes("succeeded"))).toEqual(["browser relaunch #2 succeeded"]);
+  });
+
+  it("says nothing about a healthy first launch unless NAVVI_LOG=debug asks", () => {
+    const lines: string[] = [];
+    const counter = createLaunchCounter((m) => lines.push(m), {});
+    counter.onPreLaunch("p1", { launchOptions: {} });
+    counter.onPostLaunch("p1", {});
+    expect(counter.launches).toBe(1);
+    expect(lines).toEqual([]);
+    // A relaunch is a finding on any run.
+    counter.onPreLaunch("p2", { launchOptions: {} });
+    expect(lines[0]).toContain("browser launch #2");
+  });
+
+  it("names Camoufox's own executable under the firefox launcher, not Playwright's chromium", () => {
+    const line = describeLaunch(1, { browserPlugin: { library: { name: () => "firefox" } }, launchOptions: { executablePath: "/opt/camoufox/camoufox" } }, {});
+    expect(line).toBe("browser launch #1: camoufox executable=/opt/camoufox/camoufox exists=false");
+    expect(line).not.toMatch(/chrom/i);
+    expect(describeLaunch(1, { browserPlugin: { library: { name: () => "chromium" } }, launchOptions: {} }, {})).toMatch(/^browser launch #1: chromium executable=.* \(playwright default\) exists=/);
   });
 });
 

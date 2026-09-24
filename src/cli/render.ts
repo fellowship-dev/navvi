@@ -144,6 +144,15 @@ export function makeStop(stage: string, because: string, exit: number): string {
   return `stopped at ${stage}: ${because} (exit ${exit})\n`;
 }
 
+/**
+ * `make`'s last line, stopped or not: the status word and the exit code, in
+ * the plain command's `navvi: status …` spelling. Without it a run that
+ * delivered ended on its last stage bullet and never said so.
+ */
+export function makeStatus(status: string, exit: number, runStatus?: string): string {
+  return `navvi: status ${status}${runStatus ? ` — ${runStatus}` : ""} (exit ${exit})\n`;
+}
+
 // ------------------------------------------------------------ U5: --work
 
 /**

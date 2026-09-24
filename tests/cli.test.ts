@@ -294,16 +294,75 @@ describe("help and version", () => {
     expect(io.stdout.text).toContain("--chooser");
   });
 
-  it("--version prints 3.0.0", async () => {
+  it("--version prints the package version", async () => {
     const io = makeIo();
     expect(await main(["--version"], io)).toBe(0);
-    expect(io.stdout.text.trim()).toBe("3.0.0");
+    const { version } = JSON.parse(readFileSync(resolve("package.json"), "utf8")) as { version: string };
+    expect(io.stdout.text.trim()).toBe(version);
+  });
+
+  it("a bad flag is one error line and a pointer to --help, not the whole usage", async () => {
+    const io = makeIo();
+    expect(await main(["--no-such-flag", "https://example.org/"], io)).toBe(2);
+    const lines = io.stderr.text.trimEnd().split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^navvi: .*--no-such-flag/);
+    expect(lines[1]).toBe("run navvi --help for usage");
+    expect(io.stdout.text).toBe("");
   });
 
   it("no arguments is a usage error (exit 2)", async () => {
     const io = makeIo();
     expect(await main([], io)).toBe(2);
     expect(io.stderr.text).toMatch(/usage/i);
+  });
+});
+
+describe("a start URL that does not exist", () => {
+  const status = (codes: Record<string, number>) =>
+    (async (input: unknown) => new Response(null, { status: codes[String(input)] ?? 200 })) as unknown as typeof fetch;
+
+  it("is reported by name before the prompt spends a model call", async () => {
+    let ran = false;
+    const io = makeIo({
+      env: { PATH: "" },
+      fetch: status({ "https://a.example/gone": 404 }),
+      run: async () => {
+        ran = true;
+        return summary({ items: 0, status: "no_items_found" });
+      },
+    });
+    expect(await main(["the price", "https://a.example/gone", "--decider", "agent", "--storage", storageFor("gone")], io)).toBe(1);
+    expect(ran, "no run, so no writer call").toBe(false);
+    expect(io.stderr.text).toContain("navvi: no_items_found: every start URL answered not found before the prompt was read, so no model was asked: https://a.example/gone (404)\n");
+  });
+
+  it("warns and reads the rest when only some are gone", async () => {
+    let ran = false;
+    const io = makeIo({
+      env: { PATH: "" },
+      fetch: status({ "https://a.example/gone": 410 }),
+      run: async () => {
+        ran = true;
+        return summary({ items: 1 });
+      },
+    });
+    expect(await main(["the price", "https://a.example/gone", "https://a.example/here", "--decider", "agent", "--storage", storageFor("half-gone")], io)).toBe(0);
+    expect(ran).toBe(true);
+    expect(io.stderr.text).toContain("navvi: a start URL answers not found and will read nothing: https://a.example/gone (410)\n");
+  });
+
+  it("is not probed with --mode and --fields, where no prompt is read", async () => {
+    let probed = false;
+    const io = makeIo({
+      fetch: (async () => {
+        probed = true;
+        return new Response(null, { status: 404 });
+      }) as unknown as typeof fetch,
+      run: async () => summary({ items: 1 }),
+    });
+    expect(await main(["--decider", "agent", "--mode", "record", "--fields", "a", "--storage", storageFor("no-probe"), "https://a.example/gone"], io)).toBe(0);
+    expect(probed).toBe(false);
   });
 });
 
@@ -646,7 +705,7 @@ describe("agent surfaces (R35)", () => {
 });
 
 describe("built binary", () => {
-  it("node dist/bin/cli.js --version prints 3.0.0 after npm run build", () => {
+  it("node dist/bin/cli.js --version prints the package version after npm run build", () => {
     try {
       execFileSync("npm", ["run", "build"], { cwd: REPO, stdio: "pipe", timeout: 120_000 });
     } catch (error) {
@@ -658,7 +717,8 @@ describe("built binary", () => {
       throw error;
     }
     const version = execFileSync("node", [join(REPO, "dist", "bin", "cli.js"), "--version"], { cwd: REPO, encoding: "utf8" });
-    expect(version.trim()).toBe("3.0.0");
+    const { version: packaged } = JSON.parse(readFileSync(join(REPO, "package.json"), "utf8")) as { version: string };
+    expect(version.trim()).toBe(packaged);
   }, 150_000);
 });
 
@@ -723,18 +783,19 @@ describe("attribution and the Jev announcement (U7)", () => {
     expect(io.stderr.text).not.toContain("tip:");
   });
 
-  it("without a Jev key, a person at a terminal gets one tip line; CI and --quiet do not", async () => {
+  it("without a Jev key or a CLI, the agent announcement names Jev once, terminal or pipe; --quiet does not", async () => {
     const tty = makeIo({ run: async () => summary({ items: 1 }), env: { PATH: "" } });
     Object.assign(tty.stderr, { isTTY: true });
     expect(await main(["--storage", storageFor("tip-tty"), ...FLAGS], tty)).toBe(0);
-    const tips = tty.stderr.text.split("\n").filter((l) => l.startsWith("tip:"));
-    expect(tips).toHaveLength(1);
-    expect(tips[0]).toContain("TYPESAFE_API_KEY");
-    expect(tips[0]).toContain("https://typesafe.ai");
+    const chooserLine = tty.stderr.text.split("\n").find((l) => l.startsWith("chooser: agent ("));
+    expect(chooserLine).toMatch(/\); with TYPESAFE_API_KEY set, Jev makes these decisions — get a key at https:\/\/typesafe\.ai$/);
+    expect(tty.stderr.text.match(/typesafe\.ai/g)).toHaveLength(1);
+    expect(tty.stderr.text).not.toContain("tip:");
 
     const ci = makeIo({ run: async () => summary({ items: 1 }), env: { PATH: "" } });
     expect(await main(["--storage", storageFor("tip-ci"), ...FLAGS], ci)).toBe(0);
-    expect(ci.stderr.text).not.toContain("tip:");
+    expect(ci.stderr.text).toContain("; with TYPESAFE_API_KEY set, Jev makes these decisions — get a key at https://typesafe.ai\n");
+    expect(ci.stderr.text.match(/typesafe\.ai/g)).toHaveLength(1);
 
     const quiet = makeIo({ run: async () => summary({ items: 1 }), env: { PATH: "" } });
     Object.assign(quiet.stderr, { isTTY: true });

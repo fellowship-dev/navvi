@@ -11,8 +11,8 @@ import { NotifyConfigurationError, createNotifier } from "../src/cli/notify.js";
 import { formatRows, type OutputFormat, type Row } from "../src/cli/output.js";
 import { createChooser, findOnPath, HARNESS_LABEL, loadAnswersFile, mergeAnswers, missingCredentialsMessage, NavviError, NeedsHumanError, readQuestionsFile, resolveDefaultChooser, type Chooser, type StoredAnswer } from "../src/chooser/index.js";
 import { bank, UnknownHeuristicError, type Overrides } from "../src/heuristics/index.js";
-import { defaultBrowser, parseFieldSpecs, type Chooser as ChooserId, type SourceSelection } from "../src/input/schema.js";
-import { chooserLines, heuristicBlock, heuristicsBlock, makeStop, specBlock, workBlock } from "../src/cli/render.js";
+import { defaultBrowser, isAllowedUrl, parseFieldSpecs, type Chooser as ChooserId, type SourceSelection } from "../src/input/schema.js";
+import { chooserLines, heuristicBlock, heuristicsBlock, makeStatus, makeStop, specBlock, workBlock } from "../src/cli/render.js";
 import { make as runMake, openPages, writeCompiledTemplate, type MakeStatus, type WrittenArtifacts } from "../src/make/index.js";
 import { briefToSpec, SpecParseError } from "../src/spec/spec.js";
 import { RubricSchema, type Rubric } from "../src/spec/schema.js";
@@ -170,6 +170,42 @@ function defaultSecretPrompt(io: CliIo): (name: string) => Promise<string | null
 
 // ---------------------------------------------------------------- input
 
+/**
+ * A prompt is read by the writer before any page is opened, so a start URL
+ * that does not exist used to cost a model call and then end in
+ * `no_items_found` with nothing saying why. One plain GET per start URL is
+ * cheaper than that call. Only 404 and 410 count: a 403 or a timeout may be a
+ * WAF refusing a non-browser client, which the browser may well get past. A
+ * run with secrets or a named profile is not probed, because a page behind a
+ * login can answer 404 to a visitor who has none.
+ *
+ * Every start URL gone (and no --from-url list to bring others) stops the run
+ * here, naming them. Some gone is a warning, and the run reads the rest.
+ */
+async function refuseGoneStartUrls(args: CliArgs, io: CliIo): Promise<void> {
+  if (!io.fetch || args.urls.length === 0) return;
+  const probe = io.fetch;
+  const statuses = await Promise.all(
+    args.urls.map(async (url) => {
+      if (!isAllowedUrl(url, args.allowPrivateHosts)) return null;
+      try {
+        const response = await probe(url, { method: "GET", redirect: "follow", signal: AbortSignal.timeout(10_000) });
+        await response.body?.cancel().catch(() => undefined);
+        return response.status === 404 || response.status === 410 ? { url, status: response.status } : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  const gone = statuses.filter((entry): entry is { url: string; status: number } => entry !== null);
+  if (gone.length === 0) return;
+  const named = gone.map((entry) => `${entry.url} (${entry.status})`).join(", ");
+  if (gone.length === args.urls.length && args.fromUrls.length === 0) {
+    throw new NavviError("no_items_found", `every start URL answered not found before the prompt was read, so no model was asked: ${named}`);
+  }
+  if (!args.quiet) io.stderr.write(`navvi: ${gone.length === 1 ? "a start URL answers" : "start URLs answer"} not found and will read nothing: ${named}\n`);
+}
+
 /** The raw run input: run() validates it and parses a prompt-only input through the chooser (KTD11). */
 function rawInput(args: CliArgs, io: CliIo, secrets: Record<string, string>, sources: SourceSelection): Record<string, unknown> {
   const hasSecrets = Object.keys(secrets).length > 0;
@@ -282,7 +318,8 @@ function needsHumanBlock(token: string | undefined, questionsFile: string | unde
 export async function main(argv: readonly string[], io: CliIo): Promise<number> {
   const parsed = parseArgs(argv);
   if (!parsed.ok) {
-    io.stderr.write(`navvi: ${parsed.error}\n\n${usage()}`);
+    // One line and a pointer: the full usage buried the error under a hundred lines.
+    io.stderr.write(`navvi: ${parsed.error}\nrun navvi --help for usage\n`);
     return EXIT.configuration;
   }
   const args = parsed.args;
@@ -392,15 +429,26 @@ function chooserFor(sources: SourceSelection, args: CliArgs, io: CliIo, storageD
 export const JEV_TIP = "tip: with TYPESAFE_API_KEY set, Jev makes these decisions — fast, typed, unattended, a fraction of a cent per run. Get a key at https://typesafe.ai";
 
 /**
+ * The short form, appended to the agent announcement when there is no Jev key:
+ * the agent is the fallback that asks whoever reads stderr, so that reader --
+ * often an agent on a pipe, which never sees the tip -- learns what would
+ * answer instead.
+ */
+export const JEV_POINTER = "with TYPESAFE_API_KEY set, Jev makes these decisions — get a key at https://typesafe.ai";
+
+/**
  * Without --chooser: a key, else the first signed-in CLI (Claude Code, then Codex), else the agent; the choice and its reason go to stderr.
  * U7: an auto-selected Jev names its key, its benefit and who writes the text; without a Jev key a terminal gets the tip.
  */
 async function announceChooser(io: CliIo, args: CliArgs): Promise<ChooserId> {
   const resolved = await resolveDefaultChooser(io.env, undefined, args.writer ? { writer: args.writer } : {});
   if (args.quiet) return resolved.name;
-  io.stderr.write(`chooser: ${resolved.name} (${resolved.reason})\n`);
+  const noJevKey = resolved.name !== "jev" && !io.env.AI_GATEWAY_API_KEY && !io.env.TYPESAFE_API_KEY;
+  // Jev is named once: in the agent's own line, else in the terminal tip.
+  const pointer = noJevKey && resolved.name === "agent";
+  io.stderr.write(`chooser: ${resolved.name} (${resolved.reason})${pointer ? `; ${JEV_POINTER}` : ""}\n`);
   const tty = (io.stderr as NodeJS.WritableStream & { isTTY?: boolean }).isTTY === true;
-  if (resolved.name !== "jev" && !io.env.AI_GATEWAY_API_KEY && !io.env.TYPESAFE_API_KEY && tty) io.stderr.write(`${JEV_TIP}\n`);
+  if (noJevKey && !pointer && tty) io.stderr.write(`${JEV_TIP}\n`);
   return resolved.name;
 }
 
@@ -543,10 +591,12 @@ async function make(args: CliArgs, io: CliIo): Promise<number> {
     },
   );
 
-  if (result.stoppedAt && result.because && !args.quiet) {
-    io.stderr.write(makeStop(result.stoppedAt, result.because, exitForMake(result.status, result.runStatus)));
+  const exit = exitForMake(result.status, result.runStatus);
+  if (!args.quiet) {
+    if (result.stoppedAt && result.because) io.stderr.write(makeStop(result.stoppedAt, result.because, exit));
+    io.stderr.write(makeStatus(result.status, exit, result.status === "unavailable" ? result.runStatus : undefined));
   }
-  return exitForMake(result.status, result.runStatus);
+  return exit;
 }
 
 /** `make`'s own vocabulary, mapped onto the process exit codes this file owns. */
@@ -599,6 +649,9 @@ async function execute(args: CliArgs, io: CliIo): Promise<number> {
   }
   const secrets = await collectSecrets(args, io);
   if (!args.prompt && !(args.mode && args.fields && args.fields.length > 0)) throw new CliError("give a prompt, or both --mode and --fields.");
+  if (args.prompt && !(args.mode && args.fields && args.fields.length > 0) && Object.keys(secrets).length === 0 && !args.profile) {
+    await refuseGoneStartUrls(args, io);
+  }
   // Resolved once here and passed in the input: run() never re-resolves differently.
   const sources = await resolveCliSources(args, io);
   const chooser = chooserFor(sources, args, io, storageDir);
@@ -700,6 +753,6 @@ if (invokedDirectly()) {
   // stdout carries data (and agent question batches) only: Crawlee's INFO lines and any console.log go to stderr.
   crawleeLog.setLevel(process.env.NAVVI_LOG === "debug" ? LogLevel.DEBUG : LogLevel.WARNING);
   console.log = (...parts: unknown[]) => console.error(...parts);
-  const code = await main(process.argv.slice(2), { stdin: process.stdin, stdout: process.stdout, stderr: process.stderr, env: process.env, cwd: process.cwd() });
+  const code = await main(process.argv.slice(2), { stdin: process.stdin, stdout: process.stdout, stderr: process.stderr, env: process.env, cwd: process.cwd(), fetch: globalThis.fetch });
   process.stdout.write("", () => process.exit(code));
 }

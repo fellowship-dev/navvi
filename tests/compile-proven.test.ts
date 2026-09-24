@@ -5,7 +5,7 @@ import type { Page } from "playwright";
 import type { CapturedResponse } from "../src/browser/network-capture.js";
 import { launch, type LaunchedBrowser } from "../src/browser/launch.js";
 import { NothingCompilableError, compileFromReconciliation, renderRationale } from "../src/compile/index.js";
-import { REFUSE_FALLBACK, REFUSE_SOLE, auditSelector } from "../src/compile/gate.js";import type { FieldAlias, FieldRecord, InventoryRecord, Manuscript } from "../src/investigate/manuscript.js";
+import { REFUSE_FALLBACK, REFUSE_SOLE, auditSelector, gateAlternative } from "../src/compile/gate.js";import type { FieldAlias, FieldRecord, InventoryRecord, Manuscript } from "../src/investigate/manuscript.js";
 import { reconcile } from "../src/reconcile/index.js";
 import { coerceValues, extractPage, fieldTypesOf } from "../src/scraper/extract.js";
 import type { Spec } from "../src/spec/schema.js";
@@ -586,6 +586,48 @@ describe("rationale.md explains a binding without opening the scraper JSON", () 
     expect(markdown).toContain("fallback");
     // And the fingerprint, so drift can be reasoned about from this file.
     expect(markdown).toContain("int: 4990, 12990, 7490");
+  });
+
+  /**
+   * A tier-3 column as `./template.ts` hands it over: a chooser picked the
+   * selector, and the binding's `because` already carries the gate's sentence.
+   */
+  function tier3Sku(selector: string, answeredBy = "jev"): Manuscript {
+    const book = manuscript();
+    const sku = book.fields.find((entry) => entry.field === "sku")!;
+    sku.tier = 3;
+    sku.selector = selector;
+    sku.path = "main/h1";
+    delete sku.attr;
+    sku.decision = { question: "field.sku", premise: "Which node holds the sku?", options: 4, chose: "main/h1", answeredBy };
+    sku.because =
+      `${answeredBy} chose \`main/h1\` out of 4 DOM candidate(s) that resolved on all 3 rendered page(s), asked \`field.sku\`` +
+      `; the selector gate kept it: ${gateAlternative(selector, "dom", { sole: true }).because}`;
+    return book;
+  }
+
+  it("says once, and with its reason, why the gate kept a scored tier-3 selector", () => {
+    const markdown = renderRationale(compiled(tier3Sku("h1")).rationale);
+    expect(markdown.match(/gate kept/g), markdown).toHaveLength(1);
+    expect(markdown).not.toContain("The selector was kept");
+    expect(markdown).toContain("asked `field.sku`. The selector gate kept `h1`");
+    expect(markdown).toContain(
+      "The selector gate kept `h1`: its risks score 2, below the 5 that refuses a field's only reading. Only a class certain to be wrong (UI state, campaign, generated) or two fragilities together reach that bar",
+    );
+    expect(markdown).toContain("no-semantic-hook (2): no id, data-*, itemprop, aria-* or class anywhere in the path — a bare tag");
+  });
+
+  it("does not call a meaningful class meaningless: it names the classes the gate's vocabulary missed", () => {
+    const markdown = renderRationale(compiled(tier3Sku("p.instock.availability")).rationale)
+    expect(markdown).not.toContain("meaningful class");
+    expect(markdown).toContain("none of its classes (instock, availability) begins with a word in the gate's vocabulary");
+  });
+
+  it("does not open with \"no model was asked\" over a column a model chose", () => {
+    const decided = compiled(tier3Sku("h1")).rationale.because;
+    expect(decided).not.toContain("No page was opened and no model was asked by this compile.");
+    expect(decided).toContain("This compile opened no page and asked no model; the models behind it were asked earlier: 1 tier-3 column(s) (sku) were chosen during the investigation by jev");
+    expect(compiled().rationale.because).toContain("No page was opened and no model was asked by this compile, and no model chose any column in it.");
   });
 
   it("is stable: the same investigation renders the same file twice", () => {

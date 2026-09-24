@@ -245,6 +245,7 @@ describe("the first run: the brief alone, and nothing opens a browser", () => {
     expect(code).toBe(3);
     expect(stderr.text).toContain("! inputs-shape");
     expect(stderr.text).toContain("stopped at spec: 1 blocking question (exit 3)");
+    expect(stderr.text.endsWith("navvi: status needs_answers (exit 3)\n"), stderr.text).toBe(true);
   });
 });
 
@@ -800,6 +801,8 @@ describe("re-running", () => {
       io({ stderr: resumedErr }),
     );
     expect(second, resumedErr.text).toBe(0);
+    // The plain command's status line, so a delivered make says it delivered.
+    expect(resumedErr.text.endsWith("navvi: status delivered (exit 0)\n"), resumedErr.text).toBe(true);
     const scraper = JSON.parse(readFileSync(join(work(), "scraper.json"), "utf8")) as CompiledScraper;
     expect(scraper.fields.productName!.alternatives[0]).toMatchObject({ selector: 'meta[property="og:title"]' });
     expect(scraper.chooser).toBe("agent");

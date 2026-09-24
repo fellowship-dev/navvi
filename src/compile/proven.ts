@@ -14,7 +14,7 @@ import {
   type Pagination,
 } from "../scraper/schema.js";
 import type { Spec } from "../spec/schema.js";
-import { gateAlternative, type RiskFamily } from "./gate.js";
+import { REFUSE_SOLE, gateAlternative, type GateDecision, type RiskFamily } from "./gate.js";
 
 /**
  * U7a: the seam. A reconciliation becomes a scraper the replay half runs.
@@ -531,21 +531,23 @@ export function compileFromReconciliation(
       if (reading.match !== undefined) alternative.match = reading.match;
       if (reading.entity !== undefined) alternative.entity = reading.entity;
       alternatives.push(alternative);
-      // The gate's own sentence is printed only when the gate had something to
+      // The gate's verdict is printed only when the gate had something to
       // say: for a declared alternative it says "this is a label, I did not
       // look", which is true and belongs nowhere near an explanation of why a
       // reading is in the cascade.
-      const audited = reading.source === "dom" && decision.audit.risks.length > 0 ? ` The selector was kept: ${decision.because}.` : "";
+      const audited = reading.source === "dom" && decision.audit.risks.length > 0 ? keptBecause(decision) : "";
       kept.push({
         index: alternatives.length - 1,
         source: reading.source,
         where: reading.where,
         role: reading.role,
         fingerprint,
-        because:
-          (reading.role === "binding"
-            ? field.because
-            : `another path into the same payload, carrying the same value on every binding sample; replay reaches it only when every alternative above it has stopped answering`) + audited,
+        because: sentences(
+          reading.role === "binding"
+            ? withoutGateClause(field.because)
+            : `another path into the same payload, carrying the same value on every binding sample; replay reaches it only when every alternative above it has stopped answering`,
+          audited,
+        ),
       });
     }
 
@@ -631,10 +633,70 @@ export function compileFromReconciliation(
       because:
         `${rationale.length} column(s) compiled from what the investigation proved, ` +
         `${unbound.length} proved obtainable and refused, ` +
-        `${reconciliation.notObtainable.length} requested and never obtainable. No page was opened and no model was asked by this compile` +
+        `${reconciliation.notObtainable.length} requested and never obtainable. ` +
         decidedLine(rationale),
     },
   };
+}
+
+/**
+ * A tier-3 binding's `because` arrives from `./template.ts` already carrying
+ * the gate's sentence (`; the selector gate kept it: …`), and this compile
+ * then gave its own, so `rationale.md` printed the verdict twice in one cell.
+ * The compile's sentence is the one kept: it is the one that says why.
+ */
+const TEMPLATE_GATE_CLAUSE = "; the selector gate kept it: ";
+
+function withoutGateClause(because: string): string {
+  const at = because.indexOf(TEMPLATE_GATE_CLAUSE);
+  return at < 0 ? because : because.slice(0, at);
+}
+
+/** Two sentences in one cell: the first closed with a full stop before the second is appended. */
+function sentences(first: string, second: string): string {
+  if (second === "") return first;
+  return `${/[.!?]$/.test(first) ? first : `${first}.`} ${second}`;
+}
+
+/** Class tokens of a selector, attribute brackets removed first so `[content="a.b"]` is not read as a class. */
+function classTokens(selector: string): string[] {
+  return (selector.replace(/\[[^\]]*\]/g, "").match(/\.[\w-]+/g) ?? []).map((token) => token.slice(1));
+}
+
+/**
+ * One scored risk, in words that are true of this selector. The gate's own
+ * `no-semantic-hook` sentence says "no … meaningful class", which reads as a
+ * judgment of the page — and `p.instock.availability` plainly carries meaning.
+ * What the gate actually checked is narrower: whether a class starts with a
+ * word from its own short vocabulary (`product`, `price`, `stock`, …). So the
+ * rationale says that, and names the classes it did not recognise.
+ */
+function riskWords(selector: string, risk: GateDecision["audit"]["risks"][number]): string {
+  if (risk.family !== "no-semantic-hook") return `${risk.family} (${risk.weight}): ${risk.because}`;
+  const classes = classTokens(selector);
+  const hook =
+    classes.length === 0
+      ? "no id, data-*, itemprop, aria-* or class anywhere in the path — a bare tag"
+      : `no id, data-*, itemprop or aria-*, and none of its classes (${classes.join(", ")}) begins with a word in the gate's vocabulary (product, price, stock, sku, name, title, …)`;
+  return `${risk.family} (${risk.weight}): ${hook}`;
+}
+
+/**
+ * Why the gate let a scored selector through, which the gate's own sentence
+ * ("scores 2, under the 5 …") left to the reader. The reason is the policy in
+ * `./gate.ts`: a field's only reading is refused only by a family certain to
+ * be wrong (a UI-state, campaign or generated class) or by two fragilities
+ * together, because refusing it costs the column; a fallback is refused at the
+ * lower bar, because dropping it costs nothing while the alternative ahead of
+ * it answers.
+ */
+function keptBecause(decision: GateDecision): string {
+  const { selector, score, risks } = decision.audit;
+  const bar =
+    decision.threshold === REFUSE_SOLE
+      ? `the ${decision.threshold} that refuses a field's only reading. Only a class certain to be wrong (UI state, campaign, generated) or two fragilities together reach that bar; fragility alone does not, because refusing the only reading leaves the column blank, and a selector that answers until the page moves is worth more than no column`
+      : `the ${decision.threshold} that refuses a fallback, the lower bar a fallback is held to because dropping it costs nothing while the alternative ahead of it answers`;
+  return `The selector gate kept \`${selector}\`: its risks score ${score}, below ${bar}. Scored: ${risks.map((risk) => riskWords(selector, risk)).join("; ")}.`;
 }
 
 /**
@@ -650,7 +712,7 @@ function decidedLine(fields: readonly FieldRationale[]): string {
   const picked = fields.filter((field) => field.decision !== undefined && field.decision.settles === undefined);
   // U6: a column whose reading a chooser chose out of competing ones.
   const settled = fields.filter((field) => field.decision?.settles !== undefined);
-  if (picked.length === 0 && settled.length === 0) return ".";
+  if (picked.length === 0 && settled.length === 0) return "No page was opened and no model was asked by this compile, and no model chose any column in it.";
   const by = (list: readonly FieldRationale[]): string => [...new Set(list.map((field) => field.decision!.answeredBy))].join(", ");
   const parts: string[] = [];
   if (picked.length > 0) {
@@ -659,7 +721,10 @@ function decidedLine(fields: readonly FieldRationale[]): string {
   if (settled.length > 0) {
     parts.push(`${settled.length} column(s) (${settled.map((field) => field.field).join(", ")}) had competing readings, and ${by(settled)} chose which one, one question per field`);
   }
-  return `; ${parts.join("; ")}.`;
+  // "No model was asked by this compile" was true and, over a column a model
+  // picked, read as "no model was involved": the sentence now leads with where
+  // the model was asked.
+  return `This compile opened no page and asked no model; the models behind it were asked earlier: ${parts.join("; ")}.`;
 }
 
 function rationaleFor(
