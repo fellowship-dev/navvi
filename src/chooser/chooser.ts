@@ -278,7 +278,11 @@ function validateOne(q: Question, raw: Record<string, unknown>): Answer | string
   const options = q.options ?? [];
   switch (q.kind) {
     case "choice": {
-      if (typeof raw.text === "string") return "free text on a choice question";
+      // Text in place of a pick is not an answer. Text beside a valid pick is an
+      // explanation — Haiku over an API writes one on most navigation answers — and
+      // navvi never reads it, so it is dropped rather than failing the batch.
+      if (typeof raw.text === "string" && raw.index === undefined) return "free text on a choice question";
+      if (raw.index === undefined) return "no index on a choice question";
       if (raw.index !== null && !isIndex(raw.index, options.length)) {
         return `index ${String(raw.index)} outside 0..${options.length - 1} or null`;
       }

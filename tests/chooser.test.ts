@@ -189,7 +189,19 @@ describe("validation (R37)", () => {
     ]);
     expect(result.valid).toEqual([]);
     expect(result.invalid.map((i) => i.id).sort()).toEqual(["ghost", "group", "quality", "title", "visible"]);
-    expect(validateAnswers([qs[0]!], [{ id: "group", index: 1, text: "free text leak" }]).invalid).toHaveLength(1);
+    // Text where a pick should be is not an answer.
+    expect(validateAnswers([qs[0]!], [{ id: "group", text: "the second one" } as unknown as Answer]).invalid).toHaveLength(1);
+  });
+
+  it("a pick that arrives with an explanation is the pick; the explanation goes nowhere", () => {
+    // Found by the decision race, 2026-09-24: Haiku over an API explains its choices in
+    // `text` ("TYPE_TEXT: enter the query…") on 7–11 of 19 navigation answers, and the
+    // stock validator failed the whole batch over words navvi never reads.
+    const qs = batch();
+    const result = validateAnswers([qs[0]!], [{ id: "group", index: 1, text: "because it holds the rows" }]);
+    expect(result.invalid).toEqual([]);
+    expect(result.valid[0]).toEqual({ id: "group", index: 1 });
+    expect(validateAnswers([qs[0]!], [{ id: "group", index: null, text: "none of these fit" }]).valid[0]).toEqual({ id: "group", index: null });
   });
 });
 
