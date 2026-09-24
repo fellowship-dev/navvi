@@ -1,4 +1,4 @@
-import type { FieldAlias, FieldRecord, Manuscript, VerdictLog } from "../investigate/manuscript.js";
+import type { FieldAlias, FieldRecord, Manuscript, TierDecision, VerdictLog } from "../investigate/manuscript.js";
 import type { Chooser as ChooserId, FieldType, Mode, Profile } from "../input/schema.js";
 import { rubricsFor, show, type Ambiguity, type ObtainableField, type QuotedRubric, type Reconciliation } from "../reconcile/index.js";
 import { commonShape, type TypedValue } from "../scraper/extract.js";
@@ -37,6 +37,14 @@ import { gateAlternative, type RiskFamily } from "./gate.js";
  * opens no page, launches no browser and asks no chooser. The investigation
  * already did the expensive part and argued about it in `reconcile.md`;
  * anything that needs a live page in front of it belongs to `compile()`.
+ *
+ * Since U4 that includes tier 3. A field neither cheap tier bound is handed to
+ * `compile()`'s own record flow by `./template.ts`, during the investigation,
+ * and comes back as a `dom` binding with the question that chose it and the
+ * backend that answered. By the time it reaches this file it is a record like
+ * any other -- which is the point: a tier-3 selector faces the same gate, the
+ * same fingerprint and the same rationale as a tier-1 one, and this file still
+ * asks nobody anything.
  *
  * ## Why it is short
  *
@@ -332,7 +340,9 @@ export interface FieldRationale {
   field: string;
   type: FieldType;
   typeInferred: boolean;
-  tier: 1 | 2;
+  tier: 1 | 2 | 3;
+  /** Tier 3: the question that bound this field during the investigation, and who answered it. */
+  decision?: TierDecision;
   alternatives: AlternativeRationale[];
   refused: RefusedAlternative[];
   /** Aliases the manuscript recorded that this compile did not turn into alternatives. */
@@ -590,9 +600,26 @@ export function compileFromReconciliation(
       because:
         `${rationale.length} column(s) compiled from what the investigation proved, ` +
         `${unbound.length} proved obtainable and refused, ` +
-        `${reconciliation.notObtainable.length} requested and never obtainable. No page was opened and no model was asked.`,
+        `${reconciliation.notObtainable.length} requested and never obtainable. No page was opened and no model was asked by this compile` +
+        decidedLine(rationale),
     },
   };
+}
+
+/**
+ * The half of "no model was asked" that stopped being the whole truth at U4.
+ *
+ * This compile asks nobody, and that sentence stays. But a tier-3 column was
+ * chosen by a model during the investigation, and a rationale whose summary
+ * line says "no model was asked" over a column a model picked would be true
+ * about this function and false about the scraper -- the reader of
+ * `rationale.md` is asking about the scraper.
+ */
+function decidedLine(fields: readonly FieldRationale[]): string {
+  const decided = fields.filter((field) => field.decision !== undefined);
+  if (decided.length === 0) return ".";
+  const by = [...new Set(decided.map((field) => field.decision!.answeredBy))].join(", ");
+  return `; ${decided.length} tier-3 column(s) (${decided.map((field) => field.field).join(", ")}) were chosen during the investigation by ${by}, one question per field, and faced the selector gate here like any other.`;
 }
 
 function rationaleFor(
@@ -621,6 +648,7 @@ function rationaleFor(
     type: field.type,
     typeInferred: field.typeInferred,
     tier: field.tier,
+    ...(field.decision === undefined ? {} : { decision: { ...field.decision } }),
     alternatives,
     refused,
     uncompiled,
@@ -660,7 +688,10 @@ export function renderRationale(rationale: CompileRationale): string {
   out.push(rationale.because);
   out.push("");
   out.push(
-    `Compiled ${rationale.compiledAt} from the reconciliation and the investigation manuscript. One row is a ${rationale.entity}. Nothing here opened a page or asked a model: every alternative below is a reading the investigation had already proved on real pages, and this file is the argument for the order they are in.`,
+    `Compiled ${rationale.compiledAt} from the reconciliation and the investigation manuscript. One row is a ${rationale.entity}. Nothing here opened a page or asked a model: every alternative below is a reading the investigation had already proved on real pages, and this file is the argument for the order they are in.` +
+      (rationale.fields.some((field) => field.decision !== undefined)
+        ? ` A tier-3 column is the exception in how it was proved, not in how it is compiled: a chooser picked its selector out of the candidates the page offered, and the question and the backend that answered are printed under the field.`
+        : ""),
   );
 
   // --------------------------------------------------------------- the fields
@@ -726,6 +757,15 @@ function renderField(field: FieldRationale, cell: (text: string) => string): str
   out.push(`\n### \`${field.field}\`\n`);
   out.push(field.because);
   out.push("");
+  if (field.decision !== undefined) {
+    const decision = field.decision;
+    out.push(`Decided by **${decision.answeredBy}**, asked \`${decision.question}\` over ${decision.options} candidate(s) (and \`none\`):`);
+    out.push("");
+    out.push(`> ${decision.premise}`);
+    out.push("");
+    out.push(`It chose \`${cell(decision.chose)}\`.`);
+    out.push("");
+  }
 
   out.push("| # | source | reads | why it is here |");
   out.push("| --- | --- | --- | --- |");

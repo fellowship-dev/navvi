@@ -9,7 +9,7 @@ import { createLaunchCounter, formatLaunchFailure, isLaunchFailure, launchFailur
 import { continueWithoutRevalidation } from "../browser/guards.js";
 import { captureJson, describeSkips, type Capture, type CapturedResponse } from "../browser/network-capture.js";
 import { hostOf, isAllowedRequestUrl, registrableDomain } from "../browser/policy.js";
-import { ConfigurationError, createChooser, NavviError, NeedsHumanError, StateTooLargeError, type Chooser } from "../chooser/index.js";
+import { ConfigurationError, createChooser, NavviError, NeedsHumanError, StateTooLargeError, summarizeUsage, type Chooser } from "../chooser/index.js";
 import { compile, type CompileResult } from "../compile/index.js";
 import { LIMITS, isAllowedUrl, resolveSources, type FieldType, type Profile, type ProxyInput, type RunInput } from "../input/schema.js";
 import type { RunSummary } from "../main.js";
@@ -459,20 +459,7 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
     unmappedCandidates: state.unmappedCandidates,
     fieldsNotFound: [...state.fieldsNotFound].sort(),
     // U14: the totals are the run's; `writer` names the second source and its share of them.
-    chooser: usage
-      ? {
-          name: usage.chooser,
-          questions: usage.questions,
-          inputTokens: usage.inputTokens,
-          waitMs: usage.waitMs,
-          costUsd: usage.costUsd,
-          textQuestions: usage.textQuestions,
-          ...(usage.writer
-            ? { writer: { name: usage.writer.chooser, textQuestions: usage.writer.textQuestions, inputTokens: usage.writer.inputTokens, waitMs: usage.writer.waitMs, costUsd: usage.writer.costUsd } }
-            : {}),
-          ...(usage.transportFallback ? { transportFallback: { ...usage.transportFallback } } : {}),
-        }
-      : null,
+    chooser: usage ? summarizeUsage(usage) : null,
     // R39: every secret value and proxy credential masked
     input: redactRunInput(input),
     requests: { ...state.requests },

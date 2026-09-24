@@ -93,7 +93,8 @@ export interface TierRecord {
 
 /** A candidate a tier considered and did not bind, with the reason it lost. */
 export interface RejectionRecord {
-  tier: 1 | 2;
+  /** 3: a DOM candidate the chooser picked and the selector gate refused. */
+  tier: 1 | 2 | 3;
   path: string;
   /** The value on each binding sample, in sample order. */
   values: TypedValue[];
@@ -152,6 +153,28 @@ export interface FieldAlias {
 }
 
 /**
+ * Who decided a tier-3 binding, and what they were asked.
+ *
+ * Tiers 1 and 2 bind by rule, and the rule is the argument. Tier 3 binds
+ * because a chooser picked one code-enumerated candidate over the others, so
+ * the argument is the question and the answer: which field, the premise the
+ * chooser read, how many options it had, the one it chose, and which backend
+ * answered. A rationale that says "tier 3, dom h1" without that is a binding
+ * nobody can disagree with, which is the thing the manuscript exists to stop.
+ */
+export interface TierDecision {
+  /** The question id, `field.<name>` (with `.retry` after the scroll-and-retry). */
+  question: string;
+  premise: string;
+  /** How many candidates were offered, `none` not counted. */
+  options: number;
+  /** The option chosen, as the chooser saw it: `<path> = <value on each sample>`. */
+  chose: string;
+  /** The chooser that answered (`jev`, `claude`, `model`, `recorded`, ...). */
+  answeredBy: string;
+}
+
+/**
  * One field's answer, with the path and every verdict behind it.
  *
  * `tier` absent means nothing cheap covered it and tier 3 was asked; `askModel`
@@ -161,7 +184,8 @@ export interface FieldAlias {
 export interface FieldRecord {
   field: string;
   type?: FieldType;
-  tier?: 1 | 2;
+  /** 3 since U4: a DOM selector the chooser picked for a field tiers 1 and 2 left uncovered. */
+  tier?: 1 | 2 | 3;
   /** The `FIELD_SOURCES` value the compiled alternative carries. */
   source?: FieldSource;
   path?: string;
@@ -185,6 +209,8 @@ export interface FieldRecord {
   askModel: boolean;
   rejected: RejectionRecord[];
   verdicts: VerdictLog;
+  /** Tier 3 only: the question that bound this field, and who answered it. */
+  decision?: TierDecision;
 }
 
 // ----------------------------------------------------------------- inventory
@@ -378,6 +404,7 @@ export function render(manuscript: Manuscript, dataLine = ""): string {
     const where = field.path === undefined ? "unbound" : `${field.source} ${field.match === undefined ? "" : `${field.match} `}${field.path}`;
     bullet(lines, `${field.field.padEnd(14, " ")}${where}`);
     bullet(lines, `  ${field.because}`);
+    if (field.decision !== undefined) bullet(lines, `  decided by ${field.decision.answeredBy}: ${field.decision.question}, 1 of ${field.decision.options} candidate(s)`);
   }
   if (manuscript.uncovered.length > 0) lines.push(`  ${pad("uncovered")}${manuscript.uncovered.join(", ")}`);
 

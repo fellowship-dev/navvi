@@ -59,7 +59,11 @@ describe("probeFrom — one response, read into a probe", () => {
       // A struck-through list price and a sale price: two distinct amounts, so
       // the discount is visible, which is the only thing `classify` asks.
       priceCount: 2,
+      // What a reader sees, counted by the heuristics module's own reader. Only
+      // "zero or not" is asked of it (KTD3: an empty 200 is still dead).
+      textChars: expect.any(Number),
     });
+    expect(probe.textChars).toBeGreaterThan(0);
   });
 
   it("reads a JS shell as a shell rather than as a page that declares nothing", () => {
@@ -96,9 +100,12 @@ describe("probeFrom — one response, read into a probe", () => {
     const probe = probeFrom(URLS.shell, fetched(URLS.shell, 200, SHELL), { view: silenced });
     expect(probe.isShell).toBe(false);
 
-    // And this is what that costs downstream — 2026-09-22, exactly: a healthy
-    // store's every URL read as a dead one.
-    expect(classify(probe).signature).toBe("dead:no-product");
+    // What that cost downstream on 2026-09-22 was a healthy store's every URL
+    // read as a dead one. Since KTD3 it costs less: a page that is not a shell
+    // and declares nothing is `undeclared` -- tier 1 leaves it out, tiers 2 and
+    // 3 still read it -- so the shell verdict decides how the page is read and
+    // no longer whether it is read at all.
+    expect(classify(probe).signature).toBe("live:stock?:no-price:undeclared");
     expect(classify(probeFrom(URLS.shell, fetched(URLS.shell, 200, SHELL))).strata).not.toContain("dead");
   });
 });

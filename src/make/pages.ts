@@ -149,17 +149,29 @@ export const SETTLE_FLOOR_MS = SETTLE_POLL_MS * (SETTLE_STABLE_POLLS + 1);
 export const CAPTURE_LIMIT = 200;
 
 /**
- * What the driver needs a page for. Three verbs, one per stage that reads the
- * web: `fetch` for the sample probes and tier 1, `capture` for tier 2, and
- * `read` for the determinism replays and the verify replay.
+ * What the driver needs a page for. One verb per thing that reads the web:
+ * `fetch` for the sample probes and tier 1, `capture` for tier 2, `render` for
+ * tier 3, and `read` for the determinism replays and the verify replay.
  *
- * An interface rather than a class so the tests can answer all three from
+ * An interface rather than a class so the tests can answer all of them from
  * fixtures, and so `--offline` can refuse to build one at all rather than
  * building one that quietly answers nothing.
  */
 export interface Pages {
   fetch(url: string): Promise<PageResponse>;
   capture(url: string): Promise<DrivenCapture>;
+  /**
+   * U4: live pages for tier 3, held open while the DOM compiler reads them.
+   *
+   * Tier 3 is `compile()`'s record flow, and that flow needs the pages
+   * themselves -- it evaluates the snapshot script in each one and resolves
+   * every candidate on every sample -- not a capture of them. So this is the
+   * one verb that hands a `Page` out of this file, and it hands it out inside
+   * a callback: each page goes through the same `visit` as a capture (consent,
+   * settle, the revalidation guard), and is closed when `use` returns, so the
+   * module that opens the browser is still the only one that closes anything.
+   */
+  render<T>(urls: readonly string[], use: (pages: Page[]) => Promise<T>): Promise<T>;
   /** One reading of one URL through a compiled scraper, exactly as a replay would take it. */
   read(scraper: CompiledScraper, url: string): Promise<PageReading>;
   /** The full extraction, for the verify stage's fill rate. */
@@ -384,7 +396,7 @@ async function settleRender(page: Page, deadline: number, payloads: () => number
 }
 
 /**
- * Opens a browser and returns the three verbs over it.
+ * Opens a browser and returns the verbs over it.
  *
  * The context is reused across every URL, which is what makes a consent click
  * on the first page save the click on the rest — and, for the determinism
@@ -480,6 +492,16 @@ export async function openPages(options: PagesOptions): Promise<Pages> {
         const html = await page.content().catch(() => "");
         return { responses: captured.responses, text, html, obstacles, settle };
       }),
+
+    render<T>(urls: readonly string[], use: (pages: Page[]) => Promise<T>): Promise<T> {
+      // One `visit` per URL, nested, so every page is open when `use` runs and
+      // each is closed by its own `visit` on the way out, whatever `use` did.
+      const open = (index: number, pages: Page[]): Promise<T> => {
+        const url = urls[index];
+        return url === undefined ? use(pages) : visit(url, (page) => open(index + 1, [...pages, page]));
+      };
+      return open(0, []);
+    },
 
     read: async (scraper, url) => readingOf(await readPage(scraper, url), fieldTypesOf(scraper)),
 

@@ -1,7 +1,7 @@
 import type { FieldType } from "../input/schema.js";
 import type { TypedValue } from "../scraper/extract.js";
 import type { FieldSource } from "../scraper/schema.js";
-import type { FieldAlias, Obstacle } from "../investigate/manuscript.js";
+import type { FieldAlias, Obstacle, TierDecision } from "../investigate/manuscript.js";
 
 /**
  * U4/U5: the argument, and the schema it proves.
@@ -47,7 +47,8 @@ export interface ObtainableField {
   type: FieldType;
   /** `true` when the type was inferred from the values rather than declared. */
   typeInferred: boolean;
-  tier: 1 | 2;
+  /** 3: a DOM selector a chooser picked for a field the cheap tiers left uncovered. */
+  tier: 1 | 2 | 3;
   source: FieldSource;
   /** For a `network` binding: the endpoint the path is read out of. */
   match?: string;
@@ -77,6 +78,8 @@ export interface ObtainableField {
    * was never a bad alternative, it was a field nobody had asked for yet.
    */
   splitFrom?: string;
+  /** Tier 3 only: the question that bound it and the backend that answered, carried to `rationale.md`. */
+  decision?: TierDecision;
   because: string;
 }
 
@@ -99,7 +102,11 @@ export interface NotObtainableField {
   type?: FieldType;
   kind: NotObtainableKind;
   because: string;
-  /** Tier 3 has been handed this field; the DOM compiler may still answer it. */
+  /**
+   * Tier 3 has been handed this field and did not run; the DOM compiler may
+   * still answer it. False once tier 3 ran, whatever it found: "may still
+   * answer" about a compiler that already answered is a promise nobody keeps.
+   */
   stillAsked: boolean;
   /** For `type-gap`: the ambiguity that carries both types and the decision. */
   ambiguity?: string;
@@ -371,7 +378,7 @@ export interface SchemaField {
   attr?: string;
   entity?: string;
   /** The tier that proved it. */
-  tier: 1 | 2;
+  tier: 1 | 2 | 3;
   /** One example value, from the first binding sample. */
   example?: TypedValue;
   because: string;

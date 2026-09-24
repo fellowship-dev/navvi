@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { STRATA, bindable, chooseSample, classify, type Stratum, type UrlProbe } from "../src/investigate/sample.js";
+import { probeFrom } from "../src/investigate/probe.js";
+import { STRATA, bindable, chooseSample, classify, type SamplePick, type Stratum, type UrlProbe } from "../src/investigate/sample.js";
 
 /**
  * U2d: the compile sample chooser.
@@ -56,7 +59,8 @@ function probeOf(kind: Kind, url: string): UrlProbe {
     case "gone":
       return { url, status: 404 };
     case "no-product":
-      // Store A's shape: a 200 that declares Organization and no Product.
+      // Store A's shape: a 200 that declares Organization and no Product. Since
+      // KTD3 that is `undeclared` rather than dead -- see the describe below.
       return { url, status: 200, hasDeclaredProduct: false, isShell: false };
     case "blocked":
       return { url, status: 403 };
@@ -126,10 +130,10 @@ describe("classify", () => {
     expect(classify({ url: `${HOST}/producto/x`, status: 200, redirectedTo: "/producto/x", priceCount: 1, inStock: true }).strata).toEqual(["undiscounted"]);
   });
 
-  it("reads a 200 with no declared Product as dead, because it is the same blank in a different coat", () => {
-    const entry = classify({ url: `${HOST}/producto/x`, status: 200, hasDeclaredProduct: false, isShell: false });
+  it("reads a 200 that declares nothing and shows nothing as dead, because an empty page is the same blank in a different coat", () => {
+    const entry = classify({ url: `${HOST}/producto/x`, status: 200, hasDeclaredProduct: false, isShell: false, textChars: 0 });
     expect(entry.strata).toEqual(["dead"]);
-    expect(entry.signature).toBe("dead:no-product");
+    expect(entry.signature).toBe("dead:empty");
   });
 
   it("does not read an absent field as a negative one", () => {
@@ -243,7 +247,8 @@ describe("chooseSample — the degenerate catalogues, answered honestly", () => 
       { url: "a", status: 404 },
       { url: "b", status: 404 },
       { url: "c", status: 200, redirectedTo: "https://farmacia.example/categoria/x" },
-      { url: "d", status: 200, hasDeclaredProduct: false, isShell: false },
+      // Empty, not merely undeclared: a 200 with nothing on it is still dead (KTD3).
+      { url: "d", status: 200, hasDeclaredProduct: false, isShell: false, textChars: 0 },
     ];
     const choice = chooseSample(probes);
     expect(choice.unfilled.map((entry) => entry.stratum)).toEqual(["out-of-stock", "discounted", "undiscounted"]);
@@ -295,10 +300,11 @@ describe("chooseSample — the degenerate catalogues, answered honestly", () => 
     expect(shell.strata).not.toContain("dead");
     expect(shell.excluded).toBeUndefined();
 
-    // A real page that declares nothing is still dead -- the Store A case.
+    // A real page that declares nothing is no longer dead (KTD3): it is
+    // `undeclared`, and tiers 2 and 3 may still read it.
     const served = classify({ url: `${HOST}/producto/y`, status: 200, hasDeclaredProduct: false, isShell: false });
-    expect(served.strata).toContain("dead");
-    expect(served.signature).toBe("dead:no-product");
+    expect(served.strata).not.toContain("dead");
+    expect(served.strata).toContain("undeclared");
 
     // Unknown shell state may not fire the rule: absent is not false.
     const unsure = classify({ url: `${HOST}/producto/z`, status: 200, hasDeclaredProduct: false });
@@ -321,5 +327,77 @@ describe("chooseSample — the degenerate catalogues, answered honestly", () => 
     // written; a test that spells the rule out again is a second copy that
     // drifts silently, which is what `second-spelling.test.ts` exists to forbid.
     expect(choice.picks.every((pick) => bindable(pick).bind)).toBe(true);
+  });
+});
+
+/**
+ * KTD3: "no declared Product" demotes a page, it does not kill it.
+ *
+ * A fresh-eyes `navvi make` on 2026-09-23 against a public books demo site
+ * classified every URL `dead: answers 200 but declares no Product node`, so
+ * the binding set was empty, tier 3 was "requested over 0 sample URLs" and the
+ * run exited 1 on a page with the title, the price and the stock sitting in
+ * plain markup. The rule was right about the encounter that wrote it -- a 200
+ * wearing Organization where a product used to be -- and wrong about every
+ * catalogue that never declared anything in the first place. What stays dead
+ * is what a scraper really cannot read: 4xx, a redirect away, and an empty page.
+ */
+describe("KTD3: a page that declares nothing is undeclared, not dead", () => {
+  const FIXTURES = join(import.meta.dirname, "fixtures", "template");
+  const page = (name: string): string => readFileSync(join(FIXTURES, `${name}.html`), "utf8");
+  const pickOf = (probe: UrlProbe): SamplePick => ({ url: probe.url, stratum: "coverage", because: "test", probe });
+
+  it("samples a plain-markup page with no JSON-LD as `undeclared`, bindable for tiers 2 and 3 and out of tier 1's comparison", () => {
+    const url = "https://books.example/catalogue/a-quiet-lighthouse/index.html";
+    const probe = probeFrom(url, { url, status: 200, body: page("books-1") });
+    expect(probe.hasDeclaredProduct).toBe(false);
+    expect(probe.isShell).toBe(false);
+    expect(probe.textChars).toBeGreaterThan(0);
+
+    const reading = classify(probe);
+    expect(reading.strata).toEqual(["undeclared"]);
+    expect(reading.signature).toMatch(/^live:.*:undeclared$/);
+    expect(reading.excluded).toBeUndefined();
+
+    const verdict = bindable(pickOf(probe));
+    expect(verdict.bind, verdict.because).toBe(true);
+    // Tier 1 compares declarations, and this page has none: comparing it would
+    // delete every declared candidate on the pages that do have some.
+    expect(verdict.tier1).toBe(false);
+    expect(verdict.because).toContain("declares no Product");
+
+    // And it is in the sample, which is the half the live run lacked.
+    const choice = chooseSample([probe]);
+    expect(choice.picks.map((pick) => pick.url)).toEqual([url]);
+  });
+
+  it("keeps a declaring page comparable at tier 1", () => {
+    const url = "https://shop.example/p/crema.html";
+    const probe = probeFrom(url, { url, status: 200, body: page("mixed-1") });
+    expect(probe.hasDeclaredProduct).toBe(true);
+    const verdict = bindable(pickOf(probe));
+    expect(verdict.bind).toBe(true);
+    expect(verdict.tier1).toBe(true);
+  });
+
+  it("leaves a 404 and a redirect away dead, whatever the page says", () => {
+    const gone = "https://books.example/catalogue/withdrawn/index.html";
+    const probe404 = probeFrom(gone, { url: gone, status: 404, body: page("books-1") });
+    expect(classify(probe404).strata).toEqual(["dead"]);
+    expect(bindable(pickOf(probe404)).bind).toBe(false);
+
+    const moved = "https://books.example/catalogue/moved/index.html";
+    const redirect = probeFrom(moved, { url: "https://books.example/catalogue/category/books_1/index.html", status: 200, body: page("books-1") });
+    expect(classify(redirect).strata).toEqual(["dead"]);
+    expect(classify(redirect).signature).toBe("dead:redirect");
+    expect(bindable(pickOf(redirect)).bind).toBe(false);
+  });
+
+  it("leaves an empty 200 dead: nothing declared and nothing shown is a blank, not a page", () => {
+    const url = "https://books.example/catalogue/blank/index.html";
+    const probe = probeFrom(url, { url, status: 200, body: "<!doctype html><html><head><title></title></head><body></body></html>" });
+    expect(probe.textChars).toBe(0);
+    expect(classify(probe).signature).toBe("dead:empty");
+    expect(bindable(pickOf(probe)).bind).toBe(false);
   });
 });

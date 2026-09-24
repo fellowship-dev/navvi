@@ -660,7 +660,7 @@ export function reconcile(manuscript: Manuscript, spec: Spec, options: Reconcile
   const claimed = claimedPaths(manuscript);
   const requestedKeys = new Set(manuscript.requested.map((field) => key(field.name)));
   const tier3 = manuscript.tiers.find((tier) => tier.tier === 3);
-  const stillAsked = new Set(tier3?.asked ?? []);
+  const stillAsked = new Set(tier3?.outcome === "requested" ? tier3.asked : []);
 
   // ------------------------------------------------------------- obtainable
 
@@ -704,6 +704,7 @@ export function reconcile(manuscript: Manuscript, spec: Spec, options: Reconcile
       values,
       aliases: sortedAliases(aliasesOf(record)),
       where: whereOf(record),
+      ...(record.decision === undefined ? {} : { decision: { ...record.decision } }),
       because: record.because,
     });
   }

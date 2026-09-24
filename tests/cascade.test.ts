@@ -391,7 +391,9 @@ describe("Store B — tier 1 is skipped as a shell and the payload answers", () 
     expect(manuscript.uncovered).toEqual(["sku", "stock"]);
     expect(tier(manuscript, 3).outcome).toBe("requested");
     expect(tier(manuscript, 3).asked).toEqual(["sku", "stock"]);
-    expect(tier(manuscript, 3).because).toContain("selector gate");
+    // No `dom` source was handed to this investigation, so tier 3 says it did
+    // not run rather than promising a gate it never reached (U4).
+    expect(tier(manuscript, 3).because).toContain("no DOM compiler was supplied");
     expect(manuscript.verdict).toBe("partial");
     // The payload holds `productData.stock`, and the anchor threw it out
     // because 412 is nowhere on the page a reader saw. That is the filter

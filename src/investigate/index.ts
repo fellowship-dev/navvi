@@ -48,7 +48,7 @@ export {
 } from "./blocked.js";
 export { coversSpec, declaredFrom, jsonLdBlocks, readDeclared, type DeclaredKind, type DeclaredOptions, type DeclaredReading, type DeclaredSource } from "./declared.js";
 export { importHar, safeUrl, type CapturedResponse, type HarImport } from "./har.js";
-export { investigate, type Capture, type InvestigateOptions, type Sources } from "./investigate.js";
+export { investigate, type Capture, type DomAnswer, type DomBinding, type DomRefusal, type DomRequest, type InvestigateOptions, type Sources } from "./investigate.js";
 export { anchors, flatten, narrow, typeMatches, type Candidate, type FlattenOptions, type Leaf, type NarrowOptions } from "./leaves.js";
 export {
   render,
@@ -60,6 +60,7 @@ export {
   type SamplePickRecord,
   type SampleRecord,
   type SourceRecord,
+  type TierDecision,
   type TierName,
   type TierRecord,
   type VerdictLog,
@@ -67,10 +68,13 @@ export {
 export { probeFrom, type ProbeOptions } from "./probe.js";
 export { KIND_PRECEDENCE, acceptedRoles, fieldTokens, resolutionOrder, roleOfDeclared, roleOfField, type DeclaredRole } from "./roles.js";
 export {
+  EMPTY_TEXT_CHARS,
   STRATA,
   STRATUM_RATIONALE,
+  bindable,
   chooseSample,
   classify,
+  type Bindable,
   type ChooseOptions,
   type Classification,
   type ExcludedProbe,

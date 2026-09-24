@@ -104,6 +104,43 @@ export interface WriterUsage {
   costUsd: number;
 }
 
+/**
+ * A run's chooser usage as the summary prints it: the run's totals, the
+ * writer's share of them when a second source answered the text questions, and
+ * the transport fallback when there was one.
+ *
+ * Written once here because two front ends print it. It used to be built
+ * inline in the crawler for `RunSummary.chooser`, and `navvi make` printed no
+ * usage at all -- so the command that asks a chooser to pick every tier-3
+ * selector was the one that never said who answered or what it cost.
+ */
+export interface UsageSummary {
+  name: string;
+  questions: number;
+  inputTokens: number;
+  waitMs: number;
+  costUsd: number;
+  textQuestions?: number;
+  writer?: { name: string; textQuestions: number; inputTokens: number; waitMs: number; costUsd: number };
+  /** U7 / KTD6: the decider's transport failed and the run finished over another. */
+  transportFallback?: TransportFallback;
+}
+
+export function summarizeUsage(usage: ChooserUsage): UsageSummary {
+  return {
+    name: usage.chooser,
+    questions: usage.questions,
+    inputTokens: usage.inputTokens,
+    waitMs: usage.waitMs,
+    costUsd: usage.costUsd,
+    textQuestions: usage.textQuestions,
+    ...(usage.writer
+      ? { writer: { name: usage.writer.chooser, textQuestions: usage.writer.textQuestions, inputTokens: usage.writer.inputTokens, waitMs: usage.writer.waitMs, costUsd: usage.writer.costUsd } }
+      : {}),
+    ...(usage.transportFallback ? { transportFallback: { ...usage.transportFallback } } : {}),
+  };
+}
+
 export interface Chooser {
   readonly name: ChooserName;
   ask(batch: Question[]): Promise<Answer[]>;

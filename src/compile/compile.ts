@@ -251,12 +251,56 @@ async function compileList(options: CompileOptions): Promise<CompileResult> {
   return noItems(options);
 }
 
-async function compileRecord(options: CompileOptions): Promise<CompileResult> {
-  const pages = options.pages.slice(0, 3);
+/** At most this many sample pages are read in record mode; the rest of a sample is not rendered for it. */
+export const RECORD_SAMPLE_PAGES = 3;
+
+export interface RecordChoiceOptions {
+  /** One to three rendered sample pages of one template; more are ignored. */
+  pages: readonly Page[];
+  /** The fields to ask about -- and only these. See `chooseRecordFields`. */
+  fields: readonly CompileField[];
+  chooser: Chooser;
+  description?: string | undefined;
+  settle?: SettleOptions | undefined;
+}
+
+/** What the record-mode fan-out asked and what came back, per field. */
+export interface RecordChoice {
+  /** The leaves that resolved on every sample page: the options every question offered. */
+  candidates: FieldCandidate[];
+  questions: Question[];
+  answers: Answer[];
+  /** The chosen candidate per field, null for `none`. */
+  mapped: Map<string, FieldCandidate | null>;
+  /** `""`, or `RETRY_SUFFIX` when the answer came from the scroll-and-retry. */
+  suffix: string;
+  /** The sample URLs, in page order, for making link values absolute. */
+  baseUrls: string[];
+}
+
+/**
+ * The record-mode flow -- candidates, one choice question per field, answers
+ * -- over exactly the fields it is handed.
+ *
+ * Split out of `compileRecord` for U4, so tier 3 of the one compile core
+ * (`./template.ts`) is this function and not a second DOM compiler (KTD2). The
+ * restriction is the caller's: tier 3 hands in only what tiers 1 and 2 left
+ * uncovered, so a field the page already declared is never put to a chooser
+ * as a question about DOM nodes.
+ *
+ * Null when no candidate resolved on every page, on either attempt: there was
+ * nothing to ask. A choice whose every answer is `none` is returned rather
+ * than swallowed, because "the chooser said none" and "nothing was offered"
+ * are different sentences in a manuscript.
+ */
+export async function chooseRecordFields(options: RecordChoiceOptions): Promise<RecordChoice | null> {
+  const pages = options.pages.slice(0, RECORD_SAMPLE_PAGES);
   if (pages.length === 0) throw new Error("record mode compile needs at least one sample page");
+  if (options.fields.length === 0) throw new Error("record mode compile needs at least one field");
   const description = options.description ?? "record";
   for (const page of pages) await waitForSettle(page, options.settle);
 
+  let last: RecordChoice | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     const suffix = attempt === 0 ? "" : RETRY_SUFFIX;
     if (attempt > 0) {
@@ -272,19 +316,25 @@ async function compileRecord(options: CompileOptions): Promise<CompileResult> {
 
     const state = fanOutState(description, options.fields, pages.map((p) => p.url()), `record mode, ${pages.length} sample pages`);
     const shared = { records: description, fields: options.fields, samples: pages.map((p) => p.url()), mode: "record" as const };
-    const answers = await askChunked(options.chooser, buildFieldQuestions(options.fields, candidates, state, suffix, shared));
+    const questions = buildFieldQuestions(options.fields, candidates, state, suffix, shared);
+    const answers = await askChunked(options.chooser, questions);
     const mapped = applyFieldAnswers(options.fields, candidates, answers, suffix);
-    if (allNone(mapped)) continue;
-
-    return finish(options, mapped, {
-      mode: "record",
-      entry: { mode: "direct", url: pages[0]!.url() },
-      pagination: { mode: "none" },
-      baseUrls: pages.map((p) => p.url()),
-      detailLink: null,
-    });
+    last = { candidates, questions, answers, mapped, suffix, baseUrls: pages.map((p) => p.url()) };
+    if (!allNone(mapped)) return last;
   }
-  return noItems(options);
+  return last;
+}
+
+async function compileRecord(options: CompileOptions): Promise<CompileResult> {
+  const choice = await chooseRecordFields(options);
+  if (choice === null || allNone(choice.mapped)) return noItems(options);
+  return finish(options, choice.mapped, {
+    mode: "record",
+    entry: { mode: "direct", url: options.pages[0]!.url() },
+    pagination: { mode: "none" },
+    baseUrls: choice.baseUrls,
+    detailLink: null,
+  });
 }
 
 /** Compiles the template from the given sample pages with any chooser. */

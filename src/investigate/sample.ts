@@ -62,12 +62,28 @@ export interface UrlProbe {
   isShell?: boolean | undefined;
   /** How many *distinct* price values the page shows. 2 or more means a discount is visible. */
   priceCount?: number | undefined;
+  /**
+   * Characters of visible text the plain fetch carried.
+   *
+   * The one reading that separates an empty 200 from a page that simply does
+   * not declare itself (KTD3). Absent is not zero: a probe that did not count
+   * has not seen an empty page, and the dead rule does not fire on it.
+   */
+  textChars?: number | undefined;
   inStock?: boolean | undefined;
 }
 
 // ------------------------------------------------------------------ strata
 
-export type Stratum = "dead" | "out-of-stock" | "discounted" | "undiscounted";
+/**
+ * `undeclared` is the odd one out, and on purpose. The other four are shapes
+ * the sampler *seeks* -- `STRATA` is their fill order -- while `undeclared` is
+ * only something a page can *be*: served, carrying real content, and stating
+ * no Product about itself. It is a stratum so the manuscript and the sample
+ * can name it, and it is not in `STRATA` because a compile does not need one
+ * on purpose; it needs to stop throwing them away. See `classify`.
+ */
+export type Stratum = "dead" | "out-of-stock" | "discounted" | "undiscounted" | "undeclared";
 
 /** A pick either stands for a stratum or was added to widen the sample's shapes. */
 export type PickReason = Stratum | "coverage";
@@ -107,6 +123,7 @@ export const STRATUM_RATIONALE: Record<Stratum, string> = {
   "out-of-stock": "the price node a binding depends on may not render when nothing is for sale",
   discounted: "two distinct prices are the only condition under which two fields collapsing onto one is visible",
   undiscounted: "a single-price page proves the binding does not secretly require a second price",
+  undeclared: "a page that states nothing about itself is read from its payloads or its markup (tiers 2 and 3), never compared at tier 1",
 };
 
 /**
@@ -134,6 +151,13 @@ export interface Classification {
   /** Set when the probe is not usable as compile input at all. */
   excluded?: { reason: ExcludedReason; because: string };
 }
+
+/**
+ * The most visible text a page can carry and still be empty. Zero: a page
+ * that shows a reader anything at all is a page some tier can try to read, and
+ * a threshold above zero is a guess about how short a real product page can be.
+ */
+export const EMPTY_TEXT_CHARS = 0;
 
 /** Status codes that mean "we were refused", not "this URL is gone". */
 const BLOCKED_STATUS = new Set([401, 403, 407, 429]);
@@ -218,37 +242,53 @@ export function classify(probe: UrlProbe): Classification {
     const where = probe.redirectedTo === undefined ? "somewhere it did not report" : probe.redirectedTo;
     return { url, strata: ["dead"], signature: "dead:redirect", note: `redirects to ${where}, which is not its product page` };
   }
-  if (probe.hasDeclaredProduct === false && probe.isShell === false) {
-    // Store A, 2026-09-22: a 200 that declares Organization and no Product.
-    // The graph walk bound productName to "Store A" on all 33 of them, so
-    // the row looked extracted. Same blank, wearing a different coat.
-    //
-    // It takes `isShell === false` to say that, and the qualifier is the whole
-    // point. Store B's plain fetch declares no Product on *every* URL in the
-    // catalogue -- 2,863 characters of shell, with the answer in the payload
-    // the page fetches for itself. Without the qualifier this rule reads a
-    // perfectly healthy store as 100% dead, drops every URL from the binding
-    // set, and the investigation reads nothing. That is not a hypothetical: it
-    // is what the first live run of the cascade did, and the unit tests on both
-    // sides passed while it happened, because each was written against its own
-    // fixture.
-    return { url, strata: ["dead"], signature: "dead:no-product", note: `answers ${status} but declares no Product node and is not a shell` };
+  const undeclared = probe.hasDeclaredProduct === false && probe.isShell === false;
+  if (undeclared && probe.textChars !== undefined && probe.textChars <= EMPTY_TEXT_CHARS) {
+    // An empty 200 is still the blank a dead URL is: nothing declared, nothing
+    // shown, and nothing any tier could read. KTD3 kept this one dead and
+    // nothing else.
+    return { url, strata: ["dead"], signature: "dead:empty", note: `answers ${status} with no visible text and declares no Product node` };
   }
 
   // --- live
   const strata: Stratum[] = [];
+  /**
+   * KTD3: a 200 with content and no declared Product is `undeclared`, not dead.
+   *
+   * This line used to return `dead:no-product`, and it was written against a
+   * real encounter: Store A, 2026-09-22, a 200 that declared Organization and
+   * no Product, whose graph walk bound productName to "Store A" on all 33 of
+   * them. It already took `isShell === false` to fire, because Store B's plain
+   * fetch declares no Product on every URL and without the qualifier a healthy
+   * store read as 100% dead.
+   *
+   * The fresh-eyes run of 2026-09-23 found the third catalogue the rule had
+   * never met: a public books demo that is neither a shell nor a declaring
+   * store -- title, price and stock in plain markup, no JSON-LD anywhere. Every
+   * URL classified dead, the binding set came out empty, and `navvi make`
+   * exited 1 "over 0 sample URLs" on a page a person could read at a glance.
+   * The rule was answering "is this page dead?" with "does it declare
+   * itself?", and those are different questions.
+   *
+   * So the Store A defect is closed where it lives -- tier 1 does not compare
+   * a page that declares nothing (`bindable` says so with `tier1: false`), which
+   * is what stops an Organization node standing in for a product -- and the page
+   * stays in the binding set for the tiers that can read it: the payload it
+   * fetches, and the markup the DOM compiler reads.
+   */
+  if (undeclared) strata.push("undeclared");
   if (probe.inStock === false) strata.push("out-of-stock");
   if (probe.priceCount !== undefined && probe.priceCount >= 2) strata.push("discounted");
   if (probe.priceCount === 1) strata.push("undiscounted");
   // priceCount 0 or undefined is neither: a page with nothing to compare cannot
   // stand for "a discount is visible" or for "there is no discount". It is
   // still a shape, so it can still be picked for coverage.
-  const declared = probe.hasDeclaredProduct === true ? "declared" : "declared?";
+  const declared = probe.hasDeclaredProduct === true ? "declared" : undeclared ? "undeclared" : "declared?";
   return {
     url,
     strata,
     signature: `live:${stockBand(probe.inStock)}:${priceBand(probe.priceCount)}:${declared}`,
-    note: `answers ${status}, ${stockBand(probe.inStock)}, ${priceBand(probe.priceCount)}`,
+    note: `answers ${status}, ${stockBand(probe.inStock)}, ${priceBand(probe.priceCount)}${undeclared ? ", declares no Product" : ""}`,
   };
 }
 
@@ -441,6 +481,16 @@ export function chooseSample(probes: readonly UrlProbe[], options: ChooseOptions
  */
 export interface Bindable {
   bind: boolean;
+  /**
+   * May tier 1 compare it? A narrower question than `bind`, since KTD3.
+   *
+   * Tier 1's `bindRole` opens with "every sample must declare this role", so a
+   * page that declares no Product does not merely fail to contribute there: it
+   * deletes every declared candidate on the pages that do declare one. That
+   * was true of dead picks and shells already; an `undeclared` page is the
+   * third kind, and the only one of the three that tiers 2 and 3 still read.
+   */
+  tier1: boolean;
   /** Why, in the words the manuscript prints. */
   because: string;
 }
@@ -485,15 +535,24 @@ export function bindable(pick: SamplePick, shells: ReadonlySet<string> = NO_SHEL
   if (reading.strata.includes("dead")) {
     return {
       bind: false,
+      tier1: false,
       because: `dead (${reading.note}): in the sample because reproducing a blank is parity, out of every comparison because a page that declares nothing deletes every candidate for every field`,
     };
   }
   if (shells.has(pick.url)) {
     return {
       bind: false,
+      tier1: false,
       because:
         "a JS shell: the content arrives later, so there is nothing here for the other samples to agree with — it is still fetched, still rendered, and still where tier 2 binds from",
     };
   }
-  return { bind: true, because: `${reading.note}: a page that was served, so what it declares can be compared with what the others declare` };
+  if (reading.strata.includes("undeclared")) {
+    return {
+      bind: true,
+      tier1: false,
+      because: `${reading.note}: a page that was served with content and declares no Product, so tiers 2 and 3 read it and tier 1 leaves it out of its comparison rather than let it delete every declared candidate`,
+    };
+  }
+  return { bind: true, tier1: true, because: `${reading.note}: a page that was served, so what it declares can be compared with what the others declare` };
 }

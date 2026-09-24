@@ -1,5 +1,5 @@
 import { bank, type Bank } from "../heuristics/index.js";
-import { declaresProduct } from "../heuristics/index.js";
+import { declaresProduct, visibleText } from "../heuristics/index.js";
 import type { PageResponse } from "./blocked.js";
 import type { UrlProbe } from "./sample.js";
 
@@ -66,5 +66,9 @@ export function probeFrom(requested: string, response: PageResponse, options: Pr
     hasDeclaredProduct: declared,
     isShell: view.run("shell-skips-tier-1", { html: body }).fires,
     priceCount: priceCount(body),
+    // `visibleText` is the heuristics module's own reading of "what a person
+    // sees", the same one `shell-skips-tier-1` counts; a second spelling of it
+    // here could call a page empty that the shell rule calls short.
+    textChars: visibleText(body).length,
   };
 }

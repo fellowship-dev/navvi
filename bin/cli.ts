@@ -12,7 +12,7 @@ import { formatRows, type OutputFormat, type Row } from "../src/cli/output.js";
 import { createChooser, findOnPath, HARNESS_LABEL, loadAnswersFile, mergeAnswers, missingCredentialsMessage, NavviError, NeedsHumanError, readQuestionsFile, resolveDefaultChooser, type Chooser, type StoredAnswer } from "../src/chooser/index.js";
 import { bank, UnknownHeuristicError, type Overrides } from "../src/heuristics/index.js";
 import { defaultBrowser, parseFieldSpecs, type Chooser as ChooserId, type SourceSelection } from "../src/input/schema.js";
-import { heuristicBlock, heuristicsBlock, makeStop, specBlock } from "../src/cli/render.js";
+import { chooserLines, heuristicBlock, heuristicsBlock, makeStop, specBlock } from "../src/cli/render.js";
 import { make as runMake, openPages, type MakeStatus } from "../src/make/index.js";
 import { briefToSpec, SpecParseError } from "../src/spec/spec.js";
 import { RubricSchema, type Rubric } from "../src/spec/schema.js";
@@ -250,33 +250,6 @@ async function openStorage(storageDir: string): Promise<RunStorage> {
 }
 
 // ---------------------------------------------------------------- reporting
-
-function fmtMs(ms: number): string {
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
-}
-
-const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
-
-/**
- * U7: one line per role, each with its own share, so every question is
- * attributed to whoever answered it. The run's totals are the decider's own
- * work plus the writer's; the decider line is the difference. A decider that
- * wrote its own text gets one line with both counts.
- */
-function chooserLines(c: NonNullable<RunSummary["chooser"]>): string[] {
-  const w = c.writer;
-  const decisions = c.questions - (c.textQuestions ?? 0);
-  const ownText = (c.textQuestions ?? 0) - (w?.textQuestions ?? 0);
-  const cost = (tokens: number, waitMs: number, usd: number): string => `${tokens} input tokens, ${fmtMs(waitMs)} waiting, $${usd.toFixed(4)}`;
-  const own = cost(c.inputTokens - (w?.inputTokens ?? 0), c.waitMs - (w?.waitMs ?? 0), c.costUsd - (w?.costUsd ?? 0));
-  const lines = ownText > 0
-    ? [`  decider and writer ${c.name}: ${plural(decisions, "decision", "decisions")}, ${plural(ownText, "text question", "text questions")}, ${own}`]
-    : [`  decider ${c.name}: ${plural(decisions, "decision", "decisions")}, ${own}`];
-  if (w) lines.push(`  writer ${w.name}: ${plural(w.textQuestions, "text question", "text questions")}, ${cost(w.inputTokens, w.waitMs, w.costUsd)}`);
-  const f = c.transportFallback;
-  if (f) lines.push(`  decider transport: fell back from ${f.from} to ${f.to} (${f.reason})`);
-  return lines;
-}
 
 function summaryBlock(summary: RunSummary, dataLine: string): string {
   const lines = [`navvi: status ${summary.status}${summary.message ? ` — ${summary.message}` : ""}`];

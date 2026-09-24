@@ -2,18 +2,21 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Writable } from "node:stream";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import type { Page } from "playwright";
+import { launch, type LaunchedBrowser } from "../src/browser/launch.js";
 import { main, type CliIo } from "../bin/cli.js";
 import { parseArgs } from "../src/cli/args.js";
 import { applyAnswers, digestOfParams, LEDGER_FILE, make, matchAnswer, parseAnswer, Work, type Ledger, type MakeDeps, type MakeResult, type Pages, type StageName } from "../src/make/index.js";
 import { readingOf } from "../src/replay/determinism.js";
-import { fieldTypesOf, type PageExtraction } from "../src/scraper/extract.js";
+import { extractPage, fieldTypesOf, type PageExtraction } from "../src/scraper/extract.js";
 import { canaryOrigin, type CompiledScraper } from "../src/scraper/schema.js";
 import type { Answer, Chooser, ChooserUsage, Question } from "../src/chooser/chooser.js";
 import type { Spec } from "../src/spec/schema.js";
 import type { Manuscript } from "../src/investigate/index.js";
 import type { Reconciliation } from "../src/reconcile/index.js";
 import type { Determinism } from "../src/replay/determinism.js";
+import { startFixtureServer, type FixtureServer } from "./server.js";
 
 /**
  * U11: `navvi make`, the driver — the two transcripts in
@@ -119,6 +122,9 @@ function fixturePages(): FixturePages {
     },
     capture() {
       throw new Error("capture was called; tier 1 covers every field on these fixtures, so reaching tier 2 is the finding");
+    },
+    render() {
+      throw new Error("render was called; tier 1 covers every field on these fixtures, so reaching tier 3 is the finding");
     },
     read(scraper, url) {
       return Promise.resolve(readingOf(extract(scraper, url), fieldTypesOf(scraper)));
@@ -916,6 +922,171 @@ describe("the work directory's staleness rule", () => {
 // ------------------------------------------------------------------ helpers
 
 /** A spec with one blocking question left in it, for the paths that need no chooser. */
+// ------------------------------------------------------------------ tier 3
+
+/**
+ * U4: `make` reaches tier 3, which until 2026-09-23 it never had.
+ *
+ * The fresh-eyes run that found it: `navvi make "Extract the book title, price
+ * and availability" <a books demo URL> --work w` classified every URL dead
+ * (a 200 with no declared Product), sampled zero bindable pages, recorded tier
+ * 3 as "requested over 0 sample URLs" and exited 1 -- on a page whose three
+ * fields sit in plain markup. Every test above runs on pages that declare all
+ * five fields, which is why none of them could see it.
+ *
+ * This one runs the real stages over the fixture server and a real Chromium:
+ * three books-like pages that declare nothing, and one URL that answers 404.
+ * The chooser is scripted by label pattern and counts its questions, so the
+ * assertion that tier 3 asked exactly one question per field -- and the spec
+ * none -- is a count and not a hope.
+ */
+describe("tier 3: a catalogue that declares nothing", () => {
+  let server: FixtureServer;
+  let browser: LaunchedBrowser;
+
+  beforeAll(async () => {
+    server = await startFixtureServer();
+    browser = await launch({ browser: "chromium", headed: false });
+  });
+
+  afterAll(async () => {
+    await browser?.close();
+    await server?.close();
+  });
+
+  const bookUrl = (name: string): string => `${server.baseUrl}/fixtures/template/${name}.html`;
+
+  class PatternChooser implements Chooser {
+    readonly name = "recorded" as const;
+    questions: Question[] = [];
+    constructor(private readonly patterns: Record<string, RegExp>) {}
+    async ask(batch: Question[]): Promise<Answer[]> {
+      this.questions.push(...batch);
+      return batch.map((question) => {
+        const pattern = this.patterns[question.id.replace(/^field\./, "").replace(/\.retry$/, "")];
+        const index = pattern === undefined ? -1 : (question.options ?? []).findIndex((option) => pattern.test(option));
+        return { id: question.id, index: index < 0 ? null : index };
+      });
+    }
+    usage(): ChooserUsage {
+      return { chooser: this.name, questions: this.questions.length, textQuestions: 0, batches: 1, inputTokens: 0, outputTokens: 0, waitMs: 0, costUsd: 0, zeroDataRetention: "not_applicable" };
+    }
+  }
+
+  /** The page driver over the fixture server: real fetches, real pages, no settle loop. */
+  function livePages(): Pages & { rendered: string[][] } {
+    const rendered: string[][] = [];
+    const withPage = async <T>(url: string, use: (page: Page) => Promise<T>): Promise<T> => {
+      const page = await browser.context.newPage();
+      try {
+        await page.goto(url);
+        return await use(page);
+      } finally {
+        await page.close().catch(() => undefined);
+      }
+    };
+    const extract = (scraper: CompiledScraper, url: string): Promise<PageExtraction> => withPage(url, (page) => extractPage(page, scraper, { sourceUrl: url }));
+    return {
+      rendered,
+      async fetch(url) {
+        const res = await fetch(url, { redirect: "follow" });
+        return { url: res.url, status: res.status, body: await res.text() };
+      },
+      capture: (url) =>
+        withPage(url, async (page) => ({
+          // Nothing fetched for itself: these pages carry no payload, which is
+          // the tier-2 half of "declares nothing".
+          responses: [],
+          text: await page.evaluate(() => document.body?.innerText ?? ""),
+          html: await page.content(),
+          settle: { outcome: "quiesced", textFrom: 0, text: 0, payloadsFrom: 0, payloads: 0, polls: 0, changed: 0, ms: 0 },
+        })),
+      async render(urls, use) {
+        rendered.push([...urls]);
+        const pages: Page[] = [];
+        try {
+          for (const url of urls) {
+            const page = await browser.context.newPage();
+            pages.push(page);
+            await page.goto(url);
+          }
+          return await use(pages);
+        } finally {
+          for (const page of pages) await page.close().catch(() => undefined);
+        }
+      },
+      read: async (scraper, url) => readingOf(await extract(scraper, url), fieldTypesOf(scraper)),
+      extract,
+      close: () => Promise.resolve(),
+    };
+  }
+
+  function booksSpec(): Spec {
+    return {
+      version: 1,
+      brief: "Extract the book title, price and availability",
+      target: { site: "Book Shelf Demo", pageKind: "product", provenance: "brief" },
+      entity: { name: "book", provenance: "brief" },
+      inputs: { shape: "url_list", description: "the URLs given on the command line", provenance: "brief" },
+      fields: [
+        { name: "title", provenance: "brief", briefTerm: "title" },
+        { name: "price", provenance: "brief", briefTerm: "price" },
+        { name: "availability", provenance: "brief", briefTerm: "availability" },
+      ],
+      constraints: { freshness: { stated: false }, volume: { stated: false }, cadence: { stated: false }, budget: { stated: false } },
+      rubrics: [],
+      openQuestions: [],
+    };
+  }
+
+  it("samples the undeclared pages, binds every field at tier 3 through the chooser, and delivers a scraper that replays", async () => {
+    const urls = [...["books-1", "books-2", "books-3"].map(bookUrl), bookUrl("withdrawn")];
+    Work.open(work()).writeJson("spec.json", booksSpec());
+    const chooser = new PatternChooser({ title: /^[^=]*h1 = /, price: /price_color/, availability: /availability/ });
+    const pages = livePages();
+
+    const result = await make(options({ urls }), {
+      report,
+      now: () => NOW,
+      loadUrls: () => Promise.resolve(urls),
+      openPages: () => Promise.resolve(pages),
+      openChooser: () => Promise.resolve(chooser),
+    });
+    expect(result.status, transcript()).toBe("delivered");
+
+    // KTD3: the three pages are bound, and the 404 stays dead.
+    const manuscript = JSON.parse(readFileSync(join(work(), "investigation.json"), "utf8")) as Manuscript;
+    const bound = manuscript.sample.picks.filter((pick) => pick.bound).map((pick) => pick.url).sort();
+    expect(bound).toEqual(urls.slice(0, 3).sort());
+    expect(manuscript.sample.picks.find((pick) => pick.url === bookUrl("withdrawn"))?.stratum).toBe("dead");
+
+    // Tier 3 ran, over the bound pages only, and asked one question per field.
+    const tier3 = manuscript.tiers.find((tier) => tier.tier === 3)!;
+    expect(tier3.outcome, tier3.because).toBe("ran");
+    expect(tier3.covered).toEqual(["title", "price", "availability"]);
+    expect(pages.rendered).toHaveLength(1);
+    expect([...pages.rendered[0]!].sort()).toEqual(urls.slice(0, 3).sort());
+    expect(chooser.questions.map((question) => question.id)).toEqual(["field.title", "field.price", "field.availability"]);
+    expect(manuscript.fields.every((field) => field.tier === 3 && field.decision?.answeredBy === "recorded")).toBe(true);
+
+    // The scraper, the rationale and the verify stage all see the tier-3 columns.
+    const scraper = JSON.parse(readFileSync(join(work(), "scraper.json"), "utf8")) as CompiledScraper;
+    expect(Object.keys(scraper.fields).sort()).toEqual(["availability", "price", "title"]);
+    expect(scraper.fields.price!.alternatives[0]!.selector).toBe("p.price_color");
+    const rationale = readFileSync(join(work(), "rationale.md"), "utf8");
+    expect(rationale).toContain("Decided by **recorded**, asked `field.title`");
+    expect(rationale).toMatch(/\| `price` \| text \*\(inferred\)\* \| tier 3, `dom /);
+    const determinism = JSON.parse(readFileSync(join(work(), "determinism.json"), "utf8")) as Determinism;
+    expect(determinism.verdict).toBe("stable");
+
+    // The whole run's chooser usage, in the summary lines the plain command prints.
+    const text = transcript();
+    expect(text).toMatch(/\nchooser\s+3 questions\n/);
+    expect(text).toContain("  decider recorded: 3 decisions");
+    expect(text).toMatch(/verify\s+3 of 3 compiled/);
+  });
+});
+
 function blockedSpec(): Spec {
   return {
     version: 1,

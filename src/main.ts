@@ -11,7 +11,7 @@ import { redactRunInput } from "./secrets/resolve.js";
 
 import type { Status } from "./scraper/schema.js";
 import type { HealingEvent, UnmappedCandidate } from "./replay/heal.js";
-import type { ZeroDataRetentionState } from "./chooser/chooser.js";
+import type { UsageSummary, ZeroDataRetentionState } from "./chooser/chooser.js";
 
 export type { Status };
 
@@ -30,17 +30,7 @@ export interface RunSummary {
    * of those totals, present only when a different source answered the
    * free-text questions, so each kind of question is attributable.
    */
-  chooser: {
-    name: string;
-    questions: number;
-    inputTokens: number;
-    waitMs: number;
-    costUsd: number;
-    textQuestions?: number;
-    writer?: { name: string; textQuestions: number; inputTokens: number; waitMs: number; costUsd: number };
-    /** U7 / KTD6: the decider's transport failed and the run finished over another. */
-    transportFallback?: { from: string; to: string; reason: string };
-  } | null;
+  chooser: UsageSummary | null;
   input: RunInput | null;
   /** Requests the crawler ran, by handler. */
   requests: { compile: number; list: number; record: number };

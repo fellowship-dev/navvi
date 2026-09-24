@@ -9,7 +9,7 @@ import { UNASKED, agree, answered, unservable, type Agreement, type Observation 
 import { safeUrl, type CapturedResponse } from "./har.js";
 import { headlineOf, identityAnchor, pageIdentities, type IdentityAnchor, type PageIdentity } from "./identity.js";
 import { anchors, flatten, type Leaf } from "./leaves.js";
-import type { FieldAlias, FieldRecord, InventoryRecord, Manuscript, Obstacle, RejectionRecord, RequestedField, SamplePickRecord, SourceRecord, TierRecord, VerdictLog } from "./manuscript.js";
+import type { FieldAlias, FieldRecord, InventoryRecord, Manuscript, Obstacle, RejectionRecord, RequestedField, SamplePickRecord, SourceRecord, TierDecision, TierRecord, VerdictLog } from "./manuscript.js";
 import { KIND_PRECEDENCE, acceptedRoles, resolutionOrder, roleOfDeclared, type DeclaredRole } from "./roles.js";
 import { NO_SHELLS_YET, bindable, type SampleChoice } from "./sample.js";
 
@@ -32,14 +32,25 @@ import { NO_SHELLS_YET, bindable, type SampleChoice } from "./sample.js";
  *
  * Two things this file deliberately does not do:
  *
- *  - **It does not fetch, render or drive a browser.** Both are callbacks
+ *  - **It does not fetch, render or drive a browser.** All three are callbacks
  *    (`Sources`), so the whole cascade is offline-testable and a HAR stands in
  *    for the browser without this module knowing. That is not only ergonomics:
  *    the value of the cascade is the call that is *not* made, and a test can
  *    only assert `capture` was never called if `capture` is something it owns.
  *  - **It does not generate DOM candidates.** That is `src/compile/`, it needs a
  *    live page, and it costs a model. What happens here is the *decision* that
- *    it runs at all, and the record of what it was asked for.
+ *    it runs at all -- only for the fields tiers 1 and 2 left uncovered -- and
+ *    the record of what it answered. `Sources.dom` is the callback, and
+ *    `src/compile/template.ts` is what supplies it.
+ *
+ * Tier 3 used to stop at that record. Until 2026-09-23 this file pushed
+ * `{ tier: 3, outcome: "requested" }` and nothing ever called the DOM compiler
+ * on its behalf: `navvi make` on a page with no declared product bound nothing,
+ * said so in a tier line nobody acted on, and exited 1, while the plain command
+ * compiled the same page from its markup through a second compiler. The record
+ * is still what a run without a DOM compiler writes (`requested`, with the
+ * reason); a run with one gets `ran`, the bindings, and for each one the
+ * question the chooser was asked and the backend that answered it.
  *
  * What comes out is a `Manuscript` (U2f): every source, sample, obstacle and
  * rejection, JSON-serialisable and stable.
@@ -87,14 +98,70 @@ export interface Capture {
 }
 
 /**
- * Where the bytes come from. Both are callbacks and `capture` is optional,
- * because a run that stops at tier 1 must be able to say it never had one.
+ * Where the bytes come from. All callbacks, and `capture` and `dom` are
+ * optional, because a run that stops at tier 1 must be able to say it never
+ * had either.
  */
 export interface Sources {
   /** One plain HTTP request. No browser, no JavaScript. */
   fetch(url: string): Promise<PageResponse>;
   /** Render the URL and hand back what it fetched for itself. Called only for a field tier 1 left uncovered. */
   capture?: ((url: string) => Promise<Capture>) | undefined;
+  /**
+   * Tier 3: the DOM compiler, over rendered pages, with a chooser. Called at
+   * most once, with only the fields tiers 1 and 2 left uncovered (KTD2), and
+   * never on a blocked run. `src/compile/template.ts` supplies it; this module
+   * cannot import `src/compile/` without closing a knot, and would not want
+   * to: the page and the model are the caller's.
+   */
+  dom?: ((request: DomRequest) => Promise<DomAnswer>) | undefined;
+}
+
+// ------------------------------------------------------------------- tier 3
+
+/** What tier 3 is handed: the uncovered fields, and the pages that were bound from. */
+export interface DomRequest {
+  /** The fields tiers 1 and 2 left uncovered, in requested order. Only these are asked about. */
+  fields: readonly RequestedField[];
+  /** The binding URLs, in sample order. The DOM compiler renders them, or the first few of them. */
+  urls: readonly string[];
+}
+
+/** One field tier 3 bound: a selector the chooser picked and the selector gate let through. */
+export interface DomBinding {
+  field: string;
+  selector: string;
+  attr?: string | undefined;
+  /** The candidate's path, as the snapshot labels it. */
+  path: string;
+  /** The value on each rendered sample, in sample order. */
+  values: TypedValue[];
+  decision: TierDecision;
+  because: string;
+}
+
+/** A candidate the chooser picked and the selector gate refused, with the gate's own sentence. */
+export interface DomRefusal {
+  field: string;
+  path: string;
+  values: TypedValue[];
+  because: string;
+  decision: TierDecision;
+}
+
+export interface DomAnswer {
+  /**
+   * Did the DOM compiler run? `false` when it could not -- no chooser could be
+   * opened, nothing rendered -- which is a different fact from running and
+   * finding nothing, and `because` says which.
+   */
+  ran: boolean;
+  bindings: DomBinding[];
+  refused: DomRefusal[];
+  /** Fields the chooser answered `none` for, or that had no candidate at all. */
+  unanswered: Array<{ field: string; because: string }>;
+  sources: SourceRecord[];
+  because: string;
 }
 
 export interface InvestigateOptions {
@@ -431,6 +498,13 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
    */
   const comparability = new Map(options.sample.picks.map((pick) => [pick.url, bindable(pick, shellUrls)] as const));
   const comparable = (url: string): boolean => comparability.get(url)?.bind === true;
+  /**
+   * Tier 1's own comparison set, which KTD3 made narrower than `comparable`:
+   * an `undeclared` page was served and is read by tiers 2 and 3, and it
+   * declares nothing, so in `bindRole`'s "every sample declares this role" it
+   * would delete every declared candidate on the pages that declare one.
+   */
+  const declaring = (url: string): boolean => comparability.get(url)?.tier1 === true;
 
   /**
    * The render, taken once and shared.
@@ -578,8 +652,8 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
   const uncomparable: PageResponse[] = [];
   if (!allShells) {
     for (const [index, page] of fetched.entries()) {
-      if (!comparable(page.url)) {
-        // A shell among real pages. It declares nothing, and "present on every
+      if (!declaring(page.url)) {
+        // A shell among real pages, or (KTD3) a page that declares nothing. It declares nothing, and "present on every
         // sample" would read that as "no field is present anywhere" — which is
         // exactly what it did before 2026-09-23. Its `SourceRecord` keeps the
         // shell verdict written above it, so the run still says it was read.
@@ -1083,22 +1157,72 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
 
   // ---------------------------------------------------------------- tier 3
 
+  const uncovered2 = fields.filter((field) => records.get(field.name)!.path === undefined);
+  const asked3 = uncovered2.map((field) => field.name);
+  const covered3: string[] = [];
+  let tier3: Pick<TierRecord, "outcome" | "because" | "sources">;
+  const handedOver = `${asked3.join(", ")} survived both cheap tiers`;
+  if (asked3.length === 0) {
+    tier3 = {
+      outcome: "skipped",
+      because: stop
+        ? "declared-covers-spec fired: there is no DOM alternative to gate, because nothing was compiled"
+        : "the declared data and the captured payloads covered every requested field; the DOM compiler is the exception, and this was not it",
+      sources: [],
+    };
+  } else if (options.sources.dom === undefined) {
+    tier3 = {
+      outcome: "requested",
+      because: `${handedOver}; no DOM compiler was supplied to this investigation, so tier 3 is recorded as asked for ${asked3.length === 1 ? "it" : "them"} and did not run`,
+      sources: [],
+    };
+  } else if (bindingUrls.length === 0) {
+    tier3 = {
+      outcome: "skipped",
+      because: `${handedOver}; no sampled URL is bindable, so there is no page to render and nothing for the DOM compiler to read`,
+      sources: [],
+    };
+  } else {
+    /**
+     * Only the uncovered fields, and that is KTD2 rather than thrift. A field
+     * tier 1 or 2 already bound has a reading the site stated about itself;
+     * asking a chooser to pick a DOM node for it anyway is how the 2026-09-22
+     * compiler produced `body.one-col.christmas-pattern` for a store that was
+     * stating every field in its own `<meta>` tags.
+     */
+    const answer = await options.sources.dom({ fields: uncovered2, urls: bindingUrls });
+    for (const binding of answer.bindings) {
+      const record = records.get(binding.field);
+      if (record === undefined || record.path !== undefined) continue;
+      record.tier = 3;
+      record.source = "dom";
+      record.path = binding.path;
+      record.selector = binding.selector;
+      if (binding.attr !== undefined) record.attr = binding.attr;
+      record.values = binding.values;
+      record.aliases = [];
+      record.because = binding.because;
+      record.askModel = false;
+      record.decision = binding.decision;
+      covered3.push(binding.field);
+    }
+    for (const refusal of answer.refused) {
+      const record = records.get(refusal.field);
+      if (record === undefined || record.path !== undefined) continue;
+      record.rejected.push({ tier: 3, path: refusal.path, values: refusal.values, because: refusal.because });
+      record.because = refusal.because;
+    }
+    for (const entry of answer.unanswered) {
+      const record = records.get(entry.field);
+      if (record === undefined || record.path !== undefined) continue;
+      record.because = entry.because;
+    }
+    tier3 = answer.ran
+      ? { outcome: "ran", because: `${handedOver}; ${answer.because}`, sources: answer.sources }
+      : { outcome: "requested", because: `${handedOver}; ${answer.because}`, sources: answer.sources };
+  }
+  tiers.push({ tier: 3, name: "dom", ...tier3, asked: asked3, covered: covered3, verdicts: [] });
   const uncovered = fields.filter((field) => records.get(field.name)!.path === undefined).map((field) => field.name);
-  tiers.push({
-    tier: 3,
-    name: "dom",
-    outcome: uncovered.length === 0 ? "skipped" : "requested",
-    because:
-      uncovered.length === 0
-        ? stop
-          ? "declared-covers-spec fired: there is no DOM alternative to gate, because nothing was compiled"
-          : "the declared data and the captured payloads covered every requested field; today's compiler is the exception, and this was not it"
-        : `${uncovered.join(", ")} survived both cheap tiers; the DOM compiler in src/compile is asked for ${uncovered.length === 1 ? "it" : "them"} alone, over ${bindingUrls.length} sample URL(s), and its output faces the selector gate`,
-    asked: uncovered,
-    covered: [],
-    sources: [],
-    verdicts: [],
-  });
 
   for (const field of fields) {
     const record = records.get(field.name)!;
@@ -1135,7 +1259,9 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
     because:
       uncovered.length === 0
         ? `every requested field is bound: ${fields.map((field) => `${field.name} at tier ${records.get(field.name)!.tier}`).join(", ")}`
-        : `${fields.length - uncovered.length} of ${fields.length} fields bound from declared data and captured payloads; ${uncovered.join(", ")} need the DOM compiler`,
+        : tier3.outcome === "ran"
+          ? `${fields.length - uncovered.length} of ${fields.length} fields bound across the three tiers; no tier bound ${uncovered.join(", ")}`
+          : `${fields.length - uncovered.length} of ${fields.length} fields bound from declared data and captured payloads; ${uncovered.join(", ")} need the DOM compiler`,
   });
 }
 

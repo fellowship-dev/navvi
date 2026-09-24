@@ -1,3 +1,4 @@
+import type { UsageSummary } from "../chooser/chooser.js";
 import type { BankEntry } from "../heuristics/index.js";
 import { blockingQuestions, requestedFields, underspecifiedFields, type Spec } from "../spec/schema.js";
 
@@ -141,4 +142,37 @@ export function makeNote(text: string, width = STAGE_BULLET): string {
  */
 export function makeStop(stage: string, because: string, exit: number): string {
   return `stopped at ${stage}: ${because} (exit ${exit})\n`;
+}
+
+// ------------------------------------------------------------ chooser usage
+
+function fmtMs(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
+}
+
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * U7: one line per role, each with its own share, so every question is
+ * attributed to whoever answered it. The run's totals are the decider's own
+ * work plus the writer's; the decider line is the difference. A decider that
+ * wrote its own text gets one line with both counts.
+ *
+ * Moved here from `bin/cli.ts` for U4, because `navvi make` prints the same
+ * lines: it asks the chooser every tier-3 question, and a second spelling of
+ * who answered what is exactly how the two front ends would come to disagree.
+ */
+export function chooserLines(c: UsageSummary): string[] {
+  const w = c.writer;
+  const decisions = c.questions - (c.textQuestions ?? 0);
+  const ownText = (c.textQuestions ?? 0) - (w?.textQuestions ?? 0);
+  const cost = (tokens: number, waitMs: number, usd: number): string => `${tokens} input tokens, ${fmtMs(waitMs)} waiting, $${usd.toFixed(4)}`;
+  const own = cost(c.inputTokens - (w?.inputTokens ?? 0), c.waitMs - (w?.waitMs ?? 0), c.costUsd - (w?.costUsd ?? 0));
+  const lines = ownText > 0
+    ? [`  decider and writer ${c.name}: ${plural(decisions, "decision", "decisions")}, ${plural(ownText, "text question", "text questions")}, ${own}`]
+    : [`  decider ${c.name}: ${plural(decisions, "decision", "decisions")}, ${own}`];
+  if (w) lines.push(`  writer ${w.name}: ${plural(w.textQuestions, "text question", "text questions")}, ${cost(w.inputTokens, w.waitMs, w.costUsd)}`);
+  const f = c.transportFallback;
+  if (f) lines.push(`  decider transport: fell back from ${f.from} to ${f.to} (${f.reason})`);
+  return lines;
 }

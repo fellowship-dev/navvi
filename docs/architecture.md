@@ -73,6 +73,7 @@ graph TD
   chooser --> billing
   chooser --> secrets
   chooser --> util
+  cli --> chooser
   cli --> heuristics
   cli --> input
   cli --> prestep
@@ -190,10 +191,10 @@ vocabulary.
 | module | lines | owns |
 | --- | --- | --- |
 | `spec` | 543 | `navvi spec`: a plain-words brief becomes a `Rubric`, with what the brief left unsaid recorded as open questions. Reads no page. |
-| `cli` | 531 | How a run is *shown*: argv parsing, output formats, the rendered spec and heuristic blocks, notifications. Not the binary — the binary is `bin/`. |
+| `cli` | 531 | How a run is *shown*: argv parsing, output formats, the rendered spec and heuristic blocks, the chooser-usage lines both front ends print, notifications. Not the binary — the binary is `bin/`. |
 | `investigate` | 4447 | The discovery cascade: declared data, then captured JSON, then selectors, stopping as soon as the requested fields are covered, and writing down what it tried. See [`discovery.md`](discovery.md). |
 | `reconcile` | 1094 | Phase D: the manuscript argued into `reconcile.md` — obtainable, not obtainable, **available but not requested**, ambiguities with the rubric that settled them quoted verbatim, obstacles with their cost — and `schema.json` derived from what was proved obtainable rather than from the brief. Deterministic, offline, and it opens nothing. |
-| `compile` | 1867 | Turning a page into alternatives for a field — and, since U7a, turning a *reconciliation* into them without one. `compile.ts` is the expensive half: a live page, model calls, candidates, groups, chunked questions, links to follow. `proven.ts` is the model-free half: it reads what the investigation proved, emits the `json-ld` / `network` / `dom` cascade `replay` resolves, and renders `rationale.md`. `gate.ts` refuses a selector that will not survive a page it was not compiled from. |
+| `compile` | 1867 | Turning a page into alternatives for a field — and, since U7a, turning a *reconciliation* into them without one. `compile.ts` is the expensive half: a live page, model calls, candidates, groups, chunked questions, links to follow. `proven.ts` is the model-free half: it reads what the investigation proved, emits the `json-ld` / `network` / `dom` cascade `replay` resolves, and renders `rationale.md`. `gate.ts` refuses a selector that will not survive a page it was not compiled from. `template.ts` (U4) is the **one compile core** for a page template: tier 1 → tier 2 → tier 3 (`compile.ts`'s record flow, over the fields the cheap tiers left uncovered) → reconcile → gate → scraper, with the pages and the chooser handed in. |
 | `replay` | 2759 | Running a compiled scraper again: crawl, extract, and heal the one field that moved. The only module that owns a crawler. |
 | `navigate` | 992 | Getting from the start URL to the page that has the data — a goal-driven loop over controls the code enumerated. |
 | `prestep` | 723 | What happens between the first navigation and the first charged question: credential refusal, consent banners, one Turnstile click, blocked classification. |

@@ -1,13 +1,13 @@
-import { bulletWidth, makeArtifact, makeBullet, makeNote, makeRow, makeStage } from "../cli/render.js";
-import { chooseSample, investigate, probeFrom, render as renderManuscript, type Manuscript, type RequestedField, type SampleChoice, type Stratum } from "../investigate/index.js";
+import { bulletWidth, chooserLines, makeArtifact, makeBullet, makeNote, makeRow, makeStage } from "../cli/render.js";
+import { chooseSample, probeFrom, render as renderManuscript, type Manuscript, type RequestedField, type SampleChoice, type Stratum } from "../investigate/index.js";
 import { outputSchema, reconcile, render as renderReconcile, summarize as summarizeReconcile, type Reconciliation } from "../reconcile/index.js";
-import { NothingCompilableError, compileFromReconciliation, renderRationale, type ProvenCompile } from "../compile/index.js";
+import { NothingCompilableError, chooserOf, compileFromReconciliation, investigateTemplate, renderRationale, type ProvenCompile } from "../compile/index.js";
 import { DEFAULT_REPLAYS, DEFAULT_SAMPLE_URLS, loadListSources, measureDeterminism, summarizeDeterminism, unstableFields, type Determinism, type PageReading } from "../replay/index.js";
 import { canaryOrigin, fieldTypesOf, readValues, renderMachine, type CompiledScraper } from "../scraper/index.js";
 import { groupByTemplate } from "../template/index.js";
 import { SpecSchema, blockingQuestions, requestedFields, type Rubric, type Spec } from "../spec/schema.js";
 import { briefToSpec } from "../spec/spec.js";
-import type { Chooser } from "../chooser/chooser.js";
+import { summarizeUsage, type Chooser } from "../chooser/chooser.js";
 import type { FieldType } from "../input/schema.js";
 import { AnswerError, applyAnswers, parseAnswer, type FieldTypes, type MatchedAnswer } from "./answers.js";
 import { ARTIFACTS, PRIMARY, STAGES, Work, type StageName } from "./work.js";
@@ -225,14 +225,17 @@ export interface MakeDeps {
    */
   openPages?: (() => Promise<Pages>) | undefined;
   /**
-   * Builds the chooser that answers the one question `briefToSpec` asks.
+   * Builds the chooser that answers `briefToSpec`'s question and, since U4,
+   * tier 3's: one choice question per field the cheap tiers left uncovered.
    *
    * A factory and not a `Chooser`, because building one resolves a credential,
    * announces the choice on stderr and may refuse the run outright — and a
-   * resume (the plan's second transcript) never compiles a brief at all. A
-   * command that demands an API key for a stage it was never going to run is
-   * the same false failure as a stage that reports `stable` about pages it
-   * never read.
+   * resume (the plan's second transcript) never compiles a brief at all, and a
+   * page that declares every field never reaches tier 3. A command that
+   * demands an API key for a stage it was never going to run is the same false
+   * failure as a stage that reports `stable` about pages it never read. The
+   * driver opens it at most once and both stages share it, so the usage it
+   * prints is the whole run's.
    */
   openChooser?: (() => Promise<Chooser>) | undefined;
   /** Resolves `--from-url` into a URL list. Defaults to `replay`'s own, which is the one spelling of it. */
@@ -264,6 +267,23 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
     }
     return open.pages;
   };
+
+  /**
+   * The chooser, opened at most once and only when a stage asks for it — the
+   * spec's one text question or tier 3's choice questions, whichever comes
+   * first. Boxed for the same reason as the pages: the `finally` below reads
+   * what was opened to print its usage.
+   */
+  const asked: { chooser: Chooser | null } = { chooser: null };
+  const openChooser = deps.openChooser;
+  const needChooser =
+    openChooser === undefined
+      ? undefined
+      : async (): Promise<Chooser> => {
+          asked.chooser ??= await openChooser();
+          return asked.chooser;
+        };
+  const stageDeps: MakeDeps = { ...deps, openChooser: needChooser };
 
   const say = (text: string): void => deps.report(text);
   const record = (stage: StageName, outcome: StageOutcome, because: string, artifacts: readonly string[] = []): void => {
@@ -304,7 +324,7 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
     let matched: MatchedAnswer[];
     let types: FieldTypes;
     try {
-      ({ spec, matched, types } = await runSpec(work, options, deps, answers));
+      ({ spec, matched, types } = await runSpec(work, options, stageDeps, answers));
     } catch (error) {
       if (error instanceof AnswerError || error instanceof MakeStop) return stop("spec", error.message, "configuration");
       throw error;
@@ -404,7 +424,13 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
     at("investigate");
 
     const fields: RequestedField[] = spec.fields.map((field) => (field.type === undefined ? { name: field.name } : { name: field.name, type: field.type }));
-    const investigateParams = { site: spec.target.site, fields };
+    /**
+     * `tiers: 3` marks a manuscript taken by the cascade with a real tier 3.
+     * One written before U4 recorded tier 3 as requested and never ran it, so
+     * reusing it would carry "0 sample URLs, nothing bound" forward about a
+     * page the DOM compiler can now read; the argument makes it stale instead.
+     */
+    const investigateParams = { site: spec.target.site, fields, tiers: 3 };
     const investigateState = work.currency("investigate", ["spec.json", "sample.json"], investigateParams);
     let manuscript: Manuscript;
     if (investigateState.current && !options.force) {
@@ -418,11 +444,24 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
       if (guard) return stop("investigate", guard, "configuration");
 
       const driver = await needPages();
-      manuscript = await investigate({
-        site: spec.target.site,
+      /**
+       * The compile core's tiers, not a second copy of them: `investigateTemplate`
+       * is the same tier 1 → 2 → 3 the plain command runs, and `make` holds the
+       * rest of the core apart as stages so each can be reused and edited.
+       * Tier 3 gets the pages through `render` and the chooser through the same
+       * lazy box the spec stage uses, so a page that declares every field opens
+       * neither.
+       */
+      manuscript = await investigateTemplate({
+        spec,
         fields,
         sample,
-        sources: { fetch: (url) => driver.fetch(url), capture: (url) => driver.capture(url) },
+        sources: {
+          fetch: (url) => driver.fetch(url),
+          capture: (url) => driver.capture(url),
+          render: (urls, use) => driver.render(urls, use),
+        },
+        ...(needChooser === undefined ? {} : { chooser: needChooser }),
         now: now(),
       });
       work.writeJson(PRIMARY.investigate, manuscript);
@@ -506,7 +545,11 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
     const entryUrl = bindingUrls(manuscript)[0] ?? sample.picks[0]?.url;
     if (entryUrl === undefined) return stop("compile", "the sample has no URL a replay could start from", "short");
     const templateKey = templateKeyOf(bindingUrls(manuscript).length > 0 ? bindingUrls(manuscript) : sample.picks.map((pick) => pick.url));
-    const compileOptions = { templateKey, entry: { mode: "direct" as const, url: entryUrl } };
+    // Who picked the tier-3 selectors, when anyone did. `scraper.chooser` means
+    // "who the compile paid", and before U4 a make-built scraper said `agent`
+    // whatever happened, because nobody was paid.
+    const decidedBy = chooserOf(manuscript);
+    const compileOptions = { templateKey, entry: { mode: "direct" as const, url: entryUrl }, ...(decidedBy === undefined ? {} : { chooser: decidedBy }) };
 
     const replayUrls = bindingUrls(manuscript).slice(0, DEFAULT_SAMPLE_URLS);
     const replays = options.replays ?? DEFAULT_REPLAYS;
@@ -768,6 +811,17 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
     return { status: "short", stoppedAt: running, because, stages, work: work.dir };
   } finally {
     await open.pages?.close().catch(() => undefined);
+    /**
+     * Who answered, whatever the run ended as. Printed only when a chooser was
+     * opened: a resume that asked nobody has nothing to attribute, and a line
+     * saying "0 decisions" there would read as a chooser that was consulted
+     * and had nothing to say.
+     */
+    if (asked.chooser !== null) {
+      const usage = asked.chooser.usage();
+      say(makeStage("chooser", `${usage.questions} question${usage.questions === 1 ? "" : "s"}`));
+      say(chooserLines(summarizeUsage(usage)).join("\n") + "\n");
+    }
   }
 }
 
@@ -792,10 +846,12 @@ interface SpecResult {
  *
  * Three reasons, in the order they matter:
  *
- *  1. `briefToSpec` asks a model. It is the only model call in the whole of
- *     `make`, it is not deterministic, and re-deriving would mean the second
- *     run's spec can differ from the one the client just read and answered — so
- *     the answers would be attached to question ids that no longer exist.
+ *  1. `briefToSpec` asks a model. It is the only *free-text* model call in
+ *     `make` (tier 3's are choices over enumerated candidates, and recorded in
+ *     the manuscript), it is not deterministic, and re-deriving would mean the
+ *     second run's spec can differ from the one the client just read and
+ *     answered — so the answers would be attached to question ids that no
+ *     longer exist.
  *  2. The spec is the artifact the client **approves** and the compile is later
  *     judged against. Re-deriving it silently replaces the approved thing.
  *  3. It is what makes "every stage independently runnable from the artifact

@@ -1,6 +1,8 @@
 export {
+  RECORD_SAMPLE_PAGES,
   RETRY_MIN_GROUP_ITEMS,
   askChunked,
+  chooseRecordFields,
   compile,
   probeEntry,
   type CompileNoItems,
@@ -9,6 +11,8 @@ export {
   type CompileSuccess,
   type EntryMode,
   type ItemSpec,
+  type RecordChoice,
+  type RecordChoiceOptions,
 } from "./compile.js";
 export {
   CHUNK_BUDGET_CHARS,
@@ -67,3 +71,17 @@ export {
   type RefusedAlternative,
   type UnboundField,
 } from "./proven.js";
+export {
+  chooserOf,
+  compileTemplate,
+  describeFrom,
+  domTier,
+  investigateTemplate,
+  type ChooserSource,
+  type DomTierOptions,
+  type InvestigateTemplateOptions,
+  type RenderPages,
+  type TemplateCompile,
+  type TemplateCompileOptions,
+  type TemplateSources,
+} from "./template.js";
