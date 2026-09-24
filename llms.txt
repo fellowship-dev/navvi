@@ -1,24 +1,23 @@
 # Navvi
 
-> Compile it once so you never drive it again. Navvi is a self-healing scraper compiler: `npx navvi "<prompt>" <url...>` turns a plain-words request and a few URLs into JSON records and a compiled scraper file in one step. `npx navvi make "<prompt>" <url...> --work <dir>` runs the same pipeline staged into eight inspectable phases — spec, sample, investigate, reconcile, schema, determinism, compile, verify — each writing its own artifact into the work directory, re-runnable from any artifact you edit by hand. The first run asks a small number of multiple-choice questions about the page (answered by the host coding agent with no API key, or by Jev / any AI SDK model with one); every later run replays the compiled scraper with zero model calls and heals a moved field or a renamed button instead of failing. Secrets stay in the environment, logins use a local browser profile, and the tool never solves captchas or runs model output as code.
+> Give it to your agent, get a scraper you can run forever. `npx navvi "<prompt>" <url...>` compiles a plain-words request into JSON records and a reusable scraper file: code enumerates candidates on the page (declared JSON-LD/meta, the page's own JSON payloads, then DOM elements) and a model only picks among them — with Jev (TypeSafe) those picks are typed, cheap and 3.4x faster than Claude Haiku on the same questions. Re-runs replay the scraper with zero model calls and heal a moved field instead of failing. Add `--work <dir>` to keep every compile step as a readable, editable file; `navvi make` is the same pipeline as a resumable driver. With no key, a signed-in Claude Code or Codex answers on your subscription, or the host coding agent answers over stdio.
 
 ## Start here
 
-- [SKILL.md](SKILL.md): the agent skill. The one command, the no-key question protocol on stdio, the file-and-resume path (exit 3), input contract, output shape, exit codes and limits.
-- [README: Install and run](README.md#install-and-run): four lines from zero to data.
-- [README: What you get](README.md#what-you-get): records, the scraper JSON you can commit, the zero-model second run.
-- [README: Before the compile](README.md#before-the-compile-navvi-spec-and-navvi-heuristics): `navvi spec` (a brief into a spec, with what the brief left unsaid as open questions) and `navvi heuristics` (the rules that decide what a model is even asked). Neither reads a page.
-- [README: `navvi make`](README.md#navvi-make-the-driver): the driver — one whole compile as eight artifacts in a work directory, staleness tracked by content hash rather than mtime, and what "fewer fields than requested" means in `reconcile.md` and `scorecard.md`.
-- [README: Choosers](README.md#choosers): claude and codex (an installed, signed-in CLI on your subscription), jev, model, agent (no key), and what each needs.
+- [SKILL.md](SKILL.md): the agent skill. The one command, `--work`, the no-key question protocol on stdio, the file-and-resume path (exit 3), choosers, input contract, output shape, exit codes and limits.
+- [README: Install](README.md#install): from zero to records in three lines.
+- [README: Why use Jev](README.md#why-use-jev): the decision race — the same 19 real navigation questions, Jev 3.2 s vs Haiku 11.0 s, both 19/19.
+- [README: How it works](README.md#how-it-works): one compiler, cheapest evidence first, questions instead of guesses, zero-model replay.
+- [README: Choosers](README.md#choosers): jev, claude, codex, model, agent; the default order; Jev's writer and transport fallback.
 - [README: Exit codes](README.md#exit-codes): what each status means and what to do next.
-- [README: Limits](README.md#limits): drift versus redesign, captchas, logins and secrets.
 
 ## Reference
 
-- `npx navvi --help`: every flag in one screen, including `make`'s.
-- `storage/key_value_stores/scraper-cache/<cacheKey>.json`: the compiled scraper produced by a plain run.
+- `npx navvi --help`: every flag, including `make`'s.
+- `storage/key_value_stores/scraper-cache/<cacheKey>.json`: the compiled scraper from a plain run; `<work>/scraper.json` with `--work` or `make`.
 - `storage/questions/<token>.json`: a parked question batch waiting for `--answers <file> --resume <token>`.
-- `<work>/make.json`: `navvi make`'s ledger — the digest of what each stage read, used to decide whether it must run again.
-- [docs/architecture.md](docs/architecture.md): the modules under `src/`, what each one owns, the import graph between them, the known cycles and the two orphans. Generated from the code and checked in CI.
-- [docs/measurements.md](docs/measurements.md): questions, wait time and cost with and without Jev on the same pages.
+- [docs/apify.md](docs/apify.md): the Apify actor, residential proxies, pay-per-event.
+- [docs/architecture.md](docs/architecture.md): every module and import, generated from the code and checked in CI.
+- [docs/decisions-race-provenance.json](docs/decisions-race-provenance.json): the decision race's questions, per-batch latencies and answers.
+- [docs/measurements.md](docs/measurements.md): questions, wait time and cost with and without Jev.
 - [LICENSE](LICENSE): MIT.

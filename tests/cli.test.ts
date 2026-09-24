@@ -4,6 +4,7 @@ import { existsSync, statSync, mkdtempSync, readFileSync, readdirSync, rmSync, w
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PassThrough, Writable } from "node:stream";
+import { INPUT_SHAPES } from "../src/spec/schema.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { main, type CliIo, type RunFn } from "../bin/cli.js";
 import { parseArgs } from "../src/cli/args.js";
@@ -223,6 +224,14 @@ describe("one command family (U5)", () => {
     const help = io.stdout.text.replace(/\s+/g, " ");
     expect(help).toContain('navvi "<prompt>" <url...> --work <dir> and navvi make "<prompt>" <url...> --work <dir> compile through one core and write the same scraper.json');
     expect(help).toContain("the plain command refuses them (exit 2)");
+  });
+
+  it("--help lists every value --answer inputs= takes, from the enum itself", async () => {
+    // A fresh-eyes run, 2026-09-23, answered `inputs=a URL list` from the prose options
+    // and was refused with the enum; the help never named it.
+    const io = makeIo();
+    expect(await main(["--help"], io)).toBe(0);
+    for (const shape of INPUT_SHAPES) expect(io.stdout.text).toContain(shape);
   });
 
   it("--work on the plain command writes make's artifact set for a record compile, and says what is absent", async () => {

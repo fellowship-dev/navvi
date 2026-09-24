@@ -463,6 +463,8 @@ and make refuses the plain command's --mode, --fields, --goal, --max-pages, --ma
   --work <dir>              Where the artifacts and the ledger live. Required.
   --answer <key=value>      Answer an open question, by its id or by what it is about
                             (fields, inputs, target, entity, constraints.<name>). Repeatable.
+                            inputs takes url_list, sku_list, search_terms or unknown; start
+                            URLs already answer inputs=url_list and, on one host, the target.
                             --answer fields=a,b:money,c:boolean declares each column's type on
                             the spec's own field list, so stock:boolean and stock:integer are
                             two different asks. A key naming no part of a spec is an error,

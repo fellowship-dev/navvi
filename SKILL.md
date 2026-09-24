@@ -27,6 +27,8 @@ One command turns a prompt and a few URLs into records plus a compiled scraper J
 npx navvi "<what to extract or do>" <url...> [--out data.json|data.csv]
 ```
 
+Add `--work <dir>` to keep every compile step as a readable file (spec, sample, what each tier found, `rationale.md` for why each field was bound); `navvi make` below is the same pipeline as a resumable driver.
+
 Optional structure when the prompt is not enough: `--mode list|record --fields a,b,c --goal "<navigation>" --from-url <url> --max-pages N --follow-details`. A field may declare an output type, `--fields name,price:money,stock:boolean` (types: `text`, `money`, `integer`, `number`, `boolean`, `url`); the run coerces the value and a value that does not coerce is `null`. `npx navvi --help` lists every flag.
 
 ## Two Commands That Read No Page
@@ -48,13 +50,13 @@ The one command above compiles and runs in a single step. `navvi make` is the sa
 npx navvi make "<brief>" <url...> --work work/<case> [--answer key=value] [--sample n] [--replays n] [--offline] [--force]
 ```
 
-A brief that leaves a field or the input shape unnamed stops at the `spec` stage with open questions and exit 3 — resume with `--answer key=value` (repeatable; keys are `fields`, `inputs`, `target`, `entity`, `constraints.<name>`), the same idea as `--resume`/`--answers` below but for the spec's own open questions rather than a parked chooser batch. Give no brief on a later run to resume from the `spec.json` already in `--work`.
+URLs on the command line already answer two things: start URLs or `--from-url` mean the input is a URL list, and start URLs on one host name the site. A brief that still leaves a field unnamed stops at the `spec` stage with open questions and exit 3 — resume with `--answer key=value` (repeatable; keys are `fields`, `inputs`, `target`, `entity`, `constraints.<name>`), the same idea as `--resume`/`--answers` below but for the spec's own open questions rather than a parked chooser batch. Give no brief on a later run to resume from the `spec.json` already in `--work`.
 
 `--work` holds the pipeline's artifacts and its ledger (`make.json`); `--storage` (default `./storage`) still holds browser profiles and parked questions, unchanged. The ledger is a SHA-256 over the bytes each stage actually read, not mtime, so hand-editing an artifact and re-running recompiles only what depends on it — the point of staging the pipeline at all. Re-running over an artifact edited since navvi wrote it refuses and asks for `--force` rather than silently overwriting the edit.
 
-`make` can sample only a `url_list` input shape today; a spec whose inputs are a SKU list or search terms stops at the `sample` stage with a configuration error. It also has no grade yet: `scorecard.md` reports the measurements a score would be computed from (tier mix, fill rate, model calls at replay) and no letter grade, because the weighting is undecided. Binding fewer fields than requested is an expected result, not a failure — `reconcile.md` and `scorecard.md` name which fields and why (dropped by the determinism stage for moving on an unchanged page, or never found in what the page declares, fetches or renders).
+`navvi "<prompt>" <url> --work <dir>` and `navvi make` compile through the same core and write the same `scraper.json` for a record page. `make` can sample only a `url_list` input shape today; a spec whose inputs are a SKU list or search terms stops at the `sample` stage with a configuration error. It also has no grade yet: `scorecard.md` reports the measurements a score would be computed from (tier mix, fill rate, model calls at replay) and no letter grade, because the weighting is undecided. Binding fewer fields than requested is an expected result, not a failure — `reconcile.md` and `scorecard.md` name which fields and why (dropped by the determinism stage for moving on an unchanged page, or never found in what the page declares, fetches or renders).
 
-Exit codes are the same table as below, under `make`'s own names: `delivered` is 0, `short` (a stage stopped short, e.g. nothing was obtainable) is 1, a bad flag or a refused overwrite is 2, `needs_answers` (open questions at `spec`) is 3.
+Exit codes are the same table as below, under `make`'s own names: `delivered` is 0, `short` (a stage stopped short, e.g. nothing was obtainable) is 1, a bad flag or a refused overwrite is 2, `needs_answers` (open questions, or a parked chooser) is 3, and a model or budget that ran out is 4.
 
 ## Who Answers the Questions
 
@@ -99,7 +101,7 @@ If you cannot keep stdin open (a tool that runs a command to completion), add `-
 ## Unattended
 
 - `--decider claude` or `--decider codex`: the installed CLI answers both roles on your subscription; needs no key, only a signed-in `claude` or `codex`
-- `--decider jev` (fastest, unattended healing): `AI_GATEWAY_API_KEY` (Vercel AI Gateway) or `TYPESAFE_API_KEY`; its text questions go to a signed-in `claude` or `codex` first and to a metered model only without one, so unattended runs want either a CLI or `ANTHROPIC_API_KEY`
+- `--decider jev` (fastest, unattended healing): `AI_GATEWAY_API_KEY` (Vercel AI Gateway) or `TYPESAFE_API_KEY`. Jev picks but does not write: its text questions go to a signed-in `claude` or `codex` first and to a metered model only without one, so a Jev run also needs a CLI or `ANTHROPIC_API_KEY`. Without one, a text question exits 2 naming the remedies. Get a key at https://typesafe.ai
 - `--decider jev --writer model`: pin the split rather than letting it be derived, when the box may or may not have a CLI installed
 - `--decider model` (any AI SDK model): `ANTHROPIC_API_KEY`, or `AI_GATEWAY_API_KEY` when that is all there is (metered either way)
 - `--decider agent` still needs none; a run that cannot answer parks and exits 3
@@ -132,7 +134,7 @@ If you cannot keep stdin open (a tool that runs a command to completion), add `-
 - Heals drift (a moved field, a renamed button); reports a redesign as `drift` instead of guessing
 - No captcha solving; a headed run (`--headed`) hands a challenge to a person and records that step
 - Logins use the local profile; secrets come from the environment or a file, never the command line, and never enter a question, log or the scraper JSON
-- Apify deployment is coming; today the CLI runs locally with Camoufox (default) or Chromium (`--browser chromium`)
+- Runs locally with Camoufox (default) or Chromium (`--browser chromium`); the same code runs as an Apify actor (see https://github.com/fellowship-dev/navvi/blob/main/docs/apify.md)
 
 ## With and Without Jev
 

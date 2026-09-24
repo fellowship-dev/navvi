@@ -307,10 +307,9 @@ list.
 The **driver** was the last thing still open here, and it is now
 `src/make/`: `navvi make` runs `investigate`, `reconcile`,
 `compileFromReconciliation` and the determinism replay in sequence as one
-command, writing each artifact into `--work`. The plan lives in
-`fellowship-dev/claude-buddy` under
-`specs/plans/2026-09-22-008-navvi-remaining-phases.md`, and its two transcripts
-are the specification.
+command, writing each artifact into `--work`. Since then the per-template
+compile itself moved into `src/compile/template.ts`, which both `make` and the
+plain command's crawler call: one compiler, two front ends.
 
 It is the first caller of five modules at once, which is the point rather than
 a side effect: a missing driver was a missing command and not a missing edge,
