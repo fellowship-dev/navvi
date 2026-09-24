@@ -284,8 +284,13 @@ describe("crawler runs", () => {
     expect(summary.items).toBe(12);
     const items = await datasetItems(actor);
     expect(items.filter((i) => i._source === `${server.baseUrl}/fixtures/results.html?q=python`)).toHaveLength(12);
-    expect(items[0]).toMatchObject({ title: "python role 1", company: "Company 1" });
-    expect(items[6]).toMatchObject({ title: "python role 1", company: "Company 1" });
+    // Two sessions replay concurrently, so their rows interleave in whichever order
+    // the pages finish (CI saw role 2 first, 2026-09-24). What the trace owes is each
+    // session's full page: every role once per session, in-page pagination included.
+    const titles = items.map((i) => i.title).sort();
+    const perSession = Array.from({ length: 6 }, (_, n) => `python role ${n + 1}`);
+    expect(titles).toEqual([...perSession, ...perSession].sort());
+    expect(items.filter((i) => i.title === "python role 1").every((i) => i.company === "Company 1")).toBe(true);
   });
 
   it("direct entry after a goal: the list request opens the compiled entry URL (the navigated listing), not the start URL", async () => {
