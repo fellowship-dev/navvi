@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Actor } from "apify";
@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ConfigurationError, InvalidAnswerError, type Question } from "../src/chooser/chooser.js";
 import { CliChooser, extractJsonObject, probeCli, readCodexEvents, renderPrompt, resetProbeCache, type CliRunResult, type CliRunner } from "../src/chooser/cli.js";
 import { createChooser, resolveDefaultChooser } from "../src/chooser/index.js";
-import { ModelUnavailableError } from "../src/billing/budget.js";
+import { Budget, ModelUnavailableError } from "../src/billing/budget.js";
 import { defaultChooser } from "../src/input/schema.js";
 import { run } from "../src/main.js";
 import type { CrawlDeps } from "../src/replay/crawler.js";
@@ -428,4 +428,56 @@ describe.skipIf(!LIVE)("live: pharmacy demo through the real Claude Code (NAVVI_
     expect(usage.billing).toBe("subscription");
     expect(usage.costUsd).toBe(0);
   }, 300_000);
+});
+
+describe("Claude Code token accounting (U7)", () => {
+  it("counts the cached input Claude Code reports separately, not only the uncached remainder", async () => {
+    // The shape of a real `claude -p --output-format json` envelope (2026-09-23): the
+    // harness caches its own system prompt, so `input_tokens` alone was 10 of 18,439.
+    const envelope = JSON.stringify({
+      type: "result",
+      is_error: false,
+      result: JSON.stringify(GOOD_ANSWERS),
+      total_cost_usd: 0.0091,
+      usage: { input_tokens: 10, cache_creation_input_tokens: 3716, cache_read_input_tokens: 14713, output_tokens: 38 },
+    });
+    // A budget the harness's cached prompt alone would blow through.
+    const budget = new Budget({ chooserInputTokens: 5_000 });
+    const chooser = new CliChooser("claude", { runner: fakeRunner([{ stdout: envelope }]), env: {}, budget });
+    await chooser.ask(batch());
+    expect(chooser.usage().inputTokens).toBe(18_439);
+    expect(chooser.usage().outputTokens).toBe(38);
+    // The harness's own prompt rides on the subscription; the run's input budget is charged what navvi sent.
+    expect(() => budget.assertInputTokens(4_000)).not.toThrow();
+  });
+});
+
+describe("the Jev announcement (U7)", () => {
+  it("names the key, the benefit and who writes the text", async () => {
+    const noProbe = async () => {
+      throw new Error("must not probe");
+    };
+    const bin = mkdtempSync(join(tmpdir(), "navvi-bin-"));
+    writeFileSync(join(bin, "claude"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    try {
+      const withClaude = await resolveDefaultChooser({ TYPESAFE_API_KEY: "t", PATH: bin }, noProbe);
+      expect(withClaude.name).toBe("jev");
+      expect(withClaude.reason).toBe("TYPESAFE_API_KEY found — fast typed decisions; text questions go to claude");
+
+      const both = await resolveDefaultChooser({ AI_GATEWAY_API_KEY: "g", TYPESAFE_API_KEY: "t", PATH: bin }, noProbe);
+      expect(both.reason).toBe("AI_GATEWAY_API_KEY found — fast typed decisions, TypeSafe API as fallback; text questions go to claude");
+
+      const explicit = await resolveDefaultChooser({ TYPESAFE_API_KEY: "t", PATH: bin }, noProbe, { writer: "codex" });
+      expect(explicit.reason).toContain("text questions go to codex");
+
+      const noWriter = await resolveDefaultChooser({ TYPESAFE_API_KEY: "t", PATH: "" }, noProbe);
+      expect(noWriter.reason).toContain("no text writer");
+      expect(noWriter.reason).toContain("ANTHROPIC_API_KEY");
+
+      const gatewayOnly = await resolveDefaultChooser({ AI_GATEWAY_API_KEY: "g", PATH: "" }, noProbe);
+      expect(gatewayOnly.reason).toContain("text questions go to model");
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
 });

@@ -470,6 +470,7 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
           ...(usage.writer
             ? { writer: { name: usage.writer.chooser, textQuestions: usage.writer.textQuestions, inputTokens: usage.writer.inputTokens, waitMs: usage.writer.waitMs, costUsd: usage.writer.costUsd } }
             : {}),
+          ...(usage.transportFallback ? { transportFallback: { ...usage.transportFallback } } : {}),
         }
       : null,
     // R39: every secret value and proxy credential masked

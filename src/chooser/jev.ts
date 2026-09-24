@@ -15,9 +15,11 @@ import {
   type BackendResult,
   type BaseChooserOptions,
   type ChooserName,
+  type ChooserUsage,
   type JsonValue,
   type Price,
   type Question,
+  type TransportFallback,
   type ZeroDataRetentionState,
 } from "./chooser.js";
 import { jevFraming, NONE_OPTION } from "./questions.js";
@@ -59,6 +61,8 @@ export interface JevChooserOptions extends BaseChooserOptions {
   fetch?: typeof fetch;
   timeoutMs?: number;
   zeroDataRetention?: boolean;
+  /** U7: where the one-line transport-fallback notice goes. Defaults to `console.warn` (stderr). */
+  warn?: (message: string) => void;
 }
 
 export function missingCredentialsMessage(chooser: "jev" | "model"): string {
@@ -66,6 +70,17 @@ export function missingCredentialsMessage(chooser: "jev" | "model"): string {
     `chooser "${chooser}" has no credentials. Set AI_GATEWAY_API_KEY (Vercel AI Gateway), ` +
     `TYPESAFE_API_KEY (direct Jev) or ANTHROPIC_API_KEY (model chooser), pass the key in the run input, ` +
     `or use \`chooser: agent\`, which needs no key.`
+  );
+}
+
+/**
+ * U7: Jev decides but cannot write, and nothing else was found to write. The
+ * remedies are what a person at the command line can do next.
+ */
+export function noWriterMessage(questionId: string): string {
+  return (
+    `Jev answers typed decisions but cannot write the text question "${questionId}", and no text writer is available. ` +
+    `Sign in to \`claude\` or \`codex\`, set ANTHROPIC_API_KEY, or use \`--decider agent\` to answer the questions yourself.`
   );
 }
 
@@ -151,7 +166,7 @@ export function toEvaluationQuestion(q: Question): EvaluationQuestionMapping {
     case "score":
       return { question: { type: "score", instructions: q.premise, criteria: q.options ?? [] }, keys: [] };
     case "text":
-      throw new ConfigurationError(`jev cannot answer text question "${q.id}"; configure a text model or use chooser: agent`);
+      throw new ConfigurationError(noWriterMessage(q.id));
   }
 }
 
@@ -166,30 +181,67 @@ function optionKeys(options: string[]): string[] {
 
 export class JevChooser extends BaseChooser {
   readonly name: ChooserName = "jev";
-  readonly provider: JevProvider | "injected";
   protected readonly failureStatus = "model_unavailable" as const;
   protected readonly price: Price = { inputPerMillion: JEV_PRICE_PER_MILLION_INPUT_USD, outputPerMillion: 0 };
-  private readonly model: Experimental_EvaluationModel;
+  private model: Experimental_EvaluationModel;
+  private transport: JevProvider | "injected";
   private readonly timeoutMs: number;
   private readonly requestZeroDataRetention: boolean;
+  /** U7 / KTD6: the TypeSafe key to fall back to, when the Gateway was inferred rather than pinned. */
+  private readonly fallbackKey: string | undefined;
+  private readonly fetchImpl: typeof fetch | undefined;
+  private readonly warn: (message: string) => void;
+  private fellBack: TransportFallback | undefined;
+
+  /** The transport answering now: where the run started, or `typesafe` once it fell back (U7). */
+  get provider(): JevProvider | "injected" {
+    return this.transport;
+  }
 
   constructor(options: JevChooserOptions = {}) {
     super({ ...options, maxStateChars: options.maxStateChars ?? JEV_MAX_STATE_TOKENS * CHARS_PER_TOKEN });
     this.timeoutMs = options.timeoutMs ?? JEV_TIMEOUT_MS;
     this.requestZeroDataRetention = options.zeroDataRetention ?? true;
     this.zeroDataRetentionDefault = "unknown";
+    this.fetchImpl = options.fetch;
+    this.warn = options.warn ?? ((message) => console.warn(message));
     if (options.evaluationModel) {
-      this.provider = "injected";
+      this.transport = "injected";
       this.model = options.evaluationModel;
+      this.fallbackKey = undefined;
       return;
     }
-    const selection = selectProvider(options, options.env ?? process.env);
-    this.provider = selection.provider;
+    const env = options.env ?? process.env;
+    const selection = selectProvider(options, env);
+    this.transport = selection.provider;
+    // KTD6: only an inferred Gateway falls back. A pinned transport (`--decider-transport`) is what the caller asked for.
+    this.fallbackKey = selection.provider === "gateway" && options.provider === undefined ? env.TYPESAFE_API_KEY || undefined : undefined;
+    if (this.fallbackKey) this.secrets = [...this.secrets, this.fallbackKey];
     this.secrets = [...this.secrets, selection.apiKey];
     this.model =
       selection.provider === "gateway"
         ? createGateway({ apiKey: selection.apiKey, fetch: options.fetch }).evaluationModel(JEV_GATEWAY_MODEL_ID)
         : new TypeSafeEvaluationModel({ apiKey: selection.apiKey, fetch: options.fetch });
+  }
+
+  usage(): ChooserUsage {
+    const usage = super.usage();
+    if (this.fellBack) usage.transportFallback = { ...this.fellBack };
+    return usage;
+  }
+
+  /**
+   * U7 / KTD6: the Gateway exhausted its retries on a retryable failure and a
+   * TypeSafe key is present, so Jev is asked directly for the rest of the run.
+   * Said once on stderr and kept in the usage, so the summary shows it too.
+   */
+  protected fallBack(error: Error, attempts: number): boolean {
+    if (this.transport !== "gateway" || !this.fallbackKey) return false;
+    this.model = new TypeSafeEvaluationModel({ apiKey: this.fallbackKey, fetch: this.fetchImpl });
+    this.transport = "typesafe";
+    this.fellBack = { from: "gateway", to: "typesafe", reason: `AI Gateway failed after ${attempts} attempt(s): ${error.message}` };
+    this.warn(`chooser: jev fell back from the AI Gateway to the TypeSafe API (${this.fellBack.reason}); staying on TypeSafe for the rest of the run`);
+    return true;
   }
 
   protected async callBackend(batch: Question[]): Promise<BackendResult> {

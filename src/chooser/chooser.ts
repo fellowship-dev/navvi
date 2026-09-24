@@ -77,6 +77,19 @@ export interface ChooserUsage {
    * is what the decider itself spent.
    */
   writer?: WriterUsage;
+  /**
+   * U7 / KTD6: the decider's transport failed and the run moved to another for
+   * the rest of the run (Jev: AI Gateway to the TypeSafe API). Absent when the
+   * run stayed on the transport it started on.
+   */
+  transportFallback?: TransportFallback;
+}
+
+/** U7: which route the decider left, which it took, and the failure that made it switch (sanitized). */
+export interface TransportFallback {
+  from: string;
+  to: string;
+  reason: string;
 }
 
 /** U14: the part of a `ChooserUsage` a delegated writer is responsible for. */
@@ -314,6 +327,13 @@ export interface BackendResult {
   /** One raw answer per question; validated by the base class. */
   answers: unknown;
   inputTokens?: number;
+  /**
+   * U7: the input charged to the run's token budget, when it differs from the
+   * input the backend reports. A coding CLI reports its own cached system
+   * prompt too; that rides on the subscription, and the budget caps what navvi
+   * sends. Unset charges `inputTokens`.
+   */
+  budgetInputTokens?: number;
   outputTokens?: number;
   zeroDataRetention?: ZeroDataRetentionState;
 }
@@ -499,7 +519,7 @@ export abstract class BaseChooser implements Chooser {
 
   private account(result: BackendResult, estimate: number): void {
     const input = result.inputTokens ?? estimate;
-    this.budget.chargeInputTokens(input);
+    this.budget.chargeInputTokens(result.budgetInputTokens ?? input);
     this.counters.batches += 1;
     this.counters.inputTokens += input;
     this.counters.outputTokens += result.outputTokens ?? 0;
@@ -515,6 +535,11 @@ export abstract class BaseChooser implements Chooser {
         if (err instanceof NavviError) throw err;
         const clean = sanitizeError(err, this.secrets);
         if (attempt >= this.maxAttempts || !isRetryableError(err)) {
+          // U7 / KTD6: retries on one route are spent; a backend with a second route takes it once and starts counting again.
+          if (isRetryableError(err) && this.fallBack(clean, attempt)) {
+            attempt = 0;
+            continue;
+          }
           throw new ModelUnavailableError(`${this.name} chooser failed after ${attempt} attempt(s): ${clean.message}`, { cause: clean, attempts: attempt });
         }
         await sleep(this.backoffMs[Math.min(attempt - 1, this.backoffMs.length - 1)] ?? 0);
@@ -522,6 +547,16 @@ export abstract class BaseChooser implements Chooser {
         this.counters.waitMs += performance.now() - started;
       }
     }
+  }
+
+  /**
+   * U7 / KTD6: called once retries on the current transport are exhausted by a
+   * retryable failure. A backend that can reach the same model another way
+   * switches and returns true, and the batch is retried there from the first
+   * attempt; the default has no other way and returns false.
+   */
+  protected fallBack(_error: Error, _attempts: number): boolean {
+    return false;
   }
 
   protected fail(message: string, cause: Error): NavviError {

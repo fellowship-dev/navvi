@@ -38,6 +38,8 @@ export interface RunSummary {
     costUsd: number;
     textQuestions?: number;
     writer?: { name: string; textQuestions: number; inputTokens: number; waitMs: number; costUsd: number };
+    /** U7 / KTD6: the decider's transport failed and the run finished over another. */
+    transportFallback?: { from: string; to: string; reason: string };
   } | null;
   input: RunInput | null;
   /** Requests the crawler ran, by handler. */

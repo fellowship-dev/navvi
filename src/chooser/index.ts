@@ -10,7 +10,7 @@ export * from "./chooser.js";
 export * from "./questions.js";
 export { AgentChooser, ANSWER_WITH, loadAnswersFile, mergeAnswers, questionKey, readQuestionsFile, QUESTIONS_START, QUESTIONS_END, PROTOCOL, type AgentChooserOptions, type AgentMode, type QuestionBatchFile, type StoredAnswer } from "./agent.js";
 export { CliChooser, CliUnavailableError, CLI_TIMEOUT_MS, DEFAULT_CLAUDE_MODEL, HARNESS_LABEL, SIGN_IN_COMMAND, extractJsonObject, findOnPath, probeCli, processRunner, readClaudeEnvelope, readCodexEvents, renderPrompt, resetProbeCache, type CliChooserOptions, type CliHarness, type CliProbe, type CliRunner, type CliRunResult } from "./cli.js";
-export { JevChooser, TypeSafeEvaluationModel, JEV_PRICE_PER_MILLION_INPUT_USD, JEV_MAX_STATE_TOKENS, JEV_GATEWAY_MODEL_ID, missingCredentialsMessage, type JevChooserOptions, type JevProvider } from "./jev.js";
+export { JevChooser, TypeSafeEvaluationModel, JEV_PRICE_PER_MILLION_INPUT_USD, JEV_MAX_STATE_TOKENS, JEV_GATEWAY_MODEL_ID, missingCredentialsMessage, noWriterMessage, type JevChooserOptions, type JevProvider } from "./jev.js";
 export { ModelChooser, MODEL_PRICES, DEFAULT_MODEL_ID, DEFAULT_MODEL_STATE_CHARS, priceFor, type ModelChooserOptions } from "./model.js";
 export { RecordedChooser, RecordingChooser, DEFAULT_RECORDED_DIR, type RecordedChooserOptions, type RecordingChooserOptions, type RecordedAnswerFile } from "./recorded.js";
 export { Budget, BudgetExhaustedError, ModelUnavailableError, NeedsHumanError, NavviError } from "../billing/budget.js";
@@ -126,6 +126,16 @@ interface TextFallbackCandidate {
  */
 
 /**
+ * U7: who `textFallbackFor` would ask first, without building anything — for
+ * the announcement. Same order, same PATH check; undefined when nobody can write.
+ */
+export function derivedWriter(env: NodeJS.ProcessEnv = process.env): Writer | undefined {
+  for (const harness of HARNESS_ORDER) if (findOnPath(harness, env)) return harness;
+  if (env.ANTHROPIC_API_KEY || env.AI_GATEWAY_API_KEY) return "model";
+  return undefined;
+}
+
+/**
  * Who writes the text Jev cannot (R23 / KTD11), when no `writer` was
  * configured — the derived writer. Subscription before metering:
  * an installed Claude Code or Codex answers on the user's plan at no cost,
@@ -228,16 +238,36 @@ export interface ResolvedChooser {
 const HARNESS_ORDER: CliHarness[] = ["claude", "codex"];
 
 /**
+ * U7: why Jev, what it is good for, and who takes the text it cannot write —
+ * the whole arrangement in one line, so nothing about who answers is hidden.
+ */
+function jevReason(env: NodeJS.ProcessEnv, writer: Writer | undefined): string {
+  const key = env.AI_GATEWAY_API_KEY ? "AI_GATEWAY_API_KEY" : "TYPESAFE_API_KEY";
+  const fallback = env.AI_GATEWAY_API_KEY && env.TYPESAFE_API_KEY ? ", TypeSafe API as fallback" : "";
+  const text = writer ?? derivedWriter(env);
+  const writes = text
+    ? `text questions go to ${text === "model" ? `model (${env.ANTHROPIC_API_KEY ? "ANTHROPIC_API_KEY" : "AI_GATEWAY_API_KEY"}, metered)` : text}`
+    : "no text writer: sign in to `claude` or `codex`, or set ANTHROPIC_API_KEY, if a text question comes up";
+  return `${key} found — fast typed decisions${fallback}; ${writes}`;
+}
+
+/**
  * The default chooser with its reason. Keys decide without probing; without
  * a key each CLI is probed in order (Claude Code first) and the first one
  * signed in wins. An installed but signed-out CLI never wins; its sign-in
  * command is part of the reason when the run falls through to the agent.
+ * `writer` is an explicit `--writer`, named in Jev's reason instead of the
+ * derived one.
  */
-export async function resolveDefaultChooser(env: NodeJS.ProcessEnv = process.env, probe: (harness: CliHarness) => Promise<CliProbe> = (h) => probeCli(h, { env })): Promise<ResolvedChooser> {
+export async function resolveDefaultChooser(
+  env: NodeJS.ProcessEnv = process.env,
+  probe: (harness: CliHarness) => Promise<CliProbe> = (h) => probeCli(h, { env }),
+  options: { writer?: Writer } = {},
+): Promise<ResolvedChooser> {
   if (hasChooserKey(env)) {
     const name = defaultChooser(env);
-    const key = env.AI_GATEWAY_API_KEY ? "AI_GATEWAY_API_KEY" : env.TYPESAFE_API_KEY ? "TYPESAFE_API_KEY" : "ANTHROPIC_API_KEY";
-    return { name, reason: `${key} is set`, probes: {} };
+    if (name === "jev") return { name, reason: jevReason(env, options.writer), probes: {} };
+    return { name, reason: "ANTHROPIC_API_KEY is set", probes: {} };
   }
   const probes: Partial<Record<CliHarness, CliProbe>> = {};
   const available: AvailableClis = {};

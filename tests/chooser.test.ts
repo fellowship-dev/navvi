@@ -1012,11 +1012,13 @@ describe("decider and writer (U14)", () => {
     const chooser = createChooser({
       decider: "jev",
       env: { AI_GATEWAY_API_KEY: "g", TYPESAFE_API_KEY: "t", PATH: fakeBin([]) },
-      jev: { fetch: recordingFetch(urls), maxAttempts: 1 },
+      jev: { fetch: recordingFetch(urls), maxAttempts: 1, warn: () => undefined },
     });
     await expect(chooser.ask([batch()[0]!])).rejects.toBeInstanceOf(ModelUnavailableError);
-    expect(urls).toHaveLength(1);
+    // The Gateway is asked first; a network failure there is retryable, so U7 then tries the TypeSafe key.
+    expect(urls).toHaveLength(2);
     expect(urls[0]).toContain("ai-gateway.vercel.sh");
+    expect(urls[1]).toContain("api.typesafe.ai");
   });
 
   it("a forced transport with no key for it is refused rather than quietly routed the other way", () => {
@@ -1032,5 +1034,101 @@ describe("decider and writer (U14)", () => {
     expect(resolveSources({}, { ANTHROPIC_API_KEY: "a" })).toEqual({ decider: "model" });
     expect(resolveSources({}, {}, { claude: true })).toEqual({ decider: "claude" });
     expect(resolveSources({}, {})).toEqual({ decider: "agent" });
+  });
+});
+
+// ---------------------------------------------------------------- U7: fallback and attribution
+
+/**
+ * U7 / KTD6: the Gateway is one route to Jev, not the only one. When it keeps
+ * failing with a retryable error and a TypeSafe key is also present, the run
+ * finishes over the TypeSafe API and says so; a pinned transport never moves.
+ */
+describe("Gateway to TypeSafe fallback (U7)", () => {
+  const TYPESAFE_ANSWERS = {
+    model: "jev-1.13.0",
+    answers: {
+      group: { type: "choice", choice: "option_1", probabilities: { option_0: 0.05, option_1: 0.9, option_2: 0.05, none: 0 } },
+      visible: { type: "noul", noul: 0.93 },
+      quality: { type: "score", score: 1.75, probabilities: { "0": 0.05, "1": 0.15, "2": 0.8 } },
+    },
+    usage: { input_tokens: 439, output_tokens: 0 },
+  };
+
+  /** The Gateway answers 503 every time; the TypeSafe API answers the batch. */
+  function gatewayDown(urls: string[]): typeof fetch {
+    return (async (input: unknown) => {
+      const url = typeof input === "string" ? input : String((input as { url?: string }).url ?? input);
+      urls.push(url);
+      if (url.includes("api.typesafe.ai")) return Response.json(TYPESAFE_ANSWERS);
+      return new Response(JSON.stringify({ error: { message: "Service temporarily unavailable", type: "service_unavailable" } }), { status: 503, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+  }
+
+  it("Gateway 503 three times with a TypeSafe key: the run finishes over TypeSafe, says so once, and stays there", async () => {
+    const urls: string[] = [];
+    const warnings: string[] = [];
+    const chooser = new JevChooser({ env: { AI_GATEWAY_API_KEY: "g-secret", TYPESAFE_API_KEY: "t-secret" }, fetch: gatewayDown(urls), backoffMs: [0, 0], warn: (m) => warnings.push(m) });
+    expect(chooser.provider).toBe("gateway");
+    const answers = await chooser.ask(batch());
+    expect(answers.map((a) => a.index)).toEqual([1, 1, 2]);
+    expect(urls.filter((u) => u.includes("ai-gateway"))).toHaveLength(3);
+    expect(urls.filter((u) => u.includes("api.typesafe.ai"))).toHaveLength(1);
+    expect(chooser.provider).toBe("typesafe");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/fell back from the AI Gateway to the TypeSafe API/);
+    expect(warnings.join("")).not.toContain("secret");
+    expect(chooser.usage().transportFallback).toMatchObject({ from: "gateway", to: "typesafe" });
+
+    // The rest of the run stays on TypeSafe: no second trip through a Gateway known to be down.
+    await chooser.ask(batch());
+    expect(urls.filter((u) => u.includes("ai-gateway"))).toHaveLength(3);
+    expect(warnings).toHaveLength(1);
+  });
+
+  it("Gateway 503 without a TypeSafe key is model_unavailable, as before", async () => {
+    const urls: string[] = [];
+    const err = await new JevChooser({ env: { AI_GATEWAY_API_KEY: "g" }, fetch: gatewayDown(urls), backoffMs: [0, 0] }).ask(batch()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ModelUnavailableError);
+    expect(urls).toHaveLength(3);
+    expect(urls.every((u) => u.includes("ai-gateway"))).toBe(true);
+  });
+
+  it("a pinned --decider-transport gateway never falls back", async () => {
+    const urls: string[] = [];
+    const chooser = createChooser({
+      decider: "jev",
+      deciderTransport: "gateway",
+      env: { AI_GATEWAY_API_KEY: "g", TYPESAFE_API_KEY: "t", PATH: fakeBin([]) },
+      jev: { fetch: gatewayDown(urls), backoffMs: [0, 0] },
+    });
+    await expect(chooser.ask(batch())).rejects.toBeInstanceOf(ModelUnavailableError);
+    expect(urls).toHaveLength(3);
+    expect(urls.every((u) => u.includes("ai-gateway"))).toBe(true);
+    expect(chooser.usage().transportFallback).toBeUndefined();
+  });
+
+  it("a non-retryable Gateway error is the answer, not a reason to switch", async () => {
+    const urls: string[] = [];
+    const unauthorized = (async (input: unknown) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({ error: { message: "Invalid API key", type: "authentication_error" } }), { status: 401, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+    const chooser = new JevChooser({ env: { AI_GATEWAY_API_KEY: "g", TYPESAFE_API_KEY: "t" }, fetch: unauthorized, backoffMs: [0, 0] });
+    await expect(chooser.ask(batch())).rejects.toBeInstanceOf(ModelUnavailableError);
+    expect(urls.every((u) => u.includes("ai-gateway"))).toBe(true);
+  });
+});
+
+describe("a text question Jev cannot write (U7)", () => {
+  it("names the remedies in command-line terms", async () => {
+    const chooser = createChooser({ decider: "jev", env: { TYPESAFE_API_KEY: "t", PATH: fakeBin([]) } });
+    const err = await chooser.ask([textQuestion()]).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConfigurationError);
+    const message = (err as Error).message;
+    expect(message).toContain("`claude`");
+    expect(message).toContain("`codex`");
+    expect(message).toContain("ANTHROPIC_API_KEY");
+    expect(message).toContain("--decider agent");
   });
 });

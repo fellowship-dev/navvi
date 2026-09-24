@@ -570,3 +570,91 @@ describe("persisted plain-English CLI replay", () => {
     expectTwelveProducts(JSON.parse(second.stdout.text));
   }, 60_000);
 });
+
+// ---------------------------------------------------------------- U7: who answered, and Jev in plain sight
+
+describe("attribution and the Jev announcement (U7)", () => {
+  const FLAGS = ["--mode", "record", "--fields", "name,price", "https://example.org/a"];
+  const withChooser = (chooser: NonNullable<RunSummary["chooser"]>): RunFn => async () => summary({ items: 1, chooser });
+
+  it("Jev deciding with Claude writing: one line per role, each with its own share", async () => {
+    const io = makeIo({
+      run: withChooser({ name: "jev", questions: 4, textQuestions: 1, inputTokens: 18_900, waitMs: 4_000, costUsd: 0.0001, writer: { name: "claude", textQuestions: 1, inputTokens: 18_439, waitMs: 3_100, costUsd: 0 } }),
+    });
+    expect(await main(["--chooser", "agent", "--storage", storageFor("attr-jev"), ...FLAGS], io)).toBe(0);
+    expect(io.stderr.text).toContain("  decider jev: 3 decisions, 461 input tokens, 900ms waiting, $0.0001\n");
+    expect(io.stderr.text).toContain("  writer claude: 1 text question, 18439 input tokens, 3.1s waiting, $0.0000\n");
+  });
+
+  it("a decider writing its own text: one line with both counts", async () => {
+    const io = makeIo({ run: withChooser({ name: "claude", questions: 4, textQuestions: 1, inputTokens: 36_000, waitMs: 6_000, costUsd: 0 }) });
+    expect(await main(["--chooser", "agent", "--storage", storageFor("attr-claude"), ...FLAGS], io)).toBe(0);
+    expect(io.stderr.text).toContain("  decider and writer claude: 3 decisions, 1 text question, 36000 input tokens, 6.0s waiting, $0.0000\n");
+    expect(io.stderr.text).not.toContain("  writer ");
+  });
+
+  it("a decider with no text to write prints the decider line alone", async () => {
+    const io = makeIo({ run: withChooser({ name: "jev", questions: 3, textQuestions: 0, inputTokens: 400, waitMs: 500, costUsd: 0.00002 }) });
+    expect(await main(["--chooser", "agent", "--storage", storageFor("attr-plain"), ...FLAGS], io)).toBe(0);
+    expect(io.stderr.text).toContain("  decider jev: 3 decisions, 400 input tokens, 500ms waiting, $0.0000\n");
+    expect(io.stderr.text).not.toContain("writer");
+  });
+
+  it("the summary says when the decider fell back to another transport", async () => {
+    const io = makeIo({
+      run: withChooser({ name: "jev", questions: 3, textQuestions: 0, inputTokens: 400, waitMs: 500, costUsd: 0, transportFallback: { from: "gateway", to: "typesafe", reason: "AI Gateway failed after 3 attempt(s): Service temporarily unavailable" } }),
+    });
+    expect(await main(["--chooser", "agent", "--storage", storageFor("attr-fallback"), ...FLAGS], io)).toBe(0);
+    expect(io.stderr.text).toContain("  decider transport: fell back from gateway to typesafe (AI Gateway failed after 3 attempt(s): Service temporarily unavailable)\n");
+  });
+
+  it("an auto-selected Jev is announced with its benefit and its writer", async () => {
+    const io = makeIo({ run: async () => summary({ items: 1 }), env: { TYPESAFE_API_KEY: "t", PATH: "" } });
+    expect(await main(["--storage", storageFor("announce"), ...FLAGS], io)).toBe(0);
+    expect(io.stderr.text).toContain("chooser: jev (TYPESAFE_API_KEY found — fast typed decisions; no text writer");
+    expect(io.stderr.text).not.toContain("tip:");
+  });
+
+  it("without a Jev key, a person at a terminal gets one tip line; CI and --quiet do not", async () => {
+    const tty = makeIo({ run: async () => summary({ items: 1 }), env: { PATH: "" } });
+    Object.assign(tty.stderr, { isTTY: true });
+    expect(await main(["--storage", storageFor("tip-tty"), ...FLAGS], tty)).toBe(0);
+    const tips = tty.stderr.text.split("\n").filter((l) => l.startsWith("tip:"));
+    expect(tips).toHaveLength(1);
+    expect(tips[0]).toContain("TYPESAFE_API_KEY");
+    expect(tips[0]).toContain("https://typesafe.ai");
+
+    const ci = makeIo({ run: async () => summary({ items: 1 }), env: { PATH: "" } });
+    expect(await main(["--storage", storageFor("tip-ci"), ...FLAGS], ci)).toBe(0);
+    expect(ci.stderr.text).not.toContain("tip:");
+
+    const quiet = makeIo({ run: async () => summary({ items: 1 }), env: { PATH: "" } });
+    Object.assign(quiet.stderr, { isTTY: true });
+    expect(await main(["--storage", storageFor("tip-quiet"), "--quiet", ...FLAGS], quiet)).toBe(0);
+    expect(quiet.stderr.text).toBe("");
+  });
+
+  it("the Gateway fallback notice reaches the CLI's stderr", async () => {
+    const io = makeIo({
+      env: { AI_GATEWAY_API_KEY: "g", TYPESAFE_API_KEY: "t", PATH: "" },
+      run: async (_raw, deps) => {
+        // The chooser the CLI built is the one that falls back; ask it one question over a Gateway that is down.
+        await deps!.chooser!.ask([{ id: "pick", kind: "choice", premise: "Which?", options: ["a", "b"], state: "<p>a</p>" }]).catch(() => undefined);
+        return summary({ items: 1 });
+      },
+    });
+    const gatewayDown = (async (input: unknown) => {
+      const url = String((input as { url?: string }).url ?? input);
+      if (url.includes("api.typesafe.ai")) return Response.json({ answers: { pick: { type: "choice", choice: "option_0", probabilities: { option_0: 0.9, option_1: 0.05, none: 0.05 } } }, usage: { input_tokens: 12 } });
+      return new Response(JSON.stringify({ error: { message: "Service temporarily unavailable", type: "service_unavailable" } }), { status: 503, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+    const original = globalThis.fetch;
+    globalThis.fetch = gatewayDown;
+    try {
+      expect(await main(["--storage", storageFor("fallback-cli"), ...FLAGS], io)).toBe(0);
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(io.stderr.text).toContain("chooser: jev fell back from the AI Gateway to the TypeSafe API");
+  }, 30_000);
+});

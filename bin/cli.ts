@@ -255,14 +255,34 @@ function fmtMs(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
 }
 
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * U7: one line per role, each with its own share, so every question is
+ * attributed to whoever answered it. The run's totals are the decider's own
+ * work plus the writer's; the decider line is the difference. A decider that
+ * wrote its own text gets one line with both counts.
+ */
+function chooserLines(c: NonNullable<RunSummary["chooser"]>): string[] {
+  const w = c.writer;
+  const decisions = c.questions - (c.textQuestions ?? 0);
+  const ownText = (c.textQuestions ?? 0) - (w?.textQuestions ?? 0);
+  const cost = (tokens: number, waitMs: number, usd: number): string => `${tokens} input tokens, ${fmtMs(waitMs)} waiting, $${usd.toFixed(4)}`;
+  const own = cost(c.inputTokens - (w?.inputTokens ?? 0), c.waitMs - (w?.waitMs ?? 0), c.costUsd - (w?.costUsd ?? 0));
+  const lines = ownText > 0
+    ? [`  decider and writer ${c.name}: ${plural(decisions, "decision", "decisions")}, ${plural(ownText, "text question", "text questions")}, ${own}`]
+    : [`  decider ${c.name}: ${plural(decisions, "decision", "decisions")}, ${own}`];
+  if (w) lines.push(`  writer ${w.name}: ${plural(w.textQuestions, "text question", "text questions")}, ${cost(w.inputTokens, w.waitMs, w.costUsd)}`);
+  const f = c.transportFallback;
+  if (f) lines.push(`  decider transport: fell back from ${f.from} to ${f.to} (${f.reason})`);
+  return lines;
+}
+
 function summaryBlock(summary: RunSummary, dataLine: string): string {
   const lines = [`navvi: status ${summary.status}${summary.message ? ` — ${summary.message}` : ""}`];
   lines.push(`  items ${summary.items}  pages ${summary.pages}  templates ${summary.templates}  cache hit ${summary.cacheHit ? "yes" : "no"}`);
-  const c = summary.chooser;
-  lines.push(c ? `  chooser ${c.name}: ${c.questions} questions, ${c.inputTokens} input tokens, ${fmtMs(c.waitMs)} waiting, $${c.costUsd.toFixed(4)}` : "  chooser: none (no model call)");
-  // U14: the totals above are the run's; name the second source and its share when one answered the text.
-  const w = c?.writer;
-  if (w) lines.push(`  writer ${w.name}: ${w.textQuestions} text questions, ${w.inputTokens} input tokens, ${fmtMs(w.waitMs)} waiting, $${w.costUsd.toFixed(4)} (included above)`);
+  if (summary.chooser) lines.push(...chooserLines(summary.chooser));
+  else lines.push("  chooser: none (no model call)");
   lines.push(`  healing events ${summary.healingEvents.length}  unmapped candidates ${summary.unmappedCandidates.length}  unhealed ${summary.unhealed}`);
   if (summary.fieldsNotFound.length > 0) lines.push(`  fields not found: ${summary.fieldsNotFound.join(", ")}`);
   if (dataLine) lines.push(`  ${dataLine}`);
@@ -377,6 +397,8 @@ function chooserFor(sources: SourceSelection, args: CliArgs, io: CliIo, storageD
   return createChooser({
     ...sources,
     env: io.env,
+    // U7: a Gateway-to-TypeSafe switch is said on this run's stderr, not the process's.
+    jev: { warn: (message) => { if (!args.quiet) io.stderr.write(`${message}\n`); } },
     agent: {
       stdin: io.stdin,
       stdout: io.stdout,
@@ -387,10 +409,23 @@ function chooserFor(sources: SourceSelection, args: CliArgs, io: CliIo, storageD
   });
 }
 
-/** Without --chooser: a key, else the first signed-in CLI (Claude Code, then Codex), else the agent; the choice and its reason go to stderr. */
-async function announceChooser(io: CliIo, quiet: boolean): Promise<ChooserId> {
-  const resolved = await resolveDefaultChooser(io.env);
-  if (!quiet) io.stderr.write(`chooser: ${resolved.name} (${resolved.reason})\n`);
+/**
+ * U7: said once, to a person at a terminal who has no Jev key: what Jev would
+ * do for this run and where the key comes from. Never on a pipe (CI, an agent
+ * reading stderr), never under --quiet.
+ */
+export const JEV_TIP = "tip: with TYPESAFE_API_KEY set, Jev makes these decisions — fast, typed, unattended, a fraction of a cent per run. Get a key at https://typesafe.ai";
+
+/**
+ * Without --chooser: a key, else the first signed-in CLI (Claude Code, then Codex), else the agent; the choice and its reason go to stderr.
+ * U7: an auto-selected Jev names its key, its benefit and who writes the text; without a Jev key a terminal gets the tip.
+ */
+async function announceChooser(io: CliIo, args: CliArgs): Promise<ChooserId> {
+  const resolved = await resolveDefaultChooser(io.env, undefined, args.writer ? { writer: args.writer } : {});
+  if (args.quiet) return resolved.name;
+  io.stderr.write(`chooser: ${resolved.name} (${resolved.reason})\n`);
+  const tty = (io.stderr as NodeJS.WritableStream & { isTTY?: boolean }).isTTY === true;
+  if (resolved.name !== "jev" && !io.env.AI_GATEWAY_API_KEY && !io.env.TYPESAFE_API_KEY && tty) io.stderr.write(`${JEV_TIP}\n`);
   return resolved.name;
 }
 
@@ -402,7 +437,7 @@ async function announceChooser(io: CliIo, quiet: boolean): Promise<ChooserId> {
  * prints exactly the same line.
  */
 async function resolveCliSources(args: CliArgs, io: CliIo): Promise<SourceSelection> {
-  const decider = args.decider ?? args.chooser ?? (await announceChooser(io, args.quiet));
+  const decider = args.decider ?? args.chooser ?? (await announceChooser(io, args));
   const sources: SourceSelection = { decider };
   if (args.writer) {
     sources.writer = args.writer;

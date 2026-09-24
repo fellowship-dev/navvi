@@ -245,16 +245,24 @@ interface ClaudeOutcome {
   outputTokens: number | undefined;
 }
 
-/** `claude -p --output-format json`: `{ result, total_cost_usd, usage }`. A plain stdout is the fallback text. */
+/**
+ * `claude -p --output-format json`: `{ result, total_cost_usd, usage }`. A plain stdout is the fallback text.
+ *
+ * U7: `usage.input_tokens` is only the uncached remainder. Claude Code caches
+ * its own system prompt, so a real batch reported 10 input tokens next to
+ * 18,429 in `cache_creation_input_tokens` and `cache_read_input_tokens`; the
+ * input the model read is the sum of the three.
+ */
 export function readClaudeEnvelope(stdout: string): ClaudeOutcome {
   const envelope = extractJsonObject(stdout);
   if (envelope && typeof envelope.result === "string") {
     const usage = isRecord(envelope.usage) ? envelope.usage : {};
+    const inputs = [usage.input_tokens, usage.cache_creation_input_tokens, usage.cache_read_input_tokens].filter((n): n is number => typeof n === "number");
     return {
       text: envelope.result,
       isError: envelope.is_error === true,
       costUsd: typeof envelope.total_cost_usd === "number" ? envelope.total_cost_usd : undefined,
-      inputTokens: typeof usage.input_tokens === "number" ? usage.input_tokens : undefined,
+      inputTokens: inputs.length > 0 ? inputs.reduce((a, b) => a + b, 0) : undefined,
       outputTokens: typeof usage.output_tokens === "number" ? usage.output_tokens : undefined,
     };
   }
@@ -323,7 +331,8 @@ export class CliChooser extends BaseChooser {
     const parsed = outcome.text === undefined ? undefined : extractJsonObject(outcome.text);
     // No JSON, or JSON without answers: the base class re-asks once and then fails typed.
     const answers = coerceAnswers(batch, parsed && Array.isArray(parsed.answers) ? parsed.answers : []);
-    return { answers, inputTokens: outcome.inputTokens ?? estimate, outputTokens: outcome.outputTokens ?? estimateTokens(outcome.text ?? ""), zeroDataRetention: "not_applicable" };
+    // The budget caps what navvi sends; the harness's own cached prompt is on the subscription (U7).
+    return { answers, inputTokens: outcome.inputTokens ?? estimate, budgetInputTokens: estimate, outputTokens: outcome.outputTokens ?? estimateTokens(outcome.text ?? ""), zeroDataRetention: "not_applicable" };
   }
 
   private runClaude(prompt: string): Promise<CliRunResult> {
