@@ -106,6 +106,12 @@ npm run build
 node dist/bin/cli.js --help
 ```
 
+From source there is no `navvi` on your PATH: either run `npm link` once, or
+read every `navvi ...` below as `node dist/bin/cli.js ...`. This install also
+skips the Camoufox download, so pass `--browser chromium` — which every example
+below does — or drop `NAVVI_SKIP_BROWSER_DOWNLOAD=1` and run
+`npx camoufox-js fetch`.
+
 Node 22+. Select a chooser below; an installed, signed-in Claude Code or Codex CLI
 can answer on your subscription. Jev needs a TypeSafe or AI Gateway key plus a
 text-capable fallback. A Gateway account must have access to the configured text
@@ -201,11 +207,16 @@ first stage. Answer and continue with `--answer`:
 
 ```bash
 navvi make --work work/remoteok \
+  https://remoteok.com/ --browser chromium \
   --answer fields=title,company,location,link \
   --answer inputs=url_list
 ```
 
-`--work` is the one required flag and the one new idea: a directory, not a
+The URL is repeated on purpose: **URLs are positional and are not stored in the
+work directory**, so a resume that omits them has nothing to sample and stops
+at `sample`. Everything else on that first line is optional the second time.
+
+`--work` is the one required *flag* and the one new idea: a directory, not a
 file. Re-run the same command against it and only stages whose inputs moved
 run again — the rest print `reused` and point at the artifact already on
 disk. Everything else `make` needs is either on the command line the way

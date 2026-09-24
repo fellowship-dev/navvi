@@ -120,8 +120,17 @@ async function payloadServer(): Promise<PayloadServer> {
         return;
       }
       record(200);
-      res.writeHead(200, { ...headers, "Content-Type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ productData: { name: product.name, prices: { "price-list-std": product.list, "price-sale-std": product.sale } } }));
+      // `?slow=<ms>`: answer late, the way a real product endpoint does when the
+      // page is one of forty things a loaded machine is rendering. The document
+      // has already loaded by then, so a driver that extracts on load sees
+      // nothing and a driver that waits for the payload sees everything.
+      const slow = Number(url.searchParams.get("slow") ?? 0);
+      const answer = (): void => {
+        res.writeHead(200, { ...headers, "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ productData: { name: product.name, prices: { "price-list-std": product.list, "price-sale-std": product.sale } } }));
+      };
+      if (slow > 0) setTimeout(answer, slow);
+      else answer();
       return;
     }
 
@@ -131,6 +140,8 @@ async function payloadServer(): Promise<PayloadServer> {
       // waiting for the browser's cache to ask one for it. See the crawler
       // suite at the foot of this file for why that distinction is the test.
       const conditional = url.searchParams.get("revalidate") === "1" ? `, { headers: { "If-None-Match": '"${sku}-v1"' } }` : "";
+      const slow = url.searchParams.get("slow");
+      const slowQuery = slow === null ? "" : `?slow=${encodeURIComponent(slow)}`;
       // The document itself is never cached, so a repeated visit is always a
       // real navigation and the only thing the browser can reuse is the
       // payload — which is the whole subject here.
@@ -142,7 +153,7 @@ async function payloadServer(): Promise<PayloadServer> {
     <h1 id="name">Cargando…</h1>
     <p>Los precios de esta ficha viven únicamente en la respuesta que la página pide para sí misma.</p>
     <script>
-      fetch("/payload-${sku}.json"${conditional})
+      fetch("/payload-${sku}.json${slowQuery}"${conditional})
         .then((response) => response.json())
         .then((payload) => { document.getElementById("name").textContent = payload.productData.name; })
         .catch(() => { document.getElementById("name").textContent = "Ficha sin respuesta"; });
@@ -420,6 +431,79 @@ describe("the crawler's second visit to a payload endpoint", () => {
     expect(items).toHaveLength(2);
     expect(items.map((item) => item.productName)).toEqual([product.name, product.name]);
     expect(items.map((item) => item.listPrice)).toEqual([String(product.list), String(product.list)]);
+    expect(summary.status).toBe("succeeded");
+  }, 60_000);
+
+  it("waits for the payload its scraper reads instead of extracting against an empty capture", async () => {
+    // `Capture.settled()` drains body reads that have *started*; it is not a
+    // wait for a response to arrive. So a page whose `fetch` had not yet
+    // returned when the crawler reached it was extracted against an empty
+    // capture and every `network`-source field came back null — on a page that
+    // was served perfectly, with the payload arriving moments later. That is
+    // the 25 s settle cap's defect one driver over, and it reads the same way:
+    // a field that was there and was not waited for is indistinguishable from a
+    // field the site stopped serving.
+    //
+    // A compiled scraper already names the payloads it reads, so the wait is
+    // for those rather than for quiet in general. `?slow=2000` is what a loaded
+    // machine does to a real product endpoint.
+    const sku = "900301";
+    const product = PRODUCTS[sku]!;
+    const urls = [`${server.baseUrl}/product.html?sku=${sku}&slow=2000`];
+    const templateKey = [...groupByTemplate(urls).keys()][0]!;
+
+    const actor = new Actor({ storageClient: new MemoryStorage({ localDataDirectory: mkdtempSync(join(dir, "storage-slow-")), persistStorage: false }) });
+    const store = await ScraperStore.open({ actor });
+    const alternative = (path: string, shape: "text" | "int", sample: string) => ({
+      selector: `payload-${sku}.json`,
+      source: "network" as const,
+      path,
+      match: "payload-",
+      fingerprint: { samples: [sample], shape },
+    });
+    await store.put(
+      validateScraper({
+        version: 1,
+        templateKey,
+        cacheKey: cacheKey(templateKey, { fields: FIELDS, profile: "store" }),
+        profile: "store",
+        chooser: "agent",
+        mode: "record",
+        entry: { mode: "direct", url: urls[0]! },
+        trace: [],
+        pagination: { mode: "none" },
+        detail: null,
+        createdAt: NOW.toISOString(),
+        fields: {
+          productName: { alternatives: [alternative("productData.name", "text", product.name)] },
+          listPrice: { alternatives: [alternative("productData.prices[price-list-std]", "int", String(product.list))] },
+        },
+      }),
+    );
+
+    const summary = await runCrawl(
+      parseInput({ browser: "chromium", allowPrivateHosts: ["127.0.0.1"], mode: "record", profile: "store", fields: FIELDS.map((name) => ({ name })), startUrls: urls }),
+      {
+        actor,
+        chooser: new RecordedChooser({ fixture: "crawler/empty" }),
+        env: {},
+        storageDir: mkdtempSync(join(dir, "st-slow-")),
+        attended: false,
+        maxConcurrency: 1,
+        // The subject is the wait, not the repair: `crawler/empty` refuses every
+        // question, so an unwaited null would ask one and stop the run rather
+        // than produce the null this test is about.
+        healer: async () => ({ healed: false, reason: "this test is about waiting, not repair" }),
+        log: () => undefined,
+      },
+    );
+
+    // Without the wait these are both null: the document has loaded, the
+    // capture is empty, and `extractPage` has nothing to read.
+    const items = (await (await actor.openDataset()).getData()).items as Array<Record<string, unknown>>;
+    expect(items).toHaveLength(1);
+    expect(items[0]?.productName).toBe(product.name);
+    expect(items[0]?.listPrice).toBe(String(product.list));
     expect(summary.status).toBe("succeeded");
   }, 60_000);
 });
