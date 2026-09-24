@@ -1,5 +1,5 @@
 import http from "node:http";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, type BrowserContext, type Page } from "playwright";
@@ -12,7 +12,7 @@ import { loadListSources, makeRequestGuard, proxyOptionsFor, resolveProxy, runCr
 import { ScraperStore } from "../src/scraper/store.js";
 import { SCRAPER_VERSION, cacheKey, type CompiledScraper, type TraceStep } from "../src/scraper/schema.js";
 import { groupByTemplate } from "../src/template/index.js";
-import { F, RoutingChooser, datasetItems, fixtureInput, makeActor, makeDeps } from "./helpers.js";
+import { F, PAYLOAD_IDS, RoutingChooser, datasetItems, fixtureInput, makeActor, makeDeps, payloadRoutes } from "./helpers.js";
 import { startFixtureServer, type FixtureServer } from "./server.js";
 
 let server: FixtureServer;
@@ -694,4 +694,143 @@ describe("resolveProxy", () => {
     expect(error?.message).not.toContain("hunter2-proxy");
     expect(error?.message).toContain("127.0.0.1:1");
   });
+});
+
+/**
+ * U5 (R2, KTD1): the plain command's record-mode first compile runs the one
+ * compile core -- declared, then payload, then a chooser question per field
+ * still uncovered -- instead of putting every field to the chooser as a DOM
+ * question.
+ *
+ * The first two tests are the characterization taken before the reroute: the
+ * stored scraper's selectors, fingerprints and first row, as `compile()`
+ * produced them on 2026-09-23, pinned so the core's tier 3 is shown to be the
+ * same flow rather than a lookalike. The one difference the reroute makes to
+ * those documents is `type: "text"` on each field -- the reconciliation's
+ * inferred type, which coerces nothing.
+ */
+describe("the plain record compile runs the compile core (U5)", () => {
+  /** Answers each `field.*` question by pattern and each `reading.*` question by pattern; keeps every question. */
+  class PatternChooser {
+    readonly name = "recorded" as const;
+    readonly questions: import("../src/chooser/chooser.js").Question[] = [];
+    constructor(private readonly patterns: Record<string, RegExp>) {}
+    async ask(batch: import("../src/chooser/chooser.js").Question[]): Promise<import("../src/chooser/chooser.js").Answer[]> {
+      this.questions.push(...batch);
+      return batch.map((question) => {
+        const pattern = this.patterns[question.id.replace(/^(field|reading)\./, "").replace(/\.retry$/, "")];
+        const index = pattern === undefined ? -1 : (question.options ?? []).findIndex((option) => pattern.test(option));
+        return { id: question.id, index: index < 0 ? null : index };
+      });
+    }
+    usage(): import("../src/chooser/chooser.js").ChooserUsage {
+      return { chooser: this.name, questions: this.questions.length, textQuestions: 0, batches: 1, inputTokens: 0, outputTokens: 0, waitMs: 0, costUsd: 0, zeroDataRetention: "not_applicable" };
+    }
+  }
+
+  const port = (value: unknown): unknown => JSON.parse(JSON.stringify(value).split(server.baseUrl).join("{{base}}"));
+
+  async function storedFor(actor: ReturnType<typeof makeActor>, urls: string[], input: { description: string; fields: string[] }): Promise<CompiledScraper | null> {
+    const store = await ScraperStore.open({ actor });
+    return store.get(keyFor(urls, { ...input, profile: "store" }).cacheKey);
+  }
+
+  it("pharmacy (characterization): the same selectors, fingerprints and rows as compile() gave, and a replay asks nothing", async () => {
+    const actor = makeActor(dir);
+    const urls = ["amoxicilina-500-mg", "atorvastatina-20-mg", "clotrimazol-crema", "ibuprofeno-400-mg"].map((slug) => `${server.baseUrl}/demo/pharmacy-v1/producto/${slug}.html`);
+    const raw = { startUrls: urls, mode: "record", fields: F("name", "laboratory", "price", "stock"), description: "pharmacy product" };
+    const chooser = new RecordedChooser({ fixture: "compile/pharmacy-v1" });
+    const summary = await runCrawl(fixtureInput(raw), makeDeps(dir, actor, chooser));
+    expect(summary.status).toBe("succeeded");
+    expect(summary.items).toBe(4);
+    expect(summary.chooser?.questions).toBe(4);
+    expect(summary.fieldsNotFound).toEqual([]);
+
+    const stored = await storedFor(actor, urls, { description: raw.description, fields: raw.fields.map((f) => f.name) });
+    const text = (samples: string[], shape = "text") => ({ fingerprint: { samples, shape } });
+    expect(stored?.fields).toEqual({
+      name: { type: "text", alternatives: [{ selector: "h1.producto-nombre", ...text(["Amoxicilina 500 mg x 21 cápsulas", "Atorvastatina 20 mg x 30 comprimidos", "Clotrimazol 1% crema 20 g"]) }] },
+      laboratory: { type: "text", alternatives: [{ selector: "p.producto-laboratorio > span.valor", ...text(["Bagó", "Abbott", "Bayer"]) }] },
+      price: { type: "text", alternatives: [{ selector: "div.producto-precio > span.precio", ...text(["$ 6.990", "$ 12.990", "$ 5.290"], "money") }] },
+      stock: { type: "text", alternatives: [{ selector: "span.stock", ...text(["Disponible", "Disponible", "Disponible"]) }] },
+    });
+    expect(stored?.chooser).toBe("agent");
+    expect(stored?.entry).toEqual({ mode: "direct", url: urls[0] });
+    const rows = await datasetItems(actor);
+    expect(rows.find((row) => row._source === urls[0])).toEqual({ name: "Amoxicilina 500 mg x 21 cápsulas", laboratory: "Bagó", price: "$ 6.990", stock: "Disponible", _source: urls[0] });
+
+    const empty = new RecordedChooser({ fixture: "crawler/empty" });
+    const again = await runCrawl(fixtureInput(raw), makeDeps(dir, actor, empty));
+    expect(again.cacheHit).toBe(true);
+    expect(again.items).toBe(4);
+    expect(empty.usage().questions).toBe(0);
+  }, 60_000);
+
+  it("books (characterization): a page that declares nothing binds every field at tier 3 to the selectors it always did", async () => {
+    const actor = makeActor(dir);
+    const urls = ["books-1", "books-2", "books-3"].map((name) => `${server.baseUrl}/fixtures/template/${name}.html`);
+    const raw = { startUrls: urls, mode: "record", fields: F("title", "price", "availability"), description: "book" };
+    const chooser = new PatternChooser({ title: /^[^=]*h1 = /, price: /price_color/, availability: /availability/ });
+    const summary = await runCrawl(fixtureInput(raw), makeDeps(dir, actor, chooser));
+    expect(summary.status).toBe("succeeded");
+    expect(chooser.questions.map((question) => question.id)).toEqual(["field.title", "field.price", "field.availability"]);
+
+    const stored = await storedFor(actor, urls, { description: raw.description, fields: raw.fields.map((f) => f.name) });
+    expect(Object.fromEntries(Object.entries(stored!.fields).map(([name, field]) => [name, field.alternatives.map((alt) => alt.selector)]))).toEqual({
+      title: ["h1"],
+      price: ["p.price_color"],
+      availability: ["p.instock.availability"],
+    });
+    expect(stored!.fields.price!.alternatives[0]!.fingerprint).toEqual({ samples: ["£51.77", "£23.88", "£37.59"], shape: "money" });
+    expect(port(await datasetItems(actor))).toContainEqual({ title: "A Quiet Lighthouse", price: "£51.77", availability: "In stock (22 available)", _source: "{{base}}/fixtures/template/books-1.html" });
+
+    const replay = new PatternChooser({});
+    const again = await runCrawl(fixtureInput(raw), makeDeps(dir, actor, replay));
+    expect(again.cacheHit).toBe(true);
+    expect(again.items).toBe(3);
+    expect(replay.questions).toEqual([]);
+  }, 60_000);
+
+  it("a record page with JSON-LD binds from tier 1: no DOM question is asked", async () => {
+    const pages = ["analgesico", "antiacido", "antialergico"];
+    const routes = Object.fromEntries(pages.map((name) => [`/p/${name}.html`, { type: "text/html", body: readFileSync(join(import.meta.dirname, "fixtures", "make", `${name}.html`), "utf8") }]));
+    const helper = await startHelperServer(routes);
+    try {
+      const actor = makeActor(dir);
+      const urls = pages.map((name) => `${helper.baseUrl}/p/${name}.html`);
+      const raw = { startUrls: urls, mode: "record", fields: F("productName", "sku"), description: "pharmacy product" };
+      const chooser = new PatternChooser({});
+      const summary = await runCrawl(fixtureInput(raw), makeDeps(dir, actor, chooser));
+      expect(summary.status, summary.message).toBe("succeeded");
+      expect(chooser.questions.filter((question) => question.id.startsWith("field.")).map((question) => question.id)).toEqual([]);
+      expect(summary.items).toBe(3);
+
+      const store = await ScraperStore.open({ actor });
+      const stored = await store.get(keyFor(urls, { description: raw.description, fields: ["productName", "sku"], profile: "store" }).cacheKey);
+      expect(stored!.fields.productName!.alternatives[0]!.source).toBe("json-ld");
+      const rows = await datasetItems(actor);
+      expect(rows.find((row) => String(row._source).endsWith("analgesico.html"))).toMatchObject({ productName: "Ejemplo Analgesico 500 mg 16 Comprimidos", sku: "900101" });
+    } finally {
+      await helper.close();
+    }
+  }, 60_000);
+
+  it("an open ambiguity on the plain path is one chooser question, and its answer binds", async () => {
+    const helper = await startHelperServer(payloadRoutes());
+    try {
+      const actor = makeActor(dir);
+      const urls = PAYLOAD_IDS.map((id) => `${helper.baseUrl}/p/${id}`);
+      const raw = { startUrls: urls, mode: "record", fields: [{ name: "productName", type: "text" }], description: "product" };
+      const chooser = new PatternChooser({ productName: /productData\.seo\.metaTitle/ });
+      const summary = await runCrawl(fixtureInput(raw), makeDeps(dir, actor, chooser));
+      expect(summary.status, summary.message).toBe("succeeded");
+      // Tier 2 bound the name from the payload, and the one thing asked was which of its competing readings it is: no DOM question.
+      expect(chooser.questions.map((question) => question.id)).toEqual(["reading.productName"]);
+      expect(chooser.questions[0]!.options!.length).toBeGreaterThan(1);
+      const rows = await datasetItems(actor);
+      expect(rows.map((row) => row.productName).sort()).toEqual(["Ejemplo Comprimidos", "Otro Jarabe"]);
+    } finally {
+      await helper.close();
+    }
+  }, 60_000);
 });

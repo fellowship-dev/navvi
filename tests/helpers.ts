@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Actor } from "apify";
 import { MemoryStorage } from "crawlee";
@@ -104,4 +104,37 @@ export function loginFixture(): CompiledScraper {
     detail: null,
     createdAt: "2026-09-19T12:00:00.000Z",
   };
+}
+
+/**
+ * U5: two product pages that declare nothing and fetch their product as JSON,
+ * served same-origin so the crawler's route guard lets the payload through.
+ *
+ * The payloads are `fixtures/investigate/store-b-detail*.json` and the text is
+ * what the page shows once its script has the payload -- the shape the compile
+ * core's own open-ambiguity test (`compile-template.test.ts`) reads, rendered
+ * by a real page this time, so the plain command's tier 2 is exercised through
+ * the crawler's capture rather than a stub. Eight leaves of those payloads can
+ * each be `productName`, which is the competing-readings question.
+ */
+export const PAYLOAD_IDS = ["100001", "100002"] as const;
+const PAYLOAD_TEXT = [
+  "Ejemplo Comprimidos 100 mg 30 Comprimidos $ 4.990 $ 4.491 Club Store B $ 3.992 Precio por Unidad Fraccionada: $ 166 por Comprimido Laboratorio Ejemplo",
+  "Otro Jarabe 120 ml $ 12.990 $ 11.691 Precio por Unidad Fraccionada: $ 108 por ml Laboratorio Otro",
+];
+
+export function payloadRoutes(): Record<string, { type: string; body: string }> {
+  const dir = join(import.meta.dirname, "fixtures", "investigate");
+  const routes: Record<string, { type: string; body: string }> = {};
+  for (const [index, id] of PAYLOAD_IDS.entries()) {
+    routes[`/catalog-svc/products/detail/${id}`] = { type: "application/json", body: readFileSync(join(dir, `store-b-detail${index === 0 ? "" : "-2"}.json`), "utf8") };
+    routes[`/p/${id}`] = {
+      type: "text/html",
+      body:
+        `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Ejemplo</title></head><body><main id="app">Cargando</main>` +
+        `<script>fetch("/catalog-svc/products/detail/${id}").then((r) => r.json()).then(() => { document.getElementById("app").innerText = ${JSON.stringify(PAYLOAD_TEXT[index])}; });</script>` +
+        `</body></html>`,
+    };
+  }
+  return routes;
 }

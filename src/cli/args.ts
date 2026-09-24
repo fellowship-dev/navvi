@@ -60,8 +60,13 @@ export interface CliArgs {
   /**
    * U11: the directory `navvi make` keeps its artifacts and its ledger in. A
    * new concept — before `make` there was `--out` for one file and nothing for
-   * a pipeline — so it is required by `make` and meaningless to every other
-   * command.
+   * a pipeline — so it is required by `make`.
+   *
+   * U5: the plain command takes it too. Both compile a record template through
+   * the one compile core, so `navvi "<prompt>" <url> --work <dir>` writes the
+   * artifacts that compile kept -- the spec, the sample, the manuscript, the
+   * reconciliation, the schema, the scraper and its rationale -- where `navvi
+   * make` would.
    */
   work: string | undefined;
   /**
@@ -128,6 +133,36 @@ const VALUE_FLAGS = [
   "--resume", "--agent-mode", "--notify", "--storage", "--decider", "--writer", "--decider-transport", "--rubric", "--rubrics-file",
   "--work", "--answer", "--sample", "--replays", "--settle-cap",
 ] as const;
+
+/**
+ * U5: the flags that belong to one front end and mean nothing to the other.
+ *
+ * The plain command and `navvi make` share one argv parser, so every flag
+ * parses under both, and before U5 a flag the command did not read was simply
+ * dropped: `navvi "<prompt>" <url> --replays 5` ran with no determinism stage
+ * and said nothing, and `navvi make … --max-pages 3` capped nothing. A flag
+ * that parses and is then ignored is a question answered wrongly without
+ * anyone being told, so a flag used under the command it does not belong to
+ * is an exit 2 naming it.
+ *
+ * Only the two front ends are policed. `spec` and `heuristics` read a handful
+ * of flags each and have never claimed the rest.
+ */
+const MAKE_ONLY: readonly string[] = ["--answer", "--sample", "--replays", "--settle-cap", "--offline", "--force"];
+const RUN_ONLY: readonly string[] = [
+  "--mode", "--fields", "--goal", "--max-pages", "--max-items", "--follow-details", "--detail-fields", "--profile", "--allow-domain",
+  "--secret", "--secrets-file", "--allow-mutation", "--fresh-profile", "--force-recompile", "--script-id", "--notify", "--out", "--json", "--csv",
+];
+
+function foreignFlag(command: Command, flag: string): string | null {
+  if (command === "run" && MAKE_ONLY.includes(flag)) {
+    return `${flag} is a \`navvi make\` flag, and the plain command would ignore it; run \`navvi make "<brief>" <url...> --work <dir> ${flag} …\` for the staged compile`;
+  }
+  if (command === "make" && RUN_ONLY.includes(flag)) {
+    return `${flag} belongs to the plain command (\`navvi "<prompt>" <url...>\`), and \`navvi make\` would ignore it`;
+  }
+  return null;
+}
 
 function isUrl(value: string): boolean {
   return /^https?:\/\//i.test(value);
@@ -224,6 +259,8 @@ export function parseArgs(argv: readonly string[]): ParseResult {
       }
       const eq = token.indexOf("=");
       const flag = eq >= 0 ? token.slice(0, eq) : token;
+      const foreign = foreignFlag(args.command, flag);
+      if (foreign !== null) throw new Error(foreign);
       const boolean = BOOLEAN_FLAGS.find(([name]) => name === flag);
       if (boolean) {
         if (eq >= 0) throw new Error(`${flag} takes no value`);
@@ -367,7 +404,7 @@ function apply(args: CliArgs, flag: (typeof VALUE_FLAGS)[number], value: string)
 }
 
 export function usage(): string {
-  return `Usage: navvi [<prompt>] <url...> [flags]
+  return `Usage: navvi [<prompt>] <url...> [--work <dir>] [flags]
        navvi --mode list|record --fields a,b,c <url...> [flags]
        navvi spec "<brief>" [flags]
        navvi make ["<brief>"] --work <dir> [flags]
@@ -377,12 +414,19 @@ Compile it once so you never drive it again. Prompt in, JSON out; the second
 run replays the compiled scraper with zero model calls and heals drift.
 
 Commands
-  (none)                    Compile and run, as above.
-  make                      The driver: spec, sample, investigate, reconcile, schema, determinism,
-                            compile, verify — each writing its artifact into --work and a block to
-                            stderr. Stops at the first blocking question (exit 3). Every stage is
-                            re-runnable from the artifact above it: edit one and re-run, and
+  (none)                    Compile and run, as above. A record page compiles cheapest first: what
+                            the page declares, then the payloads it fetches, then a question per
+                            field still uncovered about the page's markup.
+  make                      The same compile, staged: spec, sample, investigate, reconcile, schema,
+                            determinism, compile, verify — each writing its artifact into --work and
+                            a block to stderr. Stops at the first blocking question (exit 3). Every
+                            stage is re-runnable from the artifact above it: edit one and re-run, and
                             everything downstream of the edit recompiles.
+                            For a record page, navvi "<prompt>" <url...> --work <dir> and
+                            navvi make "<prompt>" <url...> --work <dir> compile through one core and
+                            write the same scraper.json; make adds the determinism and verify stages,
+                            --answer and resuming, and the plain command adds the crawl, list mode,
+                            --goal, pagination, healing and the scraper cache.
   spec                      Turn a brief into a spec: what was asked for, and what the brief
                             left unsaid. JSON on stdout (or --out); the open questions it
                             could not answer are listed on stderr. Reads no page.
@@ -407,8 +451,15 @@ Output
   --out <file>              Write data to a file instead of stdout (.csv writes CSV).
   --json                    Compact JSON (default is pretty).   --csv  CSV instead of JSON.
   --quiet                   No summary block on stderr.
+  --work <dir>              Also write what the compile kept, as navvi make names it: spec.json,
+                            sample.json, investigation.json, reconcile.json/.md, schema.json,
+                            scraper.json, rationale.md, machine.mmd. List mode keeps only spec.json and
+                            scraper.json and says the rest is absent. Nothing is written on a cache hit.
 
-make (the driver)
+make (the driver). The flags below are make's own: the plain command refuses them (exit 2),
+and make refuses the plain command's --mode, --fields, --goal, --max-pages, --max-items,
+--follow-details, --detail-fields, --profile, --allow-domain, --secret(s-file), --allow-mutation,
+--fresh-profile, --force-recompile, --script-id, --notify, --out, --json and --csv.
   --work <dir>              Where the artifacts and the ledger live. Required.
   --answer <key=value>      Answer an open question, by its id or by what it is about
                             (fields, inputs, target, entity, constraints.<name>). Repeatable.
@@ -441,7 +492,8 @@ Sources (who answers the compile questions)
   --decider-transport <t>   gateway|typesafe: which API the jev decider is reached over. Default: gateway when
                             AI_GATEWAY_API_KEY is set, else typesafe. Give typesafe to force api.typesafe.ai
                             even with a Gateway key.
-  --rubric <id=rule>        A case rubric carried verbatim into the spec (repeatable), e.g.
+  --rubric <id=rule>        A case rubric carried verbatim into the spec, and quoted to whoever
+                            decides between competing readings (repeatable), e.g.
                             --rubric "list-price=the list price is the crossed-out one, never Precio Club".
   --rubrics-file <file>     JSON of case rubrics: {id: rule} or [{id, rule, source?}].
   --chooser <name>          The older single flag: it sets the decider and leaves the writer derived, exactly

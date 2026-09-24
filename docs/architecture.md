@@ -147,6 +147,7 @@ graph TD
   replay --> reconcile
   replay --> scraper
   replay --> secrets
+  replay --> spec
   replay --> template
   replay --> util
   scraper --> declared

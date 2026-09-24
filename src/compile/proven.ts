@@ -520,7 +520,14 @@ export function compileFromReconciliation(
       const alternative: FieldAlternative = { selector: reading.selector, fingerprint };
       if (reading.attr !== undefined) alternative.attr = reading.attr;
       if (reading.source !== "dom") alternative.source = reading.source;
-      if (reading.path !== undefined) alternative.path = reading.path;
+      // A tier-3 reading's path is the manuscript's address for the node the
+      // chooser picked (`main/article.producto/h1`), not something replay reads:
+      // the selector is. Left on the alternative it made the one compile core's
+      // scraper differ from the plain command's by a key nothing uses (U5), and
+      // `sameAlternative` compares paths, so a heal proposing that selector again
+      // would not have recognised it. A declared `dom` reading keeps its path
+      // (`og:title`): that one names what the page declared.
+      if (reading.path !== undefined && !(field.tier === 3 && reading.source === "dom")) alternative.path = reading.path;
       if (reading.match !== undefined) alternative.match = reading.match;
       if (reading.entity !== undefined) alternative.entity = reading.entity;
       alternatives.push(alternative);

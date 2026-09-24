@@ -14,6 +14,7 @@ import { BudgetExhaustedError } from "../src/billing/budget.js";
 import type { Answer, Chooser, Question } from "../src/chooser/chooser.js";
 import type { CrawlDeps } from "../src/replay/crawler.js";
 import { run as runNavvi, summaryFor, type RunSummary } from "../src/main.js";
+import { PAYLOAD_IDS, payloadRoutes } from "./helpers.js";
 import { startFixtureServer, type FixtureServer } from "./server.js";
 
 const REPO = resolve(import.meta.dirname, "..");
@@ -176,6 +177,104 @@ describe("argument parsing", () => {
     expect(parseArgs(["one prompt", "another prompt"]).ok).toBe(false);
     expect(parseArgs(["--max-pages", "zero"]).ok).toBe(false);
   });
+});
+
+describe("one command family (U5)", () => {
+  it("a flag of the other front end is exit 2 naming it, rather than parsed and ignored", async () => {
+    const run = parseArgs(["the price", "https://a.example/x", "--replays", "2"]);
+    expect(run.ok).toBe(false);
+    if (!run.ok) expect(run.error).toContain("--replays is a `navvi make` flag");
+    for (const flag of [["--sample", "3"], ["--answer", "fields=a"], ["--offline"], ["--force"], ["--settle-cap", "100"]]) {
+      const parsed = parseArgs(["the price", "https://a.example/x", ...flag]);
+      expect(parsed.ok, flag[0]).toBe(false);
+      if (!parsed.ok) expect(parsed.error, flag[0]).toContain(flag[0]!);
+    }
+    const made = parseArgs(["make", "the price", "--work", "w", "--max-pages", "3"]);
+    expect(made.ok).toBe(false);
+    if (!made.ok) expect(made.error).toContain("--max-pages belongs to the plain command");
+    for (const flag of [["--mode", "record"], ["--fields", "a"], ["--goal", "x"], ["--out", "o.json"], ["--force-recompile"], ["--profile", "local"]]) {
+      const parsed = parseArgs(["make", "brief", "--work", "w", ...flag]);
+      expect(parsed.ok, flag[0]).toBe(false);
+      if (!parsed.ok) expect(parsed.error, flag[0]).toContain(flag[0]!);
+    }
+
+    const io = makeIo();
+    expect(await main(["the price", "https://a.example/x", "--replays", "2"], io)).toBe(2);
+    expect(io.stderr.text).toContain("--replays");
+    const makeIoText = makeIo();
+    expect(await main(["make", "the price", "--work", join(dir, "never"), "--max-pages", "3"], makeIoText)).toBe(2);
+    expect(makeIoText.stderr.text).toContain("--max-pages");
+    expect(existsSync(join(dir, "never"))).toBe(false);
+  });
+
+  it("both front ends take --work, --rubric and the shared flags", () => {
+    const run = parseArgs(["the price", "https://a.example/x", "--work", "w", "--rubric", "price=the boxed one", "--from-url", "https://a.example/list.json", "--headed"]);
+    if (!run.ok) throw new Error(run.error);
+    expect(run.args.work).toBe("w");
+    expect(run.args.rubrics).toEqual(["price=the boxed one"]);
+    const made = parseArgs(["make", "the price", "https://a.example/x", "--work", "w", "--replays", "2", "--answer", "fields=price", "--headed", "--agent-mode", "file"]);
+    if (!made.ok) throw new Error(made.error);
+    expect(made.args.replays).toBe(2);
+  });
+
+  it("--help says the plain command with --work and navvi make write the same scraper for a record page", async () => {
+    const io = makeIo();
+    expect(await main(["--help"], io)).toBe(0);
+    const help = io.stdout.text.replace(/\s+/g, " ");
+    expect(help).toContain('navvi "<prompt>" <url...> --work <dir> and navvi make "<prompt>" <url...> --work <dir> compile through one core and write the same scraper.json');
+    expect(help).toContain("the plain command refuses them (exit 2)");
+  });
+
+  it("--work on the plain command writes make's artifact set for a record compile, and says what is absent", async () => {
+    const agent = scriptedAgent();
+    const io = makeIo({ stdin: agent.stdin, stdout: agent.stdout });
+    const storage = storageFor("work");
+    const work = join(storage, "w");
+    const code = await main([...RECORD_FLAGS, "--agent-mode", "stdio", "--storage", storage, "--work", work, ...productUrls().slice(0, 4)], io);
+    expect(code, io.stderr.text).toBe(0);
+    for (const name of ["spec.json", "sample.json", "investigation.json", "reconcile.json", "reconcile.md", "schema.json", "scraper.json", "rationale.md", "machine.mmd"]) {
+      expect(existsSync(join(work, name)), name).toBe(true);
+    }
+    const spec = JSON.parse(readFileSync(join(work, "spec.json"), "utf8")) as { fields: Array<{ name: string }>; inputs: { shape: string } };
+    expect(spec.fields.map((field) => field.name)).toEqual(["name", "laboratory", "price", "stock"]);
+    expect(spec.inputs.shape).toBe("url_list");
+    expect(io.stderr.text).toContain(`navvi: work ${work}`);
+    expect(io.stderr.text).toMatch(/absent: determinism\.json, scorecard\.md — the plain command measures neither/);
+
+    // The replay compiles nothing, and says so rather than leaving the directory looking current.
+    const again = makeIo();
+    expect(await main([...RECORD_FLAGS, "--storage", storage, "--work", work, ...productUrls().slice(0, 4)], again)).toBe(0);
+    expect(again.stderr.text).toContain("nothing compiled this run");
+  }, 90_000);
+
+  it("an open ambiguity on the plain command parks under --agent-mode file (exit 3), and the resume binds the reading answered", async () => {
+    const helper = await startHelperServer(payloadRoutes());
+    try {
+      const storage = storageFor("reading");
+      const urls = PAYLOAD_IDS.map((id) => `${helper.baseUrl}/p/${id}`);
+      const flags = ["--mode", "record", "--fields", "productName:text", "--allow-private-host", "127.0.0.1", "--browser", "chromium", "--chooser", "agent", "--agent-mode", "file", "--storage", storage];
+      const first = makeIo();
+      expect(await main(["product", ...flags, ...urls], first)).toBe(3);
+      const questionsDir = join(storage, "questions");
+      const files = readdirSync(questionsDir).filter((f) => f.endsWith(".json"));
+      expect(files).toHaveLength(1);
+      const token = files[0]!.replace(/\.json$/, "");
+      const batch = JSON.parse(readFileSync(join(questionsDir, files[0]!), "utf8")) as { questions: Question[] };
+      // The payload tier bound the name; no DOM question was needed, only which reading it is.
+      expect(batch.questions.map((question) => question.id)).toEqual(["reading.productName"]);
+      const index = batch.questions[0]!.options!.findIndex((option) => option.includes("productData.seo.metaTitle"));
+      expect(index).toBeGreaterThanOrEqual(0);
+      const answersFile = join(storage, "answers.json");
+      writeFileSync(answersFile, JSON.stringify({ answers: [{ id: "reading.productName", index }] }));
+
+      const second = makeIo();
+      expect(await main(["product", ...flags, "--answers", answersFile, "--resume", token, ...urls], second)).toBe(0);
+      const rows = JSON.parse(second.stdout.text) as Array<Record<string, unknown>>;
+      expect(rows.map((row) => row.productName).sort()).toEqual(["Ejemplo Comprimidos", "Otro Jarabe"]);
+    } finally {
+      await helper.close();
+    }
+  }, 90_000);
 });
 
 describe("help and version", () => {

@@ -430,7 +430,12 @@ export function render(manuscript: Manuscript, dataLine = ""): string {
 
   lines.push(`  ${pad("fields")}${manuscript.fields.filter((field) => field.path !== undefined).length} of ${manuscript.fields.length} bound`);
   for (const field of manuscript.fields) {
-    const where = field.path === undefined ? "unbound" : `${field.source} ${field.match === undefined ? "" : `${field.match} `}${field.path}`;
+    // U5: a DOM binding is shown by the selector the scraper stores. Its path
+    // (`div.container-fluid.page/.../h1`) is the manuscript's address for the
+    // node the chooser picked, and printing it here made the transcript
+    // disagree with `scraper.json` about a binding that was fine.
+    const address = field.source === "dom" && field.selector !== undefined ? `${field.selector}${field.attr === undefined ? "" : ` @${field.attr}`}` : field.path;
+    const where = field.path === undefined ? "unbound" : `${field.source} ${field.match === undefined ? "" : `${field.match} `}${address}`;
     bullet(lines, `${field.field.padEnd(14, " ")}${where}`);
     bullet(lines, `  ${field.because}`);
     if (field.decision !== undefined) bullet(lines, `  decided by ${field.decision.answeredBy}: ${field.decision.question}, 1 of ${field.decision.options} candidate(s)`);

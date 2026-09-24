@@ -12,13 +12,13 @@ import { formatRows, type OutputFormat, type Row } from "../src/cli/output.js";
 import { createChooser, findOnPath, HARNESS_LABEL, loadAnswersFile, mergeAnswers, missingCredentialsMessage, NavviError, NeedsHumanError, readQuestionsFile, resolveDefaultChooser, type Chooser, type StoredAnswer } from "../src/chooser/index.js";
 import { bank, UnknownHeuristicError, type Overrides } from "../src/heuristics/index.js";
 import { defaultBrowser, parseFieldSpecs, type Chooser as ChooserId, type SourceSelection } from "../src/input/schema.js";
-import { chooserLines, heuristicBlock, heuristicsBlock, makeStop, specBlock } from "../src/cli/render.js";
-import { make as runMake, openPages, type MakeStatus } from "../src/make/index.js";
+import { chooserLines, heuristicBlock, heuristicsBlock, makeStop, specBlock, workBlock } from "../src/cli/render.js";
+import { make as runMake, openPages, writeCompiledTemplate, type MakeStatus, type WrittenArtifacts } from "../src/make/index.js";
 import { briefToSpec, SpecParseError } from "../src/spec/spec.js";
 import { RubricSchema, type Rubric } from "../src/spec/schema.js";
 import { run as runNavvi, type RunSummary } from "../src/main.js";
 import type { Notifier } from "../src/prestep/human.js";
-import type { CrawlActor, CrawlDeps } from "../src/replay/crawler.js";
+import type { CompiledTemplate, CrawlActor, CrawlDeps } from "../src/replay/crawler.js";
 import { secretEnvName } from "../src/secrets/resolve.js";
 
 /**
@@ -602,8 +602,20 @@ async function execute(args: CliArgs, io: CliIo): Promise<number> {
   const chooser = chooserFor(sources, args, io, storageDir);
   const input = rawInput(args, io, secrets, sources);
 
+  const rubrics = collectRubrics(args, io);
+  const work = args.work === undefined ? undefined : workWriter(resolve(io.cwd, args.work));
+
   const storage = await openStorage(storageDir);
-  const deps: CrawlDeps = { chooser, actor: storage.actor, notify, attended: args.headed, storageDir, env: io.env };
+  const deps: CrawlDeps = {
+    chooser,
+    actor: storage.actor,
+    notify,
+    attended: args.headed,
+    storageDir,
+    env: io.env,
+    ...(rubrics.length === 0 ? {} : { rubrics }),
+    ...(work === undefined ? {} : { onCompiled: work.onCompiled }),
+  };
   const runFn = io.run ?? runNavvi;
   let summary: RunSummary;
   let rows: Row[];
@@ -629,6 +641,7 @@ async function execute(args: CliArgs, io: CliIo): Promise<number> {
     dataLine = `data: ${rows.length} records on stdout`;
   }
 
+  if (work !== undefined && !args.quiet) io.stderr.write(work.report());
   if (summary.status === "needs_human") {
     io.stderr.write(needsHumanBlock(summary.needsHuman?.token, summary.needsHuman?.questionsFile, summary.message));
     await notify(`navvi needs answers: ${summary.needsHuman?.questionsFile ?? "questions parked"} (token ${summary.needsHuman?.token ?? "?"})`).catch(() => undefined);
@@ -636,6 +649,37 @@ async function execute(args: CliArgs, io: CliIo): Promise<number> {
     io.stderr.write(summaryBlock(summary, dataLine));
   }
   return exitCodeFor(summary.status);
+}
+
+// ---------------------------------------------------------------- --work
+
+/**
+ * U5: the plain command's `--work <dir>`. Each template the crawl compiles is
+ * written as `navvi make` would write it (`writeCompiledTemplate`); the first
+ * into `<dir>` itself, which is the one-template run this flag is for, and any
+ * further template into `<dir>/<template>` so two page shapes never overwrite
+ * each other's scraper.
+ */
+function workWriter(dir: string): { onCompiled: (compiled: CompiledTemplate) => void; report: () => string } {
+  const written: WrittenArtifacts[] = [];
+  const homes = new Map<string, string>();
+  return {
+    onCompiled(compiled) {
+      let home = homes.get(compiled.templateKey);
+      if (home === undefined) {
+        home = homes.size === 0 ? dir : join(dir, compiled.templateKey.replace(/[^A-Za-z0-9._-]+/g, "_"));
+        homes.set(compiled.templateKey, home);
+      }
+      const result = writeCompiledTemplate(home, compiled);
+      const at = written.findIndex((entry) => entry.templateKey === result.templateKey);
+      if (at >= 0) written[at] = result;
+      else written.push(result);
+    },
+    report() {
+      if (written.length === 0) return `navvi: work ${dir} — nothing compiled this run (a cached scraper was replayed), so nothing was written; --force-recompile compiles and writes it\n`;
+      return written.map(workBlock).join("");
+    },
+  };
 }
 
 // ---------------------------------------------------------------- process entry

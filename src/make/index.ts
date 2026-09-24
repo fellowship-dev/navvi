@@ -16,6 +16,8 @@
  *                  to skip.
  * - `work.ts`    — the work directory, the ledger, and the rule that decides
  *                  whether a stage has to run again.
+ * - `artifacts.ts` — U5: the plain command's `--work`, the same artifacts
+ *                  written from a compile the crawler ran.
  * - `answers.ts` — `--answer key=value` and what it may do to a spec.
  * - `pages.ts`   — the only part that opens a browser. Everything else is pure
  *                  or file IO, which is what lets the whole pipeline be driven
@@ -26,6 +28,7 @@
  */
 export { make, type MakeDeps, type MakeOptions, type MakeResult, type MakeStatus, type StageOutcome, type StageReport } from "./make.js";
 export { AnswerError, answersFromUrls, applyAnswers, matchAnswer, parseAnswer, stillBlocking, type Answer, type AppliedAnswers, type FieldTypes, type MatchedAnswer } from "./answers.js";
+export { writeCompiledTemplate, type AbsentArtifact, type WrittenArtifacts } from "./artifacts.js";
 export { ARTIFACTS, LEDGER_FILE, PRIMARY, STAGES, Work, digestOf, digestOfParams, type Currency, type Ledger, type StageLedger, type StageName } from "./work.js";
 export { CAPTURE_LIMIT, SETTLE_CAP_MS, openPages, plainFetch, type DrivenCapture, type Pages, type PagesOptions, type Settle, type SettleTrend } from "./pages.js";
 export { fillLine, measurements, renderScorecard, scorecard, type FieldFill, type Scorecard, type ScorecardOptions, type SourceMix } from "./verify.js";

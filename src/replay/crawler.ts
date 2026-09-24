@@ -6,12 +6,16 @@ import type { BrowserContext, Page } from "playwright";
 import { Charger, type ChargingActor } from "../billing/charge.js";
 import { buildCrawleeLaunchContext, restoreProfileCookies, saveProfileCookies } from "../browser/launch.js";
 import { createLaunchCounter, formatLaunchFailure, isLaunchFailure, launchFailureReport, resolveRelaunchKnobs, type RelaunchKnobs } from "../browser/relaunch.js";
-import { continueWithoutRevalidation } from "../browser/guards.js";
 import { captureJson, describeSkips, type Capture, type CapturedResponse } from "../browser/network-capture.js";
 import { hostOf, isAllowedRequestUrl, registrableDomain } from "../browser/policy.js";
 import { ConfigurationError, createChooser, NavviError, NeedsHumanError, StateTooLargeError, summarizeUsage, type Chooser } from "../chooser/index.js";
-import { compile, type CompileResult } from "../compile/index.js";
-import { LIMITS, isAllowedUrl, resolveSources, type FieldType, type Profile, type ProxyInput, type RunInput } from "../input/schema.js";
+import { compile, compileTemplate, type CompileRationale, type RenderPages, type TemplateCompile } from "../compile/index.js";
+import { LIMITS, isAllowedUrl, resolveSources, type FieldType, type Mode, type Profile, type ProxyInput, type RunInput } from "../input/schema.js";
+import { chooseSample, probeFrom, type Capture as PageCapture, type Manuscript, type SampleChoice } from "../investigate/index.js";
+import type { Reconciliation } from "../reconcile/index.js";
+import { specFromInput } from "../spec/input.js";
+import type { Rubric, Spec } from "../spec/schema.js";
+import { continueWithoutRevalidation, waitForSettle } from "../browser/guards.js";
 import type { RunSummary } from "../main.js";
 import { dismissConsent, runPreSteps, type Notifier } from "../prestep/index.js";
 import { coerceValues, extractPage, fieldTypesOf, fingerprintMatches, type ItemExtraction } from "../scraper/extract.js";
@@ -192,6 +196,45 @@ export interface CrawlDeps {
    * to show that second.
    */
   determinism?: Determinism | undefined;
+  /**
+   * U5: the case's rubrics, carried into the spec a record-mode compile is
+   * run against (`specFromInput`), so a competing-readings question quotes
+   * them the way `navvi make`'s does. `RunInput` has no field for them: they
+   * are the CLI's `--rubric` and `--rubrics-file`, not part of an actor input.
+   */
+  rubrics?: readonly Rubric[] | undefined;
+  /**
+   * U5: told about every template this run compiled, as it was compiled --
+   * the spec, and in record mode the whole record the compile core kept.
+   * `navvi "<prompt>" <url> --work <dir>` writes it out as `navvi make`'s
+   * artifact set; nothing in the crawler reads it back.
+   */
+  onCompiled?: ((compiled: CompiledTemplate) => Promise<void> | void) | undefined;
+}
+
+/**
+ * U5: one template's compile, as `CrawlDeps.onCompiled` hears about it.
+ *
+ * `core` is present in record mode only: list mode compiles through
+ * `compileList`, which keeps no manuscript, reconciliation or rationale, so a
+ * list-mode `--work` directory holds the spec and the scraper and says the
+ * rest is absent rather than writing an empty stand-in for it.
+ */
+export interface CompiledTemplate {
+  templateKey: string;
+  mode: Mode;
+  spec: Spec;
+  /** The scraper as stored, trace and canary included. Null when the compile stopped short; `because` says why. */
+  scraper: CompiledScraper | null;
+  because?: string | undefined;
+  core?:
+    | {
+        sample: SampleChoice;
+        manuscript: Manuscript;
+        reconciliation?: Reconciliation | undefined;
+        rationale?: CompileRationale | undefined;
+      }
+    | undefined;
 }
 
 // ---------------------------------------------------------------- policy
@@ -822,9 +865,12 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       useSessionPool: true,
       persistCookiesPerSession: false,
       sessionPoolOptions: buildSessionPoolOptions(singleSession, relaunchKnobs),
-      preNavigationHooks: [async ({ page }) => {
+      preNavigationHooks: [async ({ page, request }) => {
         await guardContext(page.context());
-        startCapture(page);
+        // U5: a record-mode compile runs the payload tier, which reads what
+        // the page fetched for itself; the capture has to be listening before
+        // the page asks.
+        startCapture(page, mode === "record" && (request.userData as UserData | undefined)?.label === "compile");
         await deps.onPage?.(page);
       }],
       requestHandler: async (ctx) => {
@@ -890,45 +936,58 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
 
     /** Every sample page opened, for cleanup; `extra` below keeps sample order. */
     const opened: Page[] = [];
-    let result: CompileResult;
+    let compiled: CompiledScraper;
+    /** Record mode: what the compile core kept, for `--work`. */
+    let core: CompiledTemplate["core"];
     try {
-      let extra: Page[] = [];
       if (mode === "record") {
         // the other samples are independent pages of one context: open them together
-        extra = await Promise.all(
+        const extra = await Promise.all(
           data.sampleUrls.slice(1).map(async (url) => {
             const sample = await page.context().newPage();
             opened.push(sample);
-            await sample.goto(url, { waitUntil: "domcontentloaded" });
+            // Listening before the page asks, as the crawler's own page is (U5).
+            startCapture(sample, true);
+            const answered = await sample.goto(url, { waitUntil: "domcontentloaded" });
             await dismissConsent(sample).catch(() => undefined);
-            return sample;
+            return { page: sample, status: answered?.status() };
           }),
         );
+        const outcome = await compileRecord(plan, data, [{ page, status: response?.status() }, ...extra]);
+        for (const name of outcome.fieldsNotFound) state.fieldsNotFound.add(name);
+        if (outcome.stop) {
+          stopWith(state, crawler, outcome.stop);
+          return;
+        }
+        if (outcome.scraper === null) return;
+        compiled = outcome.scraper;
+        core = outcome.core;
+      } else {
+        const result = await compile({
+          mode,
+          pages: [page],
+          fields: input.fields ?? [],
+          description: input.description,
+          templateKey: plan.templateKey,
+          cacheKey: plan.cacheKey,
+          profile: input.profile,
+          chooser,
+          chooserId: input.chooser,
+          startUrls: urls,
+          allowedDomains: input.allowedDomains,
+          followDetailPages: input.followDetailPages,
+          context: page.context(),
+        });
+        for (const name of result.fieldsNotFound) state.fieldsNotFound.add(name);
+        if (!result.ok) {
+          ctxLog(`template ${plan.templateKey}: ${result.status}`);
+          return;
+        }
+        compiled = input.followDetailPages && result.detailLink ? withDetailLink(result.scraper, result.detailLink) : result.scraper;
       }
-      result = await compile({
-        mode,
-        pages: [page, ...extra],
-        fields: input.fields ?? [],
-        description: input.description,
-        templateKey: plan.templateKey,
-        cacheKey: plan.cacheKey,
-        profile: input.profile,
-        chooser,
-        chooserId: input.chooser,
-        startUrls: urls,
-        allowedDomains: input.allowedDomains,
-        followDetailPages: input.followDetailPages,
-        context: page.context(),
-      });
     } finally {
       for (const p of opened) await p.close().catch(() => undefined);
     }
-    for (const name of result.fieldsNotFound) state.fieldsNotFound.add(name);
-    if (!result.ok) {
-      ctxLog(`template ${plan.templateKey}: ${result.status}`);
-      return;
-    }
-    const compiled = input.followDetailPages && result.detailLink ? withDetailLink(result.scraper, result.detailLink) : result.scraper;
     const entry = trace.length > 0 && compiled.entry.mode === "trace" ? { mode: "trace" as const, url: request.url } : compiled.entry;
     // U9c: this page compiled, so the site served it — which is the whole
     // definition of a page worth fingerprinting. Recorded now because a run
@@ -941,6 +1000,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     const canary = await recordPageCanary(request.url, response?.status(), page, ctxLog);
     const scraper = validateScraper({ ...compiled, trace, entry, canary });
     await store.put(scraper);
+    await deps.onCompiled?.({ templateKey: plan.templateKey, mode, spec: specFor(plan), scraper, ...(core === undefined ? {} : { core }) });
     plan.scraper = scraper;
     plan.canary = deps.canary ?? canary ?? plan.canary;
     if (entryModeFor(scraper) === "trace") {
@@ -950,6 +1010,145 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       return;
     }
     await crawler.addRequests(replayRequests(plan, scraper));
+  }
+
+  /** U5: the spec a template is compiled against -- the run input, written down (`specFromInput`). */
+  const specFor = (plan: TemplatePlan): Spec => specFromInput(input, { urls: plan.urls, rubrics: deps.rubrics });
+
+  interface RecordOutcome {
+    scraper: CompiledScraper | null;
+    fieldsNotFound: string[];
+    /** The run stops here: an open decision nobody could make. */
+    stop?: Stop | undefined;
+    core?: CompiledTemplate["core"];
+  }
+
+  /**
+   * U5 (R2, KTD1): a record-mode first compile, through the one compile core.
+   *
+   * ## What changed
+   *
+   * Until U5 this was `compile({ mode: "record" })`: every requested field was
+   * a question to the chooser about DOM candidates, whatever the page said
+   * about itself, while `navvi make` ran the declared and payload tiers first.
+   * Two compilers behind one scraper format. It is now `compileTemplate`, the
+   * cascade `navvi make` runs: tier 1 reads what the pages declare, tier 2 the
+   * payloads they fetched for themselves, and only the fields both left
+   * uncovered reach tier 3 -- which is `chooseRecordFields`, the flow this
+   * branch always ran, with the same question ids, options and recordings. A
+   * page that declares nothing therefore compiles to the selectors it did
+   * before, and one that declares everything asks no DOM question at all.
+   *
+   * ## What it hands the core
+   *
+   * The pages the crawler already has open, and nothing it would have to open
+   * again: `fetch` is a sample page's rendered HTML (settled first, so what a
+   * script declares is declared), `capture` is the JSON the page fetched while
+   * it loaded, `render` gives tier 3 the same pages back and never closes them
+   * -- the crawler owns their lifetime, and closes them after this returns.
+   *
+   * List mode does not come here: tiers 1 and 2 read one record per page, and
+   * a listing is many, so `compileList` stays its compiler. Neither do detail
+   * pages (`compileDetail`), which compile a record template inside a list
+   * run under their own question prefix.
+   */
+  async function compileRecord(plan: TemplatePlan, data: CompileUserData, samples: ReadonlyArray<{ page: Page; status: number | undefined }>): Promise<RecordOutcome> {
+    const requested = input.fields ?? [];
+    const names = requested.map((field) => field.name);
+    const spec = specFor(plan);
+
+    const sampleOf = (url: string): { page: Page; status: number | undefined } | undefined => {
+      const at = data.sampleUrls.indexOf(url);
+      return at >= 0 ? samples[at] : samples.find((entry) => entry.page.url() === url);
+    };
+    const fetched = new Map<string, PageResponse>();
+    const fetchFrom = async (url: string): Promise<PageResponse> => {
+      const known = fetched.get(url);
+      if (known !== undefined) return known;
+      const sample = sampleOf(url);
+      // The core only asks about the URLs it was handed as the sample, and
+      // those are this template's open pages. Anything else is answered as a
+      // fetch that never came back, which `classify` reads as transient rather
+      // than as evidence against the URL.
+      if (sample === undefined) return { url, status: 0, body: "" };
+      await waitForSettle(sample.page).catch(() => false);
+      const answer: PageResponse = { url: sample.page.url(), status: sample.status, body: await sample.page.content() };
+      fetched.set(url, answer);
+      return answer;
+    };
+    const captureFrom = async (url: string): Promise<PageCapture> => {
+      const sample = sampleOf(url);
+      if (sample === undefined) return { responses: [] };
+      await waitForSettle(sample.page).catch(() => false);
+      const capture = captures.get(sample.page);
+      await capture?.settled();
+      return {
+        responses: capture?.responses ?? [],
+        text: await sample.page.evaluate(() => document.body?.innerText ?? ""),
+        html: await sample.page.content(),
+      };
+    };
+    const render: RenderPages = (targets, use) =>
+      use(
+        targets.map((url) => {
+          const sample = sampleOf(url);
+          if (sample === undefined) throw new Error(`the compile core asked to render ${url}, which is not one of template ${plan.templateKey}'s sample pages`);
+          return sample.page;
+        }),
+      );
+
+    // The sample, in the crawler's own order: `pickSampleUrls` already chose
+    // these pages, and the page order is the order tier 3's options list their
+    // values in -- which is what a recorded answer is checked against.
+    const probes = [];
+    for (const url of data.sampleUrls) probes.push(probeFrom(url, await fetchFrom(url)));
+    const chosen = chooseSample(probes, { size: data.sampleUrls.length });
+    const position = (url: string): number => data.sampleUrls.indexOf(url);
+    const sample: SampleChoice = { ...chosen, picks: [...chosen.picks].sort((a, b) => position(a.url) - position(b.url)) };
+
+    const result: TemplateCompile = await compileTemplate({
+      spec,
+      fields: requested.map((field) => (field.type === undefined ? { name: field.name } : { name: field.name, type: field.type })),
+      sample,
+      sources: { fetch: fetchFrom, capture: captureFrom, render },
+      chooser,
+      templateKey: plan.templateKey,
+      cacheKey: plan.cacheKey,
+      profile: input.profile,
+      entry: { mode: "direct", url: samples[0]!.page.url() },
+    });
+
+    if (result.ok) {
+      const scraper = result.compiled.scraper;
+      return {
+        scraper,
+        fieldsNotFound: names.filter((name) => !(name in scraper.fields)),
+        core: { sample, manuscript: result.manuscript, reconciliation: result.reconciliation, rationale: result.compiled.rationale },
+      };
+    }
+
+    const core: CompiledTemplate["core"] = { sample, manuscript: result.manuscript, ...(result.reconciliation === undefined ? {} : { reconciliation: result.reconciliation }) };
+    await deps.onCompiled?.({ templateKey: plan.templateKey, mode, spec, scraper: null, because: result.because, core });
+    const open = result.status === "open" ? (result.open?.questions ?? []) : [];
+    if (open.length > 0) {
+      // R4: an open ambiguity does not silently compile. The core already put
+      // every choice among readings to the chooser; what is left is a decision
+      // no choice question can take (a type gap, a disagreement), or one no
+      // chooser could be opened for. Exit 3, like any other question owed.
+      return {
+        scraper: null,
+        fieldsNotFound: [],
+        core,
+        stop: {
+          status: "needs_human",
+          message:
+            `template ${plan.templateKey}: ${open.length} open decision(s) nobody here could make (${open.map((item) => item.id).join(", ")}) — ${result.because}. ` +
+            `A --rubric or a declared type (--fields name:type) that settles it, or \`navvi make --work <dir>\` with --answer, decides it; nothing compiles an open ambiguity on a guess.`,
+        },
+      };
+    }
+    ctxLog(`template ${plan.templateKey}: ${result.status} — ${result.because}`);
+    return { scraper: null, fieldsNotFound: names, core };
   }
 
   function checkFields(scraper: CompiledScraper, item: ItemExtraction): string[] {
@@ -1185,10 +1384,16 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
    * this, so nothing changes for a scraper that does not.
    */
   const captures = new WeakMap<Page, Capture>();
-  const wantsNetwork = plans.some((p) => p.scraper && Object.values(p.scraper.fields).some((f) => f.alternatives.some((a) => a.source === "network")));
+  /**
+   * Asked per page rather than once per run. A scraper compiled *this* run can
+   * read payloads too since U5 put the record compile on the payload tier, and
+   * a flag computed before the compile would leave every replay page after it
+   * without a capture, reading each `network` field null.
+   */
+  const wantsNetwork = (): boolean => plans.some((p) => p.scraper && Object.values(p.scraper.fields).some((f) => f.alternatives.some((a) => a.source === "network")));
 
-  const startCapture = (page: Page): void => {
-    if (!wantsNetwork || captures.has(page)) return;
+  const startCapture = (page: Page, compiling = false): void => {
+    if ((!compiling && !wantsNetwork()) || captures.has(page)) return;
     captures.set(page, captureJson(page, { match: /./, limit: 40 }));
   };
   const capturedFor = (page: Page): CapturedResponse[] => captures.get(page)?.responses ?? [];

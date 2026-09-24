@@ -144,6 +144,25 @@ export function makeStop(stage: string, because: string, exit: number): string {
   return `stopped at ${stage}: ${because} (exit ${exit})\n`;
 }
 
+// ------------------------------------------------------------ U5: --work
+
+/**
+ * What `navvi "<prompt>" <url> --work <dir>` wrote, and what it did not.
+ *
+ * Structural rather than `WrittenArtifacts` from `src/make/`: this module is a
+ * stage and the driver is above it. An absent artifact is listed with its
+ * reason, grouped, because "not written" and "not measured" are different
+ * sentences and a directory listing cannot tell them apart.
+ */
+export function workBlock(written: { dir: string; templateKey: string; written: readonly string[]; absent: ReadonlyArray<{ name: string; because: string }> }): string {
+  const lines = [`navvi: work ${written.dir} — ${written.templateKey}`];
+  lines.push(`  wrote: ${written.written.join(", ")}`);
+  const reasons = new Map<string, string[]>();
+  for (const entry of written.absent) reasons.set(entry.because, [...(reasons.get(entry.because) ?? []), entry.name]);
+  for (const [because, names] of reasons) lines.push(`  absent: ${names.join(", ")} — ${because}`);
+  return lines.join("\n") + "\n";
+}
+
 // ------------------------------------------------------------ chooser usage
 
 function fmtMs(ms: number): string {

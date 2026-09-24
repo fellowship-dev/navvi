@@ -7,7 +7,7 @@ import type { Page } from "playwright";
 import { launch, type LaunchedBrowser } from "../src/browser/launch.js";
 import { main, type CliIo } from "../bin/cli.js";
 import { parseArgs } from "../src/cli/args.js";
-import { answersFromUrls, applyAnswers, digestOfParams, LEDGER_FILE, make, matchAnswer, parseAnswer, Work, type Ledger, type MakeDeps, type MakeResult, type Pages, type StageName } from "../src/make/index.js";
+import { answersFromUrls, applyAnswers, digestOfParams, LEDGER_FILE, make, matchAnswer, parseAnswer, Work, writeCompiledTemplate, type Ledger, type MakeDeps, type MakeResult, type Pages, type StageName } from "../src/make/index.js";
 import { readingOf } from "../src/replay/determinism.js";
 import { extractPage, fieldTypesOf, type PageExtraction } from "../src/scraper/extract.js";
 import { canaryOrigin, type CompiledScraper } from "../src/scraper/schema.js";
@@ -17,6 +17,8 @@ import type { Spec } from "../src/spec/schema.js";
 import type { Manuscript } from "../src/investigate/index.js";
 import type { Reconciliation } from "../src/reconcile/index.js";
 import type { Determinism } from "../src/replay/determinism.js";
+import { runCrawl } from "../src/replay/crawler.js";
+import { F, fixtureInput, makeActor, makeDeps } from "./helpers.js";
 import { startFixtureServer, type FixtureServer } from "./server.js";
 
 /**
@@ -1275,6 +1277,51 @@ describe("tier 3: a catalogue that declares nothing", () => {
     expect(text).toMatch(/\nchooser\s+3 questions\n/);
     expect(text).toContain("  decider recorded: 3 decisions");
     expect(text).toMatch(/verify\s+3 of 3 compiled/);
+  });
+
+  /**
+   * U5 (AE1): one compile core, two front ends. `navvi make … --work w1` and
+   * the plain command with `--work w2` compile the same pages through
+   * `compileTemplate`'s tiers and write the same `scraper.json` fields, down
+   * to the fingerprints -- make adds the determinism and verify stages around
+   * it, and the plain command the crawl.
+   */
+  it("navvi make --work and the plain command's --work write scraper.json with the same fields and alternatives", async () => {
+    const urls = ["books-1", "books-2", "books-3"].map(bookUrl);
+    const w1 = join(dir, "w1");
+    const w2 = join(dir, "w2");
+    Work.open(w1).writeJson("spec.json", booksSpec());
+    const patterns = { title: /^[^=]*h1 = /, price: /price_color/, availability: /availability/ };
+
+    const made = await make(options({ work: w1, urls }), {
+      report,
+      now: () => NOW,
+      loadUrls: () => Promise.resolve(urls),
+      openPages: () => Promise.resolve(livePages()),
+      openChooser: () => Promise.resolve(new PatternChooser(patterns)),
+    });
+    expect(made.status, transcript()).toBe("delivered");
+
+    const plain = new PatternChooser(patterns);
+    const actor = makeActor(dir);
+    const summary = await runCrawl(
+      fixtureInput({ startUrls: urls, mode: "record", fields: F("title", "price", "availability"), description: "book", prompt: "Extract the book title, price and availability" }),
+      makeDeps(dir, actor, plain, { onCompiled: (compiled) => void writeCompiledTemplate(w2, compiled) }),
+    );
+    expect(summary.status, summary.message).toBe("succeeded");
+    expect(plain.questions.map((question) => question.id)).toEqual(["field.title", "field.price", "field.availability"]);
+
+    const one = JSON.parse(readFileSync(join(w1, "scraper.json"), "utf8")) as CompiledScraper;
+    const two = JSON.parse(readFileSync(join(w2, "scraper.json"), "utf8")) as CompiledScraper;
+    expect(two.fields).toEqual(one.fields);
+    expect(Object.keys(two.fields)).toEqual(["title", "price", "availability"]);
+
+    // The plain command's directory holds make's artifact set, less the two stages it does not run.
+    for (const name of ["spec.json", "sample.json", "investigation.json", "reconcile.json", "reconcile.md", "schema.json", "scraper.json", "rationale.md", "machine.mmd"]) {
+      expect(existsSync(join(w2, name)), name).toBe(true);
+    }
+    for (const name of ["determinism.json", "scorecard.md", "make.json"]) expect(existsSync(join(w2, name)), name).toBe(false);
+    expect(readFileSync(join(w2, "rationale.md"), "utf8")).toContain("Decided by **recorded**, asked `field.title`");
   });
 });
 

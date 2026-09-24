@@ -233,7 +233,10 @@ describe("typed fields in the input and the compiled scraper", () => {
     const stored = await store.get(summary.scriptId!);
     expect(stored?.fields.price?.type).toBe("money");
     expect(stored?.fields.stock?.type).toBe("boolean");
-    expect(stored?.fields.name?.type).toBeUndefined();
+    // U5: the record compile runs the compile core, which stores the type the
+    // reconciliation settled for every column -- declared, or read off the
+    // values. A DOM string reads as `text`, which coerces nothing.
+    expect(stored?.fields.name?.type).toBe("text");
 
     const empty = new RecordedChooser({ fixture: "crawler/empty" });
     const replayed = await runCrawl(fixtureInput({ ...raw, scriptId: summary.scriptId }), makeDeps(dir, actor, empty));
