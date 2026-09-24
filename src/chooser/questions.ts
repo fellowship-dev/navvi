@@ -12,6 +12,22 @@ export const premises = {
     `Which candidate holds the ${field}${description ? ` (${description})` : ""} value on every sample? Pick none when no candidate is right on all samples.`,
 
   /**
+   * The list follow-up (2026-09-24), for a field bound to one member of a
+   * repeated family. `plural` is whether the field's name reads as several
+   * values; it words the question and never decides it.
+   */
+  listForPositional: (field: string, path: string, plural: boolean): string =>
+    `The ${field} was bound to one element of \`${path}\`, which repeats: the options return every matching element as a list. ` +
+    (plural ? `${field} reads as several values per record; ` : "") +
+    `Pick the list when ${field} is all of them, or none to keep the one element.`,
+
+  /** The list follow-up for a field no one-value candidate held. */
+  listForUnbound: (field: string, description: string | undefined, plural: boolean): string =>
+    `No single element was the ${field}${description ? ` (${description})` : ""}. Each option returns every element a selector matches, as a list, with how many it found on each sample. ` +
+    (plural ? `${field} reads as several values per record. ` : "") +
+    `Pick the list that is the ${field} on every sample, or none.`,
+
+  /**
    * U6 (KTD5): which of the readings the cheap tiers found is the field.
    *
    * Asked when a field has competing readings -- values the site itself

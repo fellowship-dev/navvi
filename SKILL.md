@@ -125,6 +125,7 @@ If you cannot keep stdin open (a tool that runs a command to completion), add `-
 | --- | --- | --- |
 | 0 | `succeeded` | Use the data |
 | 1 | `no_items_found`, `drift`, `blocked_bot_detection`, `blocked_login_required`, `blocked_no_progress` | Read the stderr message; a redesign needs a new prompt, a login needs `--profile local` and secrets |
+| 1 | `partial` | Rows were written but a requested field is null on every one (`fields not found: …` on the status line); the cached scraper will keep it null, so rephrase or name the field and rerun with `--force-recompile` |
 | 2 | configuration or validation error | Fix the flags; the message names the env vars for keys |
 | 3 | `needs_human` | Answer `<storage>/questions/<token>.json`, rerun the same command with `--answers <file> --resume <latest token>` |
 | 4 | `budget_exhausted`, `model_unavailable`, `charge_limit` | Retry later, raise the cap, or switch chooser |

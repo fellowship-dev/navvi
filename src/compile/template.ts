@@ -152,6 +152,7 @@ export function domTier(options: DomTierOptions): (request: DomRequest) => Promi
         pages,
         fields,
         chooser,
+        offerLists: false,
         ...(options.records === undefined ? {} : { description: options.records }),
         ...(options.settle === undefined ? {} : { settle: options.settle }),
       });
@@ -176,6 +177,19 @@ export function domTier(options: DomTierOptions): (request: DomRequest) => Promi
         const offered = question?.options?.length ?? choice.candidates.length;
         if (chosen === null) {
           unanswered.push({ field: field.name, because: `tier 3: ${answeredBy} answered none to \`${id}\` over ${offered} candidate(s) on ${pageCount}; no DOM node holds ${field.name} on every sample` });
+          continue;
+        }
+        if (chosen.multiple) {
+          // Deferred, and said rather than smoothed over: a tier-3 binding
+          // reaches the scraper through the reconciliation and
+          // `compileFromReconciliation` (./proven.ts), and neither carries
+          // `Field.multiple` yet. Binding the list selector anyway would
+          // replay it as one value -- the first match -- which is the
+          // silently-wrong list this option exists to prevent.
+          unanswered.push({
+            field: field.name,
+            because: `tier 3: ${answeredBy} chose \`${chosen.path}\` as a list of every match, and the compile core cannot carry a multi-valued binding yet; ${field.name} is left unbound rather than compiled to its first element`,
+          });
           continue;
         }
         const decision: TierDecision = { question: id, premise: question?.premise ?? "", options: offered, chose: candidateLabel(chosen), answeredBy };

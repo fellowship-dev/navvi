@@ -5,7 +5,8 @@ import type { Status } from "./schema.js";
  *
  * ## Why this is not the `Status` enum
  *
- * `STATUSES` in `schema.ts` is what a *run* ends as. It is ten words long and
+ * `STATUSES` in `schema.ts` is what a *run* ends as. It was ten words long
+ * when this was written (`partial`, the eleventh, joined on 2026-09-24) and
  * every one of them is a way for a run to stop. It says nothing about the thing
  * that actually goes wrong here, which is a **field**: offered as a candidate,
  * narrowed against its siblings, bound to one of them, gated, compiled,
@@ -445,6 +446,9 @@ const TRANSITION_TABLE = [
     from: "offered",
     to: "absent",
     because: "something was offered for this field and nothing survived narrowing",
+    // Where a requested field ends unbound while its siblings compile: the run
+    // still delivers rows, and reports `partial` rather than `succeeded`.
+    status: "partial",
     requires: [
       {
         must: "each elimination names the rule that made it, so an empty result is an argument rather than a shrug",

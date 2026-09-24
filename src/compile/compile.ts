@@ -8,7 +8,10 @@ import { SCRAPER_VERSION, validateScraper, type CompiledScraper, type ENTRY_MODE
 import { pickSampleRows } from "../template/index.js";
 import {
   applyFieldAnswers,
+  applyListAnswers,
   buildFieldQuestions,
+  buildListQuestions,
+  singleCandidates,
   chunkQuestions,
   intersectCandidates,
   toAlternative,
@@ -100,11 +103,23 @@ async function resolveSpecs(page: Page, specs: readonly LeafSpec[], scope: { wit
   );
 }
 
+/** Every match of each spec, as replay reads a multi-valued field. */
+async function resolveAllSpecs(page: Page, specs: readonly LeafSpec[], scope: { within?: string; itemIndex?: number; span?: number }): Promise<Array<string[] | null>> {
+  await ensureSnapshotScript(page);
+  const list = specs.map((s) => ({ selector: s.selector, attr: s.attr }));
+  return page.evaluate(
+    ({ list, scope }) => list.map((s) => window.__navvi!.resolveAll({ ...scope, selector: s.selector, attr: s.attr })),
+    { list, scope },
+  );
+}
+
 function listResolver(page: Page, item: ItemSpec, indices: readonly number[]): SampleResolver {
+  const scope = (i: number) => ({ within: item.anchorSelector, itemIndex: indices[i] ?? 0, span: item.span });
   return {
     count: indices.length,
     baseUrl: () => page.url(),
-    resolve: (i, specs) => resolveSpecs(page, specs, { within: item.anchorSelector, itemIndex: indices[i] ?? 0, span: item.span }),
+    resolve: (i, specs) => resolveSpecs(page, specs, scope(i)),
+    resolveAll: (i, specs) => resolveAllSpecs(page, specs, scope(i)),
   };
 }
 
@@ -113,6 +128,7 @@ function recordResolver(pages: readonly Page[]): SampleResolver {
     count: pages.length,
     baseUrl: (i) => pages[i]?.url() ?? "",
     resolve: (i, specs) => resolveSpecs(pages[i]!, specs, {}),
+    resolveAll: (i, specs) => resolveAllSpecs(pages[i]!, specs, {}),
   };
 }
 
@@ -142,7 +158,13 @@ function finish(options: CompileOptions, mapped: Map<string, FieldCandidate | nu
   const fieldsNotFound: string[] = [];
   for (const field of options.fields) {
     const candidate = mapped.get(field.name);
-    if (candidate) fields[field.name] = { alternatives: [toAlternative(candidate, parts.baseUrls)], ...(field.type ? { type: field.type } : {}) };
+    if (candidate) {
+      fields[field.name] = {
+        alternatives: [toAlternative(candidate, parts.baseUrls)],
+        ...(field.type ? { type: field.type } : {}),
+        ...(candidate.multiple ? { multiple: true } : {}),
+      };
+    }
     else fieldsNotFound.push(field.name);
   }
   const doc: CompiledScraper = {
@@ -227,11 +249,14 @@ async function compileList(options: CompileOptions): Promise<CompileResult> {
     const questions = buildFieldQuestions(options.fields, candidates, state, suffix, shared);
     const nextLinks = nextLinkCandidates(cands.links, options.startUrls, allowed);
     if (nextLinks.length > 0) questions.push(buildNextLinkQuestion(nextLinks, state, suffix, shared));
-    const detailCands = options.followDetailPages ? detailLinkCandidates(candidates, page.url(), options.startUrls, allowed) : [];
+    const detailCands = options.followDetailPages ? detailLinkCandidates(singleCandidates(candidates), page.url(), options.startUrls, allowed) : [];
     if (detailCands.length > 0) questions.push(buildDetailLinkQuestion(detailCands, description, state, suffix, shared));
 
     const answers = await askChunked(options.chooser, questions);
     const mapped = applyFieldAnswers(options.fields, candidates, answers, suffix);
+    // Asked only when some field bound one member of a repeated family, or nothing.
+    const followUps = buildListQuestions(options.fields, mapped, candidates, state, suffix, shared);
+    if (followUps.length > 0) applyListAnswers(mapped, followUps, await askChunked(options.chooser, followUps.map((f) => f.question)));
     if (allNone(mapped)) continue;
 
     const nextIndex = chosenIndex(answers, `${NEXT_LINK_QUESTION_ID}${suffix}`);
@@ -262,6 +287,13 @@ export interface RecordChoiceOptions {
   chooser: Chooser;
   description?: string | undefined;
   settle?: SettleOptions | undefined;
+  /**
+   * Ask the list follow-up (`buildListQuestions`). Default true. Tier 3 of the
+   * compile core turns it off: its bindings reach the scraper through
+   * `compileFromReconciliation` (./proven.ts), which cannot carry
+   * `Field.multiple` yet, so a list there would replay as its first element.
+   */
+  offerLists?: boolean | undefined;
 }
 
 /** What the record-mode fan-out asked and what came back, per field. */
@@ -311,7 +343,8 @@ export async function chooseRecordFields(options: RecordChoiceOptions): Promise<
     }
     const leaves = [];
     for (const page of pages) leaves.push((await getCandidates(page)).leaves);
-    const candidates = await intersectCandidates(leaves, recordResolver(pages));
+    const found = await intersectCandidates(leaves, recordResolver(pages));
+    const candidates = options.offerLists === false ? singleCandidates(found) : found;
     if (candidates.length === 0) continue;
 
     const state = fanOutState(description, options.fields, pages.map((p) => p.url()), `record mode, ${pages.length} sample pages`);
@@ -319,6 +352,13 @@ export async function chooseRecordFields(options: RecordChoiceOptions): Promise<
     const questions = buildFieldQuestions(options.fields, candidates, state, suffix, shared);
     const answers = await askChunked(options.chooser, questions);
     const mapped = applyFieldAnswers(options.fields, candidates, answers, suffix);
+    const followUps = options.offerLists === false ? [] : buildListQuestions(options.fields, mapped, candidates, state, suffix, shared);
+    if (followUps.length > 0) {
+      const listAnswers = await askChunked(options.chooser, followUps.map((f) => f.question));
+      applyListAnswers(mapped, followUps, listAnswers);
+      questions.push(...followUps.map((f) => f.question));
+      answers.push(...listAnswers);
+    }
     last = { candidates, questions, answers, mapped, suffix, baseUrls: pages.map((p) => p.url()) };
     if (!allNone(mapped)) return last;
   }

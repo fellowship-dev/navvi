@@ -188,6 +188,7 @@ the TypeSafe API if the Gateway is unavailable, saying so in the summary.
 | --- | --- | --- |
 | 0 | `succeeded` (`make`: `delivered`) | Use the data |
 | 1 | `no_items_found`, `drift`, `blocked_*` (`make`: `short`) | Read stderr; a redesign needs a new prompt, a login needs `--profile local` |
+| 1 | `partial` | Rows were written, but a requested field was never bound and is null on every row; the status line names it (`fields not found: …`). Rephrase the field or pass `--fields`, then `--force-recompile` |
 | 2 | configuration error | Fix the flag; the message names what is missing |
 | 3 | `needs_human` (`make`: `needs_answers`) | Answer the parked questions and `--resume`, or `--answer` |
 | 4 | `budget_exhausted`, `model_unavailable`, `charge_limit` | Retry later, raise the cap, or switch chooser |

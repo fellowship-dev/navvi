@@ -22,8 +22,16 @@ export const MAX_VALUE_CHARS = 4_000;
 /** Attributes whose values are URLs: made absolute, non-http(s) schemes become null (R4). */
 export const URL_ATTRS: ReadonlySet<string> = new Set(["href", "src"]);
 
+/**
+ * What one field read on one item: a string, a list of strings for a
+ * multi-valued field (`Field.multiple`), or null when nothing answered. A list
+ * is never empty -- a multi-valued field that matched nothing is null, like any
+ * other field that did not resolve.
+ */
+export type RawValue = string | string[] | null;
+
 export interface ItemExtraction {
-  values: Record<string, string | null>;
+  values: Record<string, RawValue>;
   /** Index of the alternative that resolved each field, or null when none did. */
   resolvedBy: Record<string, number | null>;
   sourceUrl: string;
@@ -133,8 +141,10 @@ export function commonShape(values: readonly string[], attr?: string | undefined
  * digits with thousands separators; date accepts ISO and common written forms;
  * url accepts absolute http(s) only; text accepts any non-empty value.
  */
-export function fingerprintMatches(value: string | null | undefined, fingerprint: Fingerprint): boolean {
-  const t = squash(value);
+export function fingerprintMatches(value: string | readonly string[] | null | undefined, fingerprint: Fingerprint): boolean {
+  // A list fits when it has elements and every one of them does.
+  if (Array.isArray(value)) return value.length > 0 && value.every((v) => fingerprintMatches(v, fingerprint));
+  const t = squash(value as string | null | undefined);
   if (!t) return false;
   switch (fingerprint.shape) {
     case "text":
@@ -360,9 +370,37 @@ export function coerceValue(value: string | null, type: FieldType | undefined, b
   }
 }
 
-export function coerceValues(values: Record<string, string | null>, types: Record<string, FieldType | undefined>, base?: string): Record<string, TypedValue> {
+/** A row's value: one typed value, or a list of them for a multi-valued field. */
+export type FieldValue = TypedValue | TypedValue[];
+
+/** CSV and every other one-cell reading of a list join its elements with this. */
+export const LIST_JOINER = "; ";
+
+/** R5 for a raw value that may be a list: each element coerced on its own, in order. */
+export function coerceField(value: RawValue, type: FieldType | undefined, base?: string): FieldValue {
+  return Array.isArray(value) ? value.map((v) => coerceValue(v, type, base)) : coerceValue(value, type, base);
+}
+
+/**
+ * One value for the readers that compare scalars (determinism, verification):
+ * a list is its coerced elements joined with `LIST_JOINER`, so two readings of
+ * the same list compare equal and a changed list does not.
+ */
+export function scalarOf(value: FieldValue): TypedValue {
+  return Array.isArray(value) ? value.map((v) => (v === null ? "" : String(v))).join(LIST_JOINER) : value;
+}
+
+/** Every field of a row coerced to a scalar; lists are joined (see `scalarOf`). */
+export function coerceValues(values: Record<string, RawValue>, types: Record<string, FieldType | undefined>, base?: string): Record<string, TypedValue> {
   const out: Record<string, TypedValue> = {};
-  for (const [name, value] of Object.entries(values)) out[name] = coerceValue(value, types[name], base);
+  for (const [name, value] of Object.entries(values)) out[name] = scalarOf(coerceField(value, types[name], base));
+  return out;
+}
+
+/** The row that goes out: every field coerced, lists kept as arrays. */
+export function coerceRow(values: Record<string, RawValue>, types: Record<string, FieldType | undefined>, base?: string): Record<string, FieldValue> {
+  const out: Record<string, FieldValue> = {};
+  for (const [name, value] of Object.entries(values)) out[name] = coerceField(value, types[name], base);
   return out;
 }
 
@@ -394,7 +432,7 @@ export function readValues(extraction: PageExtraction, types: Record<string, Fie
     const out: Record<string, TypedValue> = {};
     for (const [name, value] of Object.entries(item.values)) {
       if (item.resolvedBy[name] === null || item.resolvedBy[name] === undefined) continue;
-      out[name] = coerceValue(value, types[name], item.sourceUrl);
+      out[name] = scalarOf(coerceField(value, types[name], item.sourceUrl));
     }
     return out;
   });
@@ -413,6 +451,8 @@ export function fieldTypesOf(scraper: CompiledScraper): Record<string, FieldType
 interface FieldSpec {
   name: string;
   alternatives: Array<{ selector: string; attr?: string | undefined }>;
+  /** Read every match instead of the first (`Field.multiple`). */
+  multiple: boolean;
 }
 
 interface EvaluateArg {
@@ -426,7 +466,7 @@ interface EvaluateArg {
 interface EvaluateResult {
   baseUri: string;
   /** Per item, per field: the raw value of every alternative, in alternative order. */
-  items: Array<{ candidates: Array<Array<string | null>> }>;
+  items: Array<{ candidates: Array<Array<string | string[] | null>> }>;
 }
 
 /** Runs inside the page. Self-contained: Playwright serializes it, so nothing from module scope is referenced. */
@@ -478,10 +518,32 @@ function extractInPage(arg: EvaluateArg): EvaluateResult {
     }
     return null;
   };
+  // A multi-valued field: each row itself when it matches, then every match
+  // in it, in document order; empty values dropped, and no match at all is null.
+  const resolveEvery = (rows: Element[], selector: string, attr: string | undefined): string[] | null => {
+    const out: string[] = [];
+    const seen = new Set<Element>();
+    for (const row of rows) {
+      const found: Element[] = [];
+      try {
+        if (row.matches(selector)) found.push(row);
+        found.push(...Array.from(row.querySelectorAll(selector)));
+      } catch {
+        return null;
+      }
+      for (const el of found) {
+        if (seen.has(el)) continue;
+        seen.add(el);
+        const value = attr ? squashText(el.getAttribute(attr)) : (ownText(el) || fullText(el)).slice(0, arg.maxChars);
+        if (value) out.push(value);
+      }
+    }
+    return out.length > 0 ? out : null;
+  };
   const itemRows: Element[][] =
     arg.mode === "list" ? Array.from(document.querySelectorAll(arg.anchorSelector)).map((a) => rowsFor(a, arg.span)) : [[document.documentElement]];
   const items = itemRows.map((rows) => ({
-    candidates: arg.fields.map((field) => field.alternatives.map((alt) => resolve(rows, alt.selector, alt.attr))),
+    candidates: arg.fields.map((field) => field.alternatives.map((alt) => (field.multiple ? resolveEvery(rows, alt.selector, alt.attr) : resolve(rows, alt.selector, alt.attr)))),
   }));
   return { baseUri: document.baseURI, items };
 }
@@ -499,14 +561,21 @@ function nullFilled(names: readonly string[], sourceUrl: string): ItemExtraction
  * media attribute made absolute) fits its fingerprint, else the first with any
  * non-empty value, else none.
  */
-function pickAlternative(raws: ReadonlyArray<string | null>, alternatives: readonly FieldAlternative[], baseUri: string): { by: number; value: string | null } | null {
-  const resolved = raws.map((raw, i) => {
+function pickAlternative(raws: ReadonlyArray<string | string[] | null>, alternatives: readonly FieldAlternative[], baseUri: string): { by: number; value: RawValue } | null {
+  const resolved = raws.map((raw, i): RawValue => {
     if (raw === null || raw === "") return null;
     const attr = alternatives[i]?.attr;
-    return attr !== undefined && URL_ATTRS.has(attr) ? resolveUrl(raw, baseUri) : raw;
+    const url = attr !== undefined && URL_ATTRS.has(attr);
+    if (Array.isArray(raw)) {
+      // A list keeps the elements that resolve; one that is not http(s) is dropped rather than nulled (R4).
+      const list = url ? raw.map((v) => resolveUrl(v, baseUri)).filter((v): v is string => v !== null) : raw;
+      return list.length > 0 ? list : null;
+    }
+    return url ? resolveUrl(raw, baseUri) : raw;
   });
+  const present = (raw: string | string[] | null | undefined): boolean => raw !== null && raw !== undefined && raw !== "" && !(Array.isArray(raw) && raw.length === 0);
   let by = resolved.findIndex((value, i) => value !== null && fingerprintMatches(value, alternatives[i]!.fingerprint));
-  if (by < 0) by = raws.findIndex((raw) => raw !== null && raw !== "");
+  if (by < 0) by = raws.findIndex(present);
   return by < 0 ? null : { by, value: resolved[by] ?? null };
 }
 
@@ -524,11 +593,24 @@ function pickAlternative(raws: ReadonlyArray<string | null>, alternatives: reado
  * first -- but a declared alternative that resolves ends the search, exactly as
  * a selector that resolves does.
  */
+/**
+ * A declared value as a field reads it. A multi-valued field takes an array
+ * whole, element by element; a one-valued field reads an array as its
+ * `String()`, which is what it always did.
+ */
+function declaredValue(value: unknown, multiple: boolean): RawValue {
+  if (value === undefined || value === null) return null;
+  if (!multiple) return String(value);
+  const list = (Array.isArray(value) ? value : [value]).filter((v) => v !== undefined && v !== null).map(String).filter((v) => v !== "");
+  return list.length > 0 ? list : null;
+}
+
 async function resolveDeclared(
   page: Page,
   alternative: FieldAlternative,
   captured: readonly CapturedResponse[],
-): Promise<string | null> {
+  multiple = false,
+): Promise<RawValue> {
   const source = alternative.source ?? "dom";
   if (source === "dom" || !alternative.path) return null;
 
@@ -542,7 +624,7 @@ async function resolveDeclared(
       return value !== undefined && value !== null;
     };
     const response = newestUsableResponse(captured, { match: alternative.match ?? "", carries });
-    return response === null ? null : String(readDeclared(response.body, path));
+    return response === null ? null : declaredValue(readDeclared(response.body, path), multiple);
   }
 
   // json-ld: every block on the page, first one carrying the path.
@@ -553,7 +635,7 @@ async function resolveDeclared(
     let parsed: unknown;
     try { parsed = JSON.parse(block.trim()); } catch { continue; }
     const value = readDeclared(parsed, alternative.path, alternative.entity);
-    if (value !== undefined && value !== null) return String(value);
+    if (value !== undefined && value !== null) return declaredValue(value, multiple);
   }
   return null;
 }
@@ -578,12 +660,12 @@ export async function extractPage(page: Page, scraper: CompiledScraper, options:
   //
   // `resolvedBy` stays an index into the field's own alternatives, whichever
   // source answered, because that is what healing and the summaries read.
-  const declared = new Map<string, { value: string; by: number }>();
+  const declared = new Map<string, { value: string | string[]; by: number }>();
   for (const name of compiled) {
     const alternatives = scraper.fields[name]!.alternatives;
     for (const [index, alternative] of alternatives.entries()) {
       if ((alternative.source ?? "dom") === "dom") continue;
-      const value = await resolveDeclared(page, alternative, captured);
+      const value = await resolveDeclared(page, alternative, captured, scraper.fields[name]!.multiple === true);
       if (value !== null && value !== "") {
         declared.set(name, { value, by: index });
         break;
@@ -602,6 +684,7 @@ export async function extractPage(page: Page, scraper: CompiledScraper, options:
 
   const specs: FieldSpec[] = compiled.map((name) => ({
     name,
+    multiple: scraper.fields[name]!.multiple === true,
     alternatives: domIndexes.get(name)!.map((i) => {
       const a = scraper.fields[name]!.alternatives[i]!;
       return { selector: a.selector, attr: a.attr };

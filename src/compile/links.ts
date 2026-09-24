@@ -39,7 +39,8 @@ export function buildNextLinkQuestion(links: readonly LinkCandidate[], state: st
 /** Detail-link candidates: href leaves that resolve on every sample row, on-domain on every sample. */
 export function detailLinkCandidates(candidates: readonly FieldCandidate[], baseUrl: string, startUrls: readonly string[], allowedDomains: readonly string[]): FieldCandidate[] {
   return candidates.filter((c) => {
-    if (c.attr !== "href") return false;
+    // A detail page is one link per item, never a list of them.
+    if (c.attr !== "href" || c.multiple) return false;
     return c.values.every((v) => {
       try {
         return isOnAllowedDomain(new URL(v, baseUrl).href, startUrls, allowedDomains);

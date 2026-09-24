@@ -18,7 +18,7 @@ import type { Rubric, Spec } from "../spec/schema.js";
 import { continueWithoutRevalidation, waitForSettle } from "../browser/guards.js";
 import type { RunSummary } from "../main.js";
 import { dismissConsent, runPreSteps, type Notifier } from "../prestep/index.js";
-import { coerceValues, extractPage, fieldTypesOf, fingerprintMatches, type ItemExtraction } from "../scraper/extract.js";
+import { LIST_JOINER, coerceRow, extractPage, fieldTypesOf, fingerprintMatches, type ItemExtraction } from "../scraper/extract.js";
 import { cacheKey, canaryOrigin, promoteFieldAlternative, validateScraper, type CompiledScraper, type Status, type TraceStep } from "../scraper/schema.js";
 import { ScraperStore, ScraperStoreError } from "../scraper/store.js";
 import { findPlaceholders, MASK, maskUrlCredentials, MissingSecretError, redactRunInput, resolveSecrets, type CommandRunner, type Secret } from "../secrets/resolve.js";
@@ -480,13 +480,13 @@ type UserData = CompileUserData | ReplayUserData;
 
 function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePlan[], chooser: Chooser | null, charger: Charger): RunSummary {
   const usage = chooser?.usage();
-  const status: Status = state.stop
-    ? state.stop.status
-    : state.items > 0 && !(state.unhealed > 0 && state.failedItems >= state.items)
-      ? "succeeded"
-      : state.unhealed > 0
-        ? "drift"
-        : "no_items_found";
+  const clean: Status = state.items > 0 && !(state.unhealed > 0 && state.failedItems >= state.items) ? "succeeded" : state.unhealed > 0 ? "drift" : "no_items_found";
+  // Rows went out without a field the run asked for: every one of them carries
+  // it as null, and the cached scraper will keep doing so. That is not a clean
+  // success, and it has to say so where a person reads first.
+  const fieldsNotFound = [...state.fieldsNotFound].sort();
+  const partial = !state.stop && clean === "succeeded" && fieldsNotFound.length > 0;
+  const status: Status = state.stop ? state.stop.status : partial ? "partial" : clean;
   const summary: RunSummary = {
     status,
     items: state.items,
@@ -500,7 +500,7 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
     // mistakes a reordering for a repair.
     healingEvents: [...state.healingEvents, ...state.promotions],
     unmappedCandidates: state.unmappedCandidates,
-    fieldsNotFound: [...state.fieldsNotFound].sort(),
+    fieldsNotFound,
     // U14: the totals are the run's; `writer` names the second source and its share of them.
     chooser: usage ? summarizeUsage(usage) : null,
     // R39: every secret value and proxy credential masked
@@ -514,6 +514,7 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
     charges: { ...charger.counts },
     zeroDataRetention: usage?.zeroDataRetention ?? null,
   };
+  if (partial) summary.message = `fields not found: ${fieldsNotFound.join(", ")} — every row carries them as null`;
   if (state.stop) {
     summary.message = state.stop.message;
     if (state.stop.needsHuman) summary.needsHuman = state.stop.needsHuman;
@@ -1520,7 +1521,9 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       const fill = (plan.evidence.fills[name] ??= { filled: 0, total: 0 });
       const values = (plan.evidence.values[name] ??= []);
       for (const item of e.items) {
-        const value = item.values[name] ?? null;
+        const raw = item.values[name] ?? null;
+        // A list is one reading here: the variation check compares whole lists.
+        const value = Array.isArray(raw) ? raw.join(LIST_JOINER) : raw;
         fill.total += 1;
         if (value !== null && value !== "") fill.filled += 1;
         if (values.length < FIELD_VALUE_SAMPLES) values.push(value);
@@ -1675,7 +1678,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       await dataset.pushData(
         rows.map((item) => {
           const { [DETAIL_LINK_FIELD]: _hidden, ...values } = item.values;
-          return { ...coerceValues(values, types, sourceUrl), _source: sourceUrl };
+          return { ...coerceRow(values, types, sourceUrl), _source: sourceUrl };
         }),
       );
     }

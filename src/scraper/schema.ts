@@ -13,6 +13,13 @@ export const SCRAPER_VERSION = 1 as const;
 // R6: the status union. main.ts imports this once the orchestrator rewires it.
 export const STATUSES = [
   "succeeded",
+  /**
+   * Rows went out, and a requested field was never bound: every row carries it
+   * as null. Not `succeeded`, because on 2026-09-24 that is what a quotes run
+   * reported with `tags: null` on all ten rows and the cached scraper set to
+   * replay null forever; the only sign was one stderr line.
+   */
+  "partial",
   "no_items_found",
   "blocked_bot_detection",
   "blocked_login_required",
@@ -96,6 +103,18 @@ export const FieldAlternativeSchema = z.object({
 export const FieldSchema = z.object({
   alternatives: z.array(FieldAlternativeSchema).min(1, "a field needs at least one alternative"),
   type: z.enum(FIELD_TYPES).optional(),
+  /**
+   * A multi-valued field: every element a `dom` alternative's selector matches
+   * within the item (list mode) or the page (record mode), as a list, and a
+   * declared alternative's array whole. `type` then applies to each element.
+   *
+   * Absent means one value, the first match, which is what every scraper
+   * written before 2026-09-24 meant and still means. It exists because the
+   * quotes run of that day compiled a tag list to `a.tag:nth-of-type(2)`: a
+   * field that is a list had no way to be one, so it was the second tag or
+   * nothing.
+   */
+  multiple: z.boolean().optional(),
 });
 
 const fieldName = z.string().regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/, "field names are identifiers");

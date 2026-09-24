@@ -193,6 +193,8 @@ declare global {
       controlName(element: Element): string;
       candidates(opts: unknown): Candidates;
       resolveLeaf(opts: unknown): string | null;
+      /** Every match of a leaf selector, for a multi-valued field; null when the selector does not parse. */
+      resolveAll(opts: unknown): string[] | null;
       freshness(): { url: string; text: string; values: Array<[number, string, boolean]> };
       /** The in-page shape classifier, exposed for the differential test against `shapeOf` in src/scraper/extract.ts. */
       shapeOf(text: string, attr?: string | undefined): Shape;
@@ -228,6 +230,12 @@ export async function getCandidates(page: Page, opts: CandidateOptions = {}): Pr
 export async function resolveLeaf(page: Page, opts: ResolveLeafOptions): Promise<string | null> {
   await ensureSnapshotScript(page);
   return page.evaluate((a) => window.__navvi!.resolveLeaf(a), { ...opts });
+}
+
+/** Every value a leaf selector matches, the way replay reads a multi-valued field; empty when nothing matches. */
+export async function resolveAll(page: Page, opts: ResolveLeafOptions): Promise<string[]> {
+  await ensureSnapshotScript(page);
+  return (await page.evaluate((a) => window.__navvi!.resolveAll(a), { ...opts })) ?? [];
 }
 
 const q = (s: string, max: number): string => JSON.stringify(s.length > max ? `${s.slice(0, max - 1)}…` : s);

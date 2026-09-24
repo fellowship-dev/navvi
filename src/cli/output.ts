@@ -2,6 +2,7 @@
  * U17: the data writers. JSON is an array of records; CSV takes its header from
  * the union of keys in first-seen order and quotes per RFC 4180 (CRLF rows,
  * quotes doubled, fields quoted when they carry a comma, quote or line break).
+ * A multi-valued field is one cell, its elements joined with "; ".
  */
 
 export type Row = Record<string, unknown>;
@@ -10,9 +11,14 @@ export function toJson(rows: readonly Row[], compact = false): string {
   return (compact ? JSON.stringify(rows) : JSON.stringify(rows, null, 2)) + "\n";
 }
 
+/** A multi-valued field's cell: its elements joined, nulls empty. JSON keeps the array. */
+export const CSV_LIST_JOINER = "; ";
+
 function cell(value: unknown): string {
   if (value === null || value === undefined) return "";
-  const text = typeof value === "string" ? value : typeof value === "object" ? JSON.stringify(value) : String(value);
+  const text = Array.isArray(value)
+    ? value.map((v) => (v === null || v === undefined ? "" : typeof v === "object" ? JSON.stringify(v) : String(v))).join(CSV_LIST_JOINER)
+    : typeof value === "string" ? value : typeof value === "object" ? JSON.stringify(value) : String(value);
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 

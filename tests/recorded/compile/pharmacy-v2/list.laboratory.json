@@ -1,0 +1,9 @@
+{
+  "id": "list.laboratory",
+  "index": null,
+  "kind": "choice",
+  "note": "list follow-up (2026-09-24): keep the one-value binding, or none for a field no candidate held",
+  "options": [
+    "main/article/div/p/span (every match, as a list) = 2 values: \"Laboratorio:\", … | 2 values: \"Laboratorio:\", … | 2 values: \"Laboratorio:\", …"
+  ]
+}

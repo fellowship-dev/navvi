@@ -315,7 +315,9 @@ describe("record mode (AE7)", () => {
       expect(() => validateScraper(result.scraper)).not.toThrow();
       const out = await extractPage(pages[0]!, result.scraper, { fields: ["name", "isbn"] });
       expect(out.values).toEqual({ name: "Paracetamol 500 mg x 16 comprimidos", isbn: null });
-      expect(spy.batches).toHaveLength(1);
+      // the field batch, then the list follow-up an unbound field is offered
+      // (2026-09-24); a list is not the isbn either, so it stays unbound
+      expect(spy.batches.map((batch) => batch.map((q) => q.id))).toEqual([["field.name", "field.isbn"], ["list.isbn"]]);
     } finally {
       await closePages(pages);
     }

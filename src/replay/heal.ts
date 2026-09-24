@@ -2,7 +2,7 @@ import type { Page } from "playwright";
 import { DEFAULT_CAPS, getCandidates, getControls, type LeafCandidate, type SnapshotControl } from "../browser/snapshot.js";
 import type { JsonValue, Question } from "../chooser/chooser.js";
 import { premises } from "../chooser/questions.js";
-import { askChunked, candidateContexts, candidateKey, candidateLabel, toAlternative, type FieldCandidate } from "../compile/index.js";
+import { askChunked, candidateContexts, candidateKey, candidateLabel, listCandidatesFromLeaves, toAlternative, type FieldCandidate } from "../compile/index.js";
 import {
   checkCanary,
   classifyRun,
@@ -237,7 +237,11 @@ async function healFields(ctx: HealContext, fields: readonly string[], memory: S
     const known = new Set(field.alternatives.map((a) => candidateKey(a.selector, a.attr)));
     const samples = field.alternatives[0]?.fingerprint.samples.slice(0, 2) ?? [];
     const shape = field.alternatives[0]?.fingerprint.shape ?? "text";
-    const fresh = leaves.filter((leaf) => !known.has(candidateKey(leaf.selector, leaf.attr))).map(leafToCandidate);
+    const single = leaves.filter((leaf) => !known.has(candidateKey(leaf.selector, leaf.attr))).map(leafToCandidate);
+    // A multi-valued field heals to a list: its families of positional leaves
+    // are offered first, so a repair does not turn a list into one element.
+    const lists = field.multiple ? listCandidatesFromLeaves(leaves).filter((c) => !known.has(candidateKey(c.selector, c.attr))) : [];
+    const fresh = [...lists, ...single];
     const candidates = rankHealCandidates(fresh, { field: name, shape, samples });
     // The none-memory keys on every fresh leaf, so pages with the same structure share one answer whatever the cap keeps.
     if (candidates.length === 0 || memory.has(memoryKey(name, fresh))) continue;

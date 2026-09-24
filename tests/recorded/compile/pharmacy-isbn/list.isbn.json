@@ -1,0 +1,13 @@
+{
+  "id": "list.isbn",
+  "index": null,
+  "kind": "choice",
+  "note": "list follow-up (2026-09-24): keep the one-value binding, or none for a field no candidate held",
+  "options": [
+    "main/section.relacionados/ul.lista-relacionados/li.relacionado/a (every match, as a list) = 4 values: \"Ibuprofeno 400 mg x…\", … | 4 values: \"Omeprazol 20 mg x 3…\", … | 4 values: \"Loratadina 10 mg x …\", …",
+    "main/section.relacionados/ul.lista-relacionados/li.relacionado/a/@href (every match, as a list) = 4 values: \"ibuprofeno-400-mg.h…\", … | 4 values: \"omeprazol-20-mg.html\", … | 4 values: \"loratadina-10-mg.ht…\", …",
+    "main/section.relacionados/ul.lista-relacionados/li.relacionado/span.precio (every match, as a list) = 4 values: \"$ 3.990\", … | 4 values: \"$ 5.490\", … | 4 values: \"$ 4.290\", …",
+    "main/nav.breadcrumb/a (every match, as a list) = 3 values: \"Inicio\", … | 3 values: \"Inicio\", … | 3 values: \"Inicio\", …",
+    "main/nav.breadcrumb/a/@href (every match, as a list) = 3 values: \"../index.html\", … | 3 values: \"../index.html\", … | 3 values: \"../index.html\", …"
+  ]
+}

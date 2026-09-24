@@ -511,6 +511,37 @@
     return null;
   }
 
+  /**
+   * Every element a selector matches, the way replay reads a multi-valued
+   * field: each row itself when it matches, then its matches in document
+   * order; empty values dropped. Null only for a selector that does not parse.
+   */
+  function resolveAll(input) {
+    var rows;
+    if (input.within) {
+      var anchor = document.querySelectorAll(input.within)[input.itemIndex || 0];
+      if (!anchor) return [];
+      rows = rowsFor(anchor, input.span || 1);
+    } else {
+      rows = [document.documentElement];
+    }
+    var out = [], seen = new Set();
+    for (var row of rows) {
+      var found = [];
+      try {
+        if (row.matches(input.selector)) found.push(row);
+        for (var m of row.querySelectorAll(input.selector)) found.push(m);
+      } catch (e) { return null; }
+      for (var el of found) {
+        if (seen.has(el)) continue;
+        seen.add(el);
+        var value = input.attr ? squash(el.getAttribute(input.attr)) : (ownText(el) || fullText(el, LEAF_TEXT_CHARS));
+        if (value) out.push(value);
+      }
+    }
+    return out;
+  }
+
   // ------------------------------------------------------------ controls (R24, R38)
   function accessibleName(e, seen) {
     seen = seen || new Set();
@@ -808,6 +839,7 @@
     controlName: (element) => accessibleName(element) || roleOf(element) || "button",
     candidates: candidates,
     resolveLeaf: resolveLeaf,
+    resolveAll: resolveAll,
     freshness: freshness,
     DEFAULT_CAPS: DEFAULT_CAPS,
     // Exposed only so the differential test can run this copy beside

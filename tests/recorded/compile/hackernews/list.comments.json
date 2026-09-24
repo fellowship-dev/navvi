@@ -1,0 +1,9 @@
+{
+  "id": "list.comments",
+  "index": null,
+  "kind": "choice",
+  "note": "list follow-up (2026-09-24): keep the one-value binding, or none for a field no candidate held",
+  "options": [
+    "+1/td.subtext/span.subline/a (every match, as a list) = 3 values: \"user0\", … | 3 values: \"user1\", … | 3 values: \"user2\", …"
+  ]
+}

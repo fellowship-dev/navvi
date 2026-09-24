@@ -69,6 +69,8 @@ export function exitCodeFor(status: RunStatus): number {
     case "model_unavailable":
     case "charge_limit":
       return EXIT.budget;
+    // Rows went out with a requested field null on every one: short of what was asked.
+    case "partial":
     case "no_items_found":
     case "drift":
     case "blocked_bot_detection":

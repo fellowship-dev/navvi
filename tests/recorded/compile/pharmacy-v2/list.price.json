@@ -1,0 +1,9 @@
+{
+  "id": "list.price",
+  "index": null,
+  "kind": "choice",
+  "note": "list follow-up (2026-09-24): keep the one-value binding, or none for a field no candidate held",
+  "options": [
+    "main/article/aside/span (every match, as a list) = 2 values: \"Precio\", … | 4 values: \"Precio oferta\", … | 2 values: \"Precio\", …"
+  ]
+}
