@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Actor } from "apify";
 import { LogLevel, MemoryStorage, log as crawleeLog } from "crawlee";
-import { chromium } from "playwright";
+import { chromium, type Page } from "playwright";
 import { CliChooser, JevChooser, ModelChooser, RecordingChooser, type Answer, type BackendResult, type Chooser, type Question } from "../src/chooser/index.js";
 import { run, type RunSummary } from "../src/main.js";
 import { FFMPEG } from "./recorder.js";
@@ -45,6 +45,11 @@ import { FFMPEG } from "./recorder.js";
  *                      without `vs` renders as haiku. claude-code publishes to docs/decisions-race-claude-code.{gif,mp4}
  *                      and docs/decisions-race-claude-code-provenance.json
  *   DECISIONS_PUBLISH=1  copy gif/mp4/provenance to docs/decisions-race.* (or the DECISIONS_VS names above)
+ *   DECISIONS_VISUAL=1   the visual cut. capture: also screenshot navvi's own crawler page (CrawlDeps.onPage) just
+ *                        before each batch is asked and measure the element box of every option on it
+ *                        (capture/visual.json + capture/visual/batch-N.png). race/render: needs such a capture and
+ *                        renders the page pane with each lane's picks outlined; publishes to
+ *                        docs/decisions-race-visual.* or docs/decisions-race-claude-code-visual.*
  * Keys: AI_GATEWAY_API_KEY (Haiku lane, reference decider), TYPESAFE_API_KEY (Jev lane).
  * ANTHROPIC_API_KEY is removed from the environment so ModelChooser uses the Gateway.
  */
@@ -127,9 +132,137 @@ function laneEnv(needGateway = true): NodeJS.ProcessEnv {
   return env;
 }
 
+// ---------------------------------------------------------------- visual capture
+
+/** An element box in the page's CSS pixels, relative to the viewport the screenshot shows. */
+interface VisualBox { x: number; y: number; w: number; h: number; how: string }
+
+interface VisualBatch {
+  batch: number;
+  url: string;
+  shot: string;
+  viewport: { width: number; height: number };
+  /** per question id: one box (or null: not located) per option, in option order */
+  boxes: Record<string, Array<VisualBox | null>>;
+  takenAtMs: number;
+}
+
+const round = (b: { x: number; y: number; width: number; height: number }, how: string): VisualBox =>
+  ({ x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height), how });
+
+/**
+ * Resolves one option to the element it names on the live page, from the
+ * structured facts navvi attached to it (`optionContext`): a control's ARIA
+ * role and name (navigate/agent.ts), a group's container and item selectors
+ * (compile/groups.ts), a field candidate's path and sample values
+ * (compile/fields.ts), a link's text and href (compile/links.ts). Read-only.
+ */
+async function optionBox(page: Page, ctx: Record<string, unknown>): Promise<VisualBox | null> {
+  const str = (k: string) => (typeof ctx[k] === "string" ? (ctx[k] as string) : undefined);
+  try {
+    if (str("container") && str("item")) {
+      const sel = `${str("container")} > ${str("item")}`;
+      const r = await page.evaluate((s) => {
+        const els = [...document.querySelectorAll(s)].map((e) => e.getBoundingClientRect()).filter((b) => b.width > 0 && b.height > 0);
+        if (!els.length) return null;
+        const x = Math.min(...els.map((b) => b.left)); const y = Math.min(...els.map((b) => b.top));
+        return { x, y, width: Math.max(...els.map((b) => b.right)) - x, height: Math.max(...els.map((b) => b.bottom)) - y };
+      }, sel);
+      return r ? round(r, `union of ${sel}`) : null;
+    }
+    if (str("path") && Array.isArray(ctx.values_per_sample)) {
+      // A list candidate: every element on the path, on sample 1 — the union of the elements whose values it lists.
+      const css = str("path")!.split("/").filter((seg) => !seg.startsWith("@")).join(" > ");
+      const want = ((ctx.values_per_sample as unknown[][])[0] ?? []).map((x) => String(x).replace(/\s+/g, " ").trim());
+      const r = await page.evaluate(({ css, want }) => {
+        const norm = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
+        const left = [...want];
+        const rects: DOMRect[] = [];
+        for (const el of document.querySelectorAll(css)) {
+          const i = left.indexOf(norm((el as HTMLElement).innerText ?? el.textContent));
+          if (i < 0) continue;
+          left.splice(i, 1);
+          rects.push(el.getBoundingClientRect());
+          if (!left.length) break;
+        }
+        if (!rects.length) return null;
+        const x = Math.min(...rects.map((b) => b.left)); const y = Math.min(...rects.map((b) => b.top));
+        return { x, y, width: Math.max(...rects.map((b) => b.right)) - x, height: Math.max(...rects.map((b) => b.bottom)) - y };
+      }, { css, want });
+      return r ? round(r, `union of the ${css} elements holding sample 1's values`) : null;
+    }
+    if (str("path") && Array.isArray(ctx.values)) {
+      const path = str("path")!;
+      const attr = str("attribute");
+      const css = path.split("/").filter((seg) => !seg.startsWith("@")).join(" > ");
+      const want = String((ctx.values as unknown[])[0] ?? "").replace(/…$/, "").replace(/\s+/g, " ").trim();
+      const r = await page.evaluate(({ css, attr, want }) => {
+        const norm = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
+        for (const el of document.querySelectorAll(css)) {
+          const v = attr ? norm((el as unknown as Record<string, string>)[attr] ?? el.getAttribute(attr)) : norm((el as HTMLElement).innerText ?? el.textContent);
+          const raw = attr ? norm(el.getAttribute(attr)) : v;
+          if (!want || v.startsWith(want) || raw.startsWith(want)) {
+            const b = el.getBoundingClientRect();
+            if (b.width > 0 && b.height > 0) return { x: b.left, y: b.top, width: b.width, height: b.height };
+          }
+        }
+        return null;
+      }, { css, attr: attr ?? null, want });
+      return r ? round(r, `first ${css} whose ${attr ? `@${attr}` : "text"} is sample 1's value`) : null;
+    }
+    const role = str("role");
+    const name = str("name");
+    if (role && name) {
+      const loc = page.getByRole(role as Parameters<Page["getByRole"]>[0], { name, exact: true });
+      if ((await loc.count()) > 0) {
+        const b = await loc.first().boundingBox({ timeout: 1500 });
+        if (b) return round(b, `getByRole(${role}, "${name}")`);
+      }
+    }
+    const href = str("href");
+    if (href) {
+      const text = str("text") ?? name ?? "";
+      const r = await page.evaluate(({ href, text }) => {
+        const as = [...document.querySelectorAll("a")].filter((a) => a.href === href);
+        const a = as.find((x) => (x.innerText || x.getAttribute("aria-label") || "").trim() === text) ?? as[0];
+        if (!a) return null;
+        const b = a.getBoundingClientRect();
+        return b.width > 0 && b.height > 0 ? { x: b.left, y: b.top, width: b.width, height: b.height } : null;
+      }, { href, text });
+      return r ? round(r, `a[href="${href}"]`) : null;
+    }
+  } catch {
+    // an option that cannot be located stays null; the render says so
+  }
+  return null;
+}
+
+async function snapVisual(page: Page, dir: string, id: number, batch: Question[], started: number): Promise<VisualBatch | null> {
+  if (page.isClosed()) return null;
+  const takenAtMs = performance.now() - started;
+  const shot = `batch-${id}.png`;
+  mkdirSync(join(dir, "visual"), { recursive: true });
+  await page.screenshot({ path: join(dir, "visual", shot), type: "png" });
+  const viewport = page.viewportSize() ?? (await page.evaluate(() => ({ width: innerWidth, height: innerHeight })));
+  const boxes: Record<string, Array<VisualBox | null>> = {};
+  const cache = new Map<string, VisualBox | null>();
+  for (const q of batch) {
+    if (q.kind !== "choice" || !q.optionContext) continue;
+    const out: Array<VisualBox | null> = [];
+    for (const ctx of q.optionContext) {
+      if (!ctx || typeof ctx !== "object" || Array.isArray(ctx)) { out.push(null); continue; }
+      const key = JSON.stringify(ctx);
+      if (!cache.has(key)) cache.set(key, await optionBox(page, ctx as Record<string, unknown>));
+      out.push(cache.get(key)!);
+    }
+    boxes[q.id] = out;
+  }
+  return { batch: id, url: page.url(), shot, viewport, boxes, takenAtMs };
+}
+
 // ---------------------------------------------------------------- capture
 
-async function capture(dir: string, env: NodeJS.ProcessEnv): Promise<void> {
+async function capture(dir: string, env: NodeJS.ProcessEnv, visual = false): Promise<void> {
   const url = process.env.DECISIONS_URL ?? DEFAULT_URL;
   const prompt = process.env.DECISIONS_PROMPT ?? DEFAULT_PROMPT;
   const referenceModel = process.env.DECISIONS_REFERENCE_MODEL ?? "claude-sonnet-4-6";
@@ -140,11 +273,22 @@ async function capture(dir: string, env: NodeJS.ProcessEnv): Promise<void> {
   const recording = new RecordingChooser(reference, { fixture: "capture", dir: join(dir, "recorded"), env });
   const started = performance.now();
   let n = 0;
+  // Visual cut: navvi's own crawler page, observed through CrawlDeps.onPage, is photographed read-only before each batch.
+  let livePage: Page | undefined;
+  const visuals: VisualBatch[] = [];
   const logged: Chooser = {
     name: recording.name,
     usage: () => recording.usage(),
     async ask(batch: Question[]): Promise<Answer[]> {
       const id = ++n;
+      if (visual && livePage) {
+        try {
+          const v = await snapVisual(livePage, dir, id, batch, started);
+          if (v) visuals.push(v);
+        } catch (e) {
+          console.log(`capture batch ${id}: no screenshot (${e instanceof Error ? e.message : String(e)})`);
+        }
+      }
       const t = performance.now();
       const answers = await recording.ask(batch);
       const entry: CapturedBatch = { batch: id, elapsedMs: t - started, waitMs: performance.now() - t, questions: batch, answers };
@@ -160,6 +304,7 @@ async function capture(dir: string, env: NodeJS.ProcessEnv): Promise<void> {
   try {
     summary = await run({ startUrls: [url], prompt, browser: "chromium", maxPages: 1, maxItems: 10 }, {
       actor, chooser: logged, env: { ...env, NAVVI_BROWSER: "chromium" }, storageDir: join(dir, "profiles"), attended: false, maxConcurrency: 1,
+      ...(visual ? { onPage: async (p: Page) => { livePage = p; } } : {}),
     });
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
@@ -173,6 +318,7 @@ async function capture(dir: string, env: NodeJS.ProcessEnv): Promise<void> {
     usage: reference.usage(),
   }, null, 2) + "\n");
   rmSync(join(dir, "profiles"), { recursive: true, force: true });
+  if (visual) writeFileSync(join(dir, "visual.json"), JSON.stringify(visuals, null, 2) + "\n");
   if (error || !summary || summary.status !== "succeeded" || summary.items === 0) throw new Error(`capture did not succeed: ${summary?.status ?? "error"} ${summary?.message ?? error ?? ""}`);
   console.log(`capture: ${summary.items} rows, ${n} batches -> ${dir}`);
 }
@@ -470,6 +616,8 @@ interface RenderInput {
   runs: number;
   haikuModel: string;
   vs: Vs;
+  /** visual cut: the capture's screenshot and option boxes per batch, the screenshot inlined as a data URI */
+  visual?: Map<number, VisualBatch & { dataUri: string }> | undefined;
 }
 
 /** Name, subtitle and color per lane. The haiku pair keeps its published labels. */
@@ -558,6 +706,289 @@ function endCard(inp: RenderInput): string {
   </div><div class="foot">${esc(footer(inp))}</div></body></html>`;
 }
 
+// ---------------------------------------------------------------- render: visual cut
+
+const VISUAL_FINAL_HOLD_S = 1.6;
+/** After both lanes have answered a batch, the page keeps showing it this long (display seconds) before moving on. */
+const VISUAL_LANDED_HOLD_S = 0.9;
+const PANE_W = 860;
+const PANE_H = 486;
+const BOX_COLOR: Record<"jev" | "other", { line: string; fill: string }> = {
+  jev: { line: "#2da44e", fill: "rgba(46,164,78,0.13)" },
+  other: { line: "#8250df", fill: "rgba(130,80,223,0.10)" },
+};
+
+type BatchKind = "nav" | "done" | "group" | "fields" | "list" | "other";
+
+function batchKind(b: CapturedBatch): BatchKind {
+  const ids = b.questions.map((q) => q.id);
+  if (ids.some((id) => /^nav\.\d+\.op$/.test(id))) return "nav";
+  if (ids.some((id) => /^nav\.\d+\.done$/.test(id))) return "done";
+  if (ids.includes("group")) return "group";
+  if (ids.some((id) => id.startsWith("field."))) return "fields";
+  if (ids.some((id) => id.startsWith("list."))) return "list";
+  return "other";
+}
+
+const BATCH_TITLE: Record<BatchKind, [string, string]> = {
+  nav: ["Next step: which action, on which control?", "Next step"],
+  done: ["Is the search done?", "Search done?"],
+  group: ["Which list holds the results?", "Results list"],
+  fields: ["Which element is each field? Which link is the next page?", "Fields + next"],
+  list: ["One value per record, or every match as a list?", "One or a list?"],
+  other: ["Which option?", "Decision"],
+};
+
+/** Where a picked option sits on the page, and what to call it there. */
+function boxLabel(q: Question): string {
+  if (/^nav\.\d+\.click$/.test(q.id)) return "click";
+  if (/^nav\.\d+\.type$/.test(q.id)) return "type here";
+  if (/^nav\.\d+\.select$/.test(q.id)) return "select";
+  if (q.id === "group" || q.id.startsWith("group")) return "results list";
+  if (q.id.startsWith("field.")) return q.id.slice(6).split(/[./]/)[0]!.replace(/_/g, " ");
+  if (q.id.startsWith("link.next")) return "next page";
+  if (q.id.startsWith("list.")) return `${q.id.slice(5).replace(/_/g, " ")} as a list`;
+  return "pick";
+}
+
+const answerOf = (lane: LaneRun, batch: number, id: string): Answer | undefined => lane.batches.find((b) => b.batch === batch)?.answers.find((a) => a.id === id);
+
+/** One line for what a lane decided in a batch: `full` for under the page, compact for the rail. */
+function batchPick(b: CapturedBatch, answers: (id: string) => Answer | undefined, full: boolean): string {
+  const q = (re: RegExp) => b.questions.find((x) => re.test(x.id));
+  switch (batchKind(b)) {
+    case "nav": {
+      const op = q(/^nav\.\d+\.op$/)!;
+      const name = pickText(op, answers(op.id));
+      const target = (re: RegExp) => { const t = q(re); const txt = t ? pickText(t, answers(t.id)) : "none"; return full ? txt : txt.split(" ")[0]!; };
+      if (name === "CLICK") return `CLICK → ${target(/^nav\.\d+\.click$/)}`;
+      if (name === "TYPE_TEXT") return `TYPE → ${target(/^nav\.\d+\.type$/)}`;
+      if (name === "SELECT") return `SELECT → ${target(/^nav\.\d+\.select$/)}`;
+      return full && name === "DONE" ? "DONE: the goal is met on this page" : name;
+    }
+    case "done": { const d = q(/^nav\.\d+\.done$/)!; return pickText(d, answers(d.id)); }
+    case "group": { const g = b.questions[0]!; const t = pickText(g, answers(g.id)); return full ? t : t.split(" (")[0]!; }
+    case "fields": {
+      const fields = b.questions.filter((x) => x.id.startsWith("field."));
+      const found = fields.filter((f) => { const a = answers(f.id); return a && a.index !== null; });
+      const next = q(/^link\.next/);
+      const nextPick = next ? pickText(next, answers(next.id)) : "";
+      if (!full) return `${found.length}/${fields.length} fields`;
+      return `${found.length} of ${fields.length} fields located${next ? ` · next page: ${nextPick}` : ""}`;
+    }
+    case "list": return b.questions.map((x) => { const a = answers(x.id); const f = x.id.slice(5).replace(/_/g, " "); return !a ? "(no answer)" : a.index === null ? (full ? `${f}: none, keep the one element` : "one value") : (full ? `${f}: every match, as a list` : "list"); }).join(", ");
+    default: return b.questions.map((x) => pickText(x, answers(x.id))).join(", ");
+  }
+}
+
+function batchMatches(b: CapturedBatch, lane: LaneRun): { n: number; m: number } {
+  let m = 0;
+  for (const q of b.questions) {
+    const ref = b.answers.find((a) => a.id === q.id);
+    const got = answerOf(lane, b.batch, q.id);
+    if (got && ref && got.index === ref.index) m += 1;
+  }
+  return { n: b.questions.length, m };
+}
+
+/** The part of the viewport screenshot the pane shows for a batch: every picked element (reference and both lanes) in view, fixed for the batch. */
+function paneCrop(inp: RenderInput, b: CapturedBatch, v: VisualBatch): { x: number; y: number; w: number; h: number; scale: number } {
+  const vw = v.viewport.width;
+  const vh = v.viewport.height;
+  const picked: VisualBox[] = [];
+  for (const q of b.questions) {
+    const boxes = v.boxes[q.id];
+    if (!boxes) continue;
+    for (const a of [b.answers.find((x) => x.id === q.id), answerOf(laneOf(inp.run, "jev"), b.batch, q.id), answerOf(laneOf(inp.run, inp.vs), b.batch, q.id)]) {
+      const box = a && a.index !== null ? boxes[a.index] : null;
+      // A results list spans the page; it does not decide the zoom.
+      // A very wide element (a full-width search bar) counts by its left part, so the zoom stays readable.
+      if (box && box.y < vh && box.y + box.h > 0 && q.id !== "group") picked.push({ ...box, w: Math.min(box.w, 700) });
+    }
+  }
+  const aspect = PANE_H / PANE_W;
+  let w = Math.min(vw, 860);
+  let cx = 0;
+  let cy = 0;
+  if (picked.length) {
+    const x0 = Math.min(...picked.map((p) => p.x)); const y0 = Math.min(...picked.map((p) => Math.max(0, p.y)));
+    const x1 = Math.max(...picked.map((p) => p.x + p.w)); const y1 = Math.max(...picked.map((p) => Math.min(vh, p.y + p.h)));
+    w = Math.min(vw, Math.max(w, x1 - x0 + 120, (y1 - y0 + 160) / aspect));
+    const wide = picked.some((p) => p.w === 700);
+    cx = Math.min(x0 - (wide ? 200 : 60), (x0 + x1) / 2 - w / 2);
+    cy = y0 - 90;
+  } else {
+    // Nothing picked on this page: show its top left, from where its located elements start.
+    const all = inp.visual ? [...inp.visual.values()].flatMap((x) => Object.values(x.boxes).flat()) : [];
+    const lefts = all.filter((x): x is VisualBox => !!x && x.y < vh && x.w < vw / 2).map((x) => x.x);
+    w = Math.min(vw, 980);
+    cx = lefts.length ? Math.min(...lefts) - 30 : 0;
+  }
+  let h = w * aspect;
+  if (h > vh) { h = vh; w = h / aspect; }
+  const x = Math.max(0, Math.min(vw - w, cx));
+  const y = Math.max(0, Math.min(vh - h, cy));
+  return { x, y, w, h, scale: PANE_W / w };
+}
+
+const isElementQuestion = (q: Question): boolean => q.kind === "choice" && (/^nav\.\d+\.(click|type|select)$/.test(q.id) || q.id.startsWith("group") || q.id.startsWith("field.") || q.id.startsWith("link.") || q.id.startsWith("list."));
+
+/**
+ * The outlines and labels on the page for the lanes that have answered this
+ * batch: the other lane's box outside, Jev's inside. When both lanes picked
+ * the same element it gets one label with both lane colors; different picks
+ * get one label each. Labels are placed where they do not cover each other.
+ */
+function paneOverlay(inp: RenderInput, b: CapturedBatch, v: VisualBatch, answered: readonly Lane[], crop: ReturnType<typeof paneCrop>): string {
+  const toPane = (box: VisualBox, pad: number) => ({ left: (box.x - crop.x) * crop.scale - pad, top: (box.y - crop.y) * crop.scale - pad, width: box.w * crop.scale + 2 * pad, height: box.h * crop.scale + 2 * pad });
+  const outlines: string[] = [];
+  const edges: string[] = [];
+  const chips: Array<{ label: string; whos: Array<"jev" | "other">; r: ReturnType<typeof toPane> }> = [];
+  for (const q of b.questions) {
+    if (!isElementQuestion(q)) continue;
+    const ref = b.answers.find((x) => x.id === q.id);
+    const picks = answered.map((lane) => ({ lane, who: (lane === "jev" ? "jev" : "other") as "jev" | "other", a: answerOf(laneOf(inp.run, lane), b.batch, q.id) }))
+      .filter((p) => p.a && p.a.index !== null);
+    const byIndex = new Map<number, typeof picks>();
+    for (const p of picks) byIndex.set(p.a!.index!, [...(byIndex.get(p.a!.index!) ?? []), p]);
+    for (const [index, ps] of byIndex) {
+      const box = v.boxes[q.id]?.[index];
+      const label = `${boxLabel(q)}${ref && ref.index === index ? "" : " ≠"}`;
+      const whos = ps.map((p) => p.who).sort((x, y) => (x === "jev" ? -1 : y === "jev" ? 1 : 0));
+      if (!box) { edges.push(`<div class="edge">${whos.map((w) => `<i style="background:${BOX_COLOR[w].line}"></i>`).join("")}${esc(label)}: not located on the page</div>`); continue; }
+      const inner = toPane(box, 3);
+      if (inner.top > PANE_H || inner.top + inner.height < 0) { edges.push(`<div class="edge">${whos.map((w) => `<i style="background:${BOX_COLOR[w].line}"></i>`).join("")}${inner.top > PANE_H ? "↓" : "↑"} ${esc(label)}: outside this view</div>`); continue; }
+      for (const w of [...whos].reverse()) {
+        const r = toPane(box, w === "jev" ? 3 : 8);
+        outlines.push(`<div class="hl" style="left:${r.left.toFixed(1)}px;top:${r.top.toFixed(1)}px;width:${r.width.toFixed(1)}px;height:${r.height.toFixed(1)}px;border-color:${BOX_COLOR[w].line};background:${BOX_COLOR[w].fill}"></div>`);
+      }
+      chips.push({ label, whos, r: toPane(box, whos.includes("other") ? 8 : 3) });
+    }
+  }
+  // Label placement: above or below the box, left or right aligned, the first spot inside the pane that overlaps no earlier label.
+  type Rect = { x: number; y: number; w: number; h: number };
+  const placed: Rect[] = [];
+  const overlaps = (a: Rect, p: Rect) => a.x < p.x + p.w && p.x < a.x + a.w && a.y < p.y + p.h && p.y < a.y + a.h;
+  // Labels avoid each other and every outlined element smaller than a quarter of the pane (a results list is not one).
+  const obstacles: Rect[] = chips.map((c) => ({ x: c.r.left, y: c.r.top, w: c.r.width, h: c.r.height })).filter((r) => r.w * r.h < (PANE_W * PANE_H) / 4);
+  const hit = (a: Rect) => placed.some((p) => overlaps(a, p)) || obstacles.some((o) => overlaps(a, o));
+  const labels = chips.sort((a, b) => a.r.top - b.r.top || a.r.left - b.r.left).map((c) => {
+    const w = c.label.length * 8.6 + 16 + c.whos.length * 14;
+    const h = 23;
+    const { left, top, width, height } = c.r;
+    const spots = [
+      { x: left, y: top - h - 1 }, { x: left, y: top + height + 1 }, { x: left + width - w, y: top - h - 1 }, { x: left + width - w, y: top + height + 1 },
+      { x: left + width + 4, y: top }, { x: left - w - 4, y: top }, { x: left + 4, y: top + 4 },
+    ].map((sp) => ({ x: Math.max(4, Math.min(PANE_W - w - 4, sp.x)), y: Math.max(4, Math.min(PANE_H - h - 4, sp.y)), w, h }));
+    const spot = spots.find((sp) => !hit(sp)) ?? spots.find((sp) => !placed.some((p) => overlaps(sp, p))) ?? spots[0]!;
+    placed.push(spot);
+    const bg = c.whos.length === 1 ? BOX_COLOR[c.whos[0]!].line : "#161b22";
+    return `<div class="tag" style="left:${spot.x.toFixed(1)}px;top:${spot.y.toFixed(1)}px;background:${bg}">${c.whos.length > 1 ? c.whos.map((w) => `<i style="background:${BOX_COLOR[w].line}"></i>`).join("") : ""}${esc(c.label)}</div>`;
+  });
+  return `${outlines.join("")}${labels.join("")}${edges.length ? `<div class="edges">${edges.join("")}</div>` : ""}`;
+}
+
+/** The batch the page pane shows at measured time t, and whether each lane has answered it. */
+function paneBatch(inp: RenderInput, tMs: number): CapturedBatch {
+  const doneAt = (b: CapturedBatch) => Math.max(...([inp.vs, "jev"] as const).map((l) => laneOf(inp.run, l).batches.find((x) => x.batch === b.batch)?.endMs ?? Infinity));
+  const landed = inp.batches.filter((b) => doneAt(b) <= tMs);
+  const working = inp.batches.find((b) => doneAt(b) > tMs);
+  if (!working) return inp.batches[inp.batches.length - 1]!;
+  const last = landed[landed.length - 1];
+  if (last && (tMs - doneAt(last)) / inp.speed < VISUAL_LANDED_HOLD_S * 1000) return last;
+  return working;
+}
+
+function laneRail(inp: RenderInput, lane: Lane, tMs: number, shown: number): string {
+  const lr = laneOf(inp.run, lane);
+  const done = lr.batches.filter((b) => b.endMs <= tMs);
+  const finished = done.length === lr.batches.length;
+  const clock = finished ? lr.totalMs : Math.min(tMs, lr.totalMs);
+  const { name, sub, color } = laneLabel(inp, lane);
+  const decisions = inp.batches.filter((b) => done.some((d) => d.batch === b.batch)).reduce((n, b) => n + b.questions.length, 0);
+  const rows = inp.batches.map((b) => {
+    const answered = done.some((d) => d.batch === b.batch);
+    const cur = b.batch === shown ? " cur" : "";
+    if (!answered) return `<div class="rrow pending${cur}"><span class="tick">·</span><span class="q">${esc(BATCH_TITLE[batchKind(b)][1])}</span><span class="a"></span></div>`;
+    const { n, m } = batchMatches(b, lr);
+    const ok = n === m;
+    return `<div class="rrow${cur}"><span class="tick" style="color:${ok ? "#7ee787" : "#ffa657"}">${ok ? "✓" : "≠"}</span><span class="q">${esc(BATCH_TITLE[batchKind(b)][1])}</span><span class="a">${esc(clip(batchPick(b, (id) => answerOf(lr, b.batch, id), false), 18))}</span></div>`;
+  }).join("");
+  const status = finished ? `<span style="color:${color}">done · ${decisions} decisions</span>` : `${decisions} / ${inp.scored.length} decisions`;
+  return `<div class="rail${finished ? " fin" : ""}">
+    <div class="rh"><div><div class="rname${name.length > 12 ? " long" : ""}" style="color:${color}">${esc(name)}</div><div class="rsub">${esc(sub)}</div></div><div class="rclock" style="color:${finished ? color : "#e6edf3"}">${(clock / 1000).toFixed(1)}s</div></div>
+    <div class="rstatus">${status}</div>${rows}</div>`;
+}
+
+const VISUAL_STYLE = `
+.vmain { position: absolute; top: 64px; left: 20px; right: 20px; display: grid; grid-template-columns: ${PANE_W}px 1fr; gap: 16px }
+.pane { background: #11161f; border: 1px solid #262c36; border-radius: 12px; overflow: hidden }
+.ph { display: flex; justify-content: space-between; align-items: baseline; padding: 8px 14px 6px; font-size: 21px; color: #e6edf3; font-weight: 700 }
+.ph .bn { font-size: 16px; color: #8b949e; font-weight: 600 }
+.bar { display: flex; align-items: center; gap: 8px; padding: 4px 10px; background: #2d333b; color: #adbac7; font-size: 13px }
+.bar .dots span { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px }
+.bar .url { flex: 1; background: #1c2128; border-radius: 4px; padding: 2px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.shot { position: relative; width: ${PANE_W}px; height: ${PANE_H}px; overflow: hidden; background: #fff }
+.shot img { position: absolute; display: block; max-width: none }
+.hl { position: absolute; border: 4px solid; border-radius: 6px }
+.tag { position: absolute; color: #fff; font: 700 15px/1 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; padding: 4px 7px; border-radius: 5px; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,.35) }
+.tag i, .edge i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px }
+.edges { position: absolute; left: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 6px }
+.edge { background: #161b22; color: #fff; font: 700 15px -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; padding: 5px 9px; border-radius: 5px }
+.strip { padding: 7px 14px 8px; border-top: 1px solid #262c36 }
+.sl { display: grid; grid-template-columns: 14px 150px minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 18px; padding: 2px 0 }
+.sl .dot { width: 12px; height: 12px; border-radius: 3px } .sl .who { font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.sl .what { color: #e6edf3; font: 600 16px Menlo, Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis } .sl .when { color: #8b949e; font: 600 16px Menlo, Consolas, monospace }
+.rails { display: grid; grid-template-rows: 1fr 1fr; gap: 12px; height: 610px }
+.rail { background: #11161f; border: 1px solid #262c36; border-radius: 12px; padding: 10px 14px; overflow: hidden }
+.rail.fin { border-color: #3a4454 }
+.rh { display: flex; justify-content: space-between; align-items: center }
+.rname { font-size: 30px; font-weight: 800; line-height: 1 } .rname.long { font-size: 20px } .rsub { font-size: 12px; color: #8b949e; margin-top: 3px; max-width: 190px }
+.rclock { font: 800 46px/1 Menlo, Consolas, monospace; letter-spacing: -2px }
+.rstatus { font-size: 16px; color: #8b949e; margin: 5px 0 4px }
+.rrow { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 6px; align-items: baseline; font-size: 16px; padding: 3px 4px; border-top: 1px solid #1d232d }
+.rrow.pending { color: #545d68 } .rrow.cur { background: #1b2230; border-radius: 4px }
+.rrow .a { font: 600 14px Menlo, Consolas, monospace; color: #e6edf3; white-space: nowrap }
+.rrow .tick { font-weight: 800 }`;
+
+function visualFrame(inp: RenderInput, tMs: number): string {
+  const b = paneBatch(inp, tMs);
+  const v = inp.visual!.get(b.batch);
+  const pos = inp.batches.indexOf(b) + 1;
+  let pane: string;
+  if (v) {
+    const crop = paneCrop(inp, b, v);
+    const img = `<img src="${v.dataUri}" style="left:${(-crop.x * crop.scale).toFixed(1)}px;top:${(-crop.y * crop.scale).toFixed(1)}px;width:${(v.viewport.width * crop.scale).toFixed(1)}px;height:${(v.viewport.height * crop.scale).toFixed(1)}px">`;
+    // The other lane's (outer) box first, Jev's (inner) on top, each only once that lane has answered.
+    const lanes = ([inp.vs, "jev"] as const).filter((l) => (laneOf(inp.run, l).batches.find((x) => x.batch === b.batch)?.endMs ?? Infinity) <= tMs);
+    pane = `<div class="bar"><span class="dots"><span style="background:#ff5f56"></span><span style="background:#ffbd2e"></span><span style="background:#27c93f"></span></span><span class="url">${esc(v.url)}</span></div>
+      <div class="shot">${img}${paneOverlay(inp, b, v, lanes, crop)}</div>`;
+  } else {
+    pane = `<div class="bar"><span class="url">(no screenshot for this batch)</span></div><div class="shot"></div>`;
+  }
+  const strip = ([ "jev", inp.vs ] as const).map((l) => {
+    const lr = laneOf(inp.run, l);
+    const lb = lr.batches.find((x) => x.batch === b.batch);
+    const { name, color } = laneLabel(inp, l);
+    const short = l === "jev" ? "Jev" : name;
+    if (lb && lb.endMs <= tMs) {
+      const { n, m } = batchMatches(b, lr);
+      return `<div class="sl"><span class="dot" style="background:${BOX_COLOR[l === "jev" ? "jev" : "other"].line}"></span><span class="who" style="color:${color}">${esc(short)}</span><span class="what">${n === m ? "✓" : `≠ ${m}/${n}`} ${esc(batchPick(b, (id) => answerOf(lr, b.batch, id), true))}</span><span class="when">${(lb.ms / 1000).toFixed(1)}s</span></div>`;
+    }
+    const thinking = lb && lb.startMs <= tMs ? `${((tMs - lb.startMs) / 1000).toFixed(1)}s` : "";
+    return `<div class="sl"><span class="dot" style="background:${BOX_COLOR[l === "jev" ? "jev" : "other"].line}"></span><span class="who" style="color:${color}">${esc(short)}</span><span class="what" style="color:#8b949e">${thinking ? "thinking…" : "…"}</span><span class="when">${thinking}</span></div>`;
+  }).join("");
+  const speed = inp.speed > 1 ? `<div class="speed">shown at ${inp.speed}× speed</div>` : "";
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${STYLE}${VISUAL_STYLE}
+  .title { padding: 12px 20px 0 } .title h1 { font-size: 34px }</style></head><body>
+  <div class="title"><h1>Same questions, on the page navvi was reading.</h1>${speed}</div>
+  <div class="vmain">
+    <div class="pane"><div class="ph"><span>${esc(BATCH_TITLE[batchKind(b)][0])}</span><span class="bn">batch ${pos} of ${inp.batches.length}</span></div>${pane}<div class="strip">${strip}</div></div>
+    <div class="rails">${laneRail(inp, "jev", tMs, b.batch)}${laneRail(inp, inp.vs, tMs, b.batch)}</div>
+  </div>
+  <div class="foot">${esc(footer(inp))}</div></body></html>`;
+}
+
 async function render(dir: string, inp: RenderInput): Promise<{ gif: string; mp4: string }> {
   const frames = join(dir, "frames");
   rmSync(frames, { recursive: true, force: true });
@@ -576,13 +1007,14 @@ async function render(dir: string, inp: RenderInput): Promise<{ gif: string; mp4
       i += 1;
     }
   };
-  await shot(raceFrame(inp, 0), Math.round(INTRO_S * FPS));
+  const frameAt = inp.visual ? visualFrame : raceFrame;
+  await shot(frameAt(inp, 0), Math.round(INTRO_S * FPS));
   const activeFrames = Math.ceil((total / inp.speed / 1000) * FPS);
   let last = "";
   let run = 0;
   for (let f = 0; f <= activeFrames; f++) {
     const tMs = Math.min(total, (f / FPS) * 1000 * inp.speed);
-    const html = raceFrame(inp, tMs);
+    const html = frameAt(inp, tMs);
     if (html === last) {
       copyFileSync(join(frames, `${String(i - 1).padStart(5, "0")}.png`), join(frames, `${String(i).padStart(5, "0")}.png`));
       i += 1;
@@ -592,13 +1024,13 @@ async function render(dir: string, inp: RenderInput): Promise<{ gif: string; mp4
     last = html;
     await shot(html, 1);
   }
-  await shot(raceFrame(inp, total), Math.round(1.2 * FPS));
+  await shot(frameAt(inp, total), Math.round((inp.visual ? VISUAL_FINAL_HOLD_S : 1.2) * FPS));
   await shot(endCard(inp), Math.round(END_HOLD_S * FPS));
   await browser.close();
   const input = join(frames, "%05d.png");
   const gif = join(dir, "decisions-race.gif");
   const mp4 = join(dir, "decisions-race.mp4");
-  execFileSync(FFMPEG, ["-y", "-loglevel", "error", "-framerate", String(FPS), "-i", input, "-vf", `fps=${GIF_FPS},split[s0][s1];[s0]palettegen=max_colors=64:stats_mode=diff[p];[s1][p]paletteuse=dither=none:diff_mode=rectangle`, "-loop", "0", gif], { stdio: "inherit" });
+  execFileSync(FFMPEG, ["-y", "-loglevel", "error", "-framerate", String(FPS), "-i", input, "-vf", `fps=${GIF_FPS},split[s0][s1];[s0]palettegen=max_colors=${inp.visual ? 128 : 64}:stats_mode=diff[p];[s1][p]paletteuse=dither=none:diff_mode=rectangle`, "-loop", "0", gif], { stdio: "inherit" });
   execFileSync(FFMPEG, ["-y", "-loglevel", "error", "-framerate", String(FPS), "-i", input, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20", "-r", "30", "-movflags", "+faststart", mp4], { stdio: "inherit" });
   for (const f of [gif, mp4]) console.log(`${f}: ${(statSync(f).size / 1024 / 1024).toFixed(2)} MB`);
   return { gif, mp4 };
@@ -634,6 +1066,7 @@ async function main(): Promise<void> {
   let runs: RaceRun[];
   let raceMeta: { measuredAt: string; commit: string; workingTree: string };
   let vs = vsLane(process.env.DECISIONS_VS);
+  const visual = process.env.DECISIONS_VISUAL === "1";
   if (mode === "render") {
     const source = process.env.DECISIONS_SOURCE;
     if (!source) throw new Error("DECISIONS_SOURCE is required in render mode");
@@ -648,13 +1081,14 @@ async function main(): Promise<void> {
     cpSync(captureDir, join(dir, "capture"), { recursive: true });
   } else {
     const env = laneEnv(mode === "capture" || vs === "haiku");
-    if (mode === "capture") await capture(captureDir, env);
+    if (mode === "capture") await capture(captureDir, env, visual);
     else {
       const src = process.env.DECISIONS_CAPTURE;
       if (!src) throw new Error("DECISIONS_CAPTURE is required in race mode");
       // Keep the run directory self-contained: the capture it raced travels with it.
       cpSync(join(resolve(src), "capture"), captureDir, { recursive: true });
     }
+    if (visual && !existsSync(join(captureDir, "visual.json"))) throw new Error("DECISIONS_VISUAL=1 needs a capture made with DECISIONS_VISUAL=1 (capture/visual.json)");
     const batches = loadBatches(captureDir);
     runs = await race(batches, env, Number(process.env.DECISIONS_RUNS ?? 3), vs);
     raceMeta = { measuredAt: new Date().toISOString(), commit, workingTree };
@@ -674,8 +1108,14 @@ async function main(): Promise<void> {
   const date = raceMeta.measuredAt.slice(0, 10);
   process.env.DECISIONS_PROMPT_SHOWN = cap.prompt;
   const haikuModel = vs === "haiku" ? laneOf(median, "haiku").modelId.replace(/^anthropic\//, "") : laneOf(median, vs).modelId.replace(/^claude --model /, "");
-  const media = await render(dir, { batches, run: median, scored, date, commit: raceMeta.commit, site: cap.url, speed, runs: runs.length, haikuModel, vs });
-  const stem = vs === "haiku" ? "docs/decisions-race" : `docs/decisions-race-${vs}`;
+  let visuals: VisualBatch[] | undefined;
+  if (visual) {
+    if (!existsSync(join(captureDir, "visual.json"))) throw new Error("DECISIONS_VISUAL=1 needs a capture made with DECISIONS_VISUAL=1 (capture/visual.json)");
+    visuals = JSON.parse(readFileSync(join(captureDir, "visual.json"), "utf8")) as VisualBatch[];
+  }
+  const visualMap = visuals && new Map(visuals.map((v) => [v.batch, { ...v, dataUri: `data:image/png;base64,${readFileSync(join(captureDir, "visual", v.shot)).toString("base64")}` }]));
+  const media = await render(dir, { batches, run: median, scored, date, commit: raceMeta.commit, site: cap.url, speed, runs: runs.length, haikuModel, vs, visual: visualMap });
+  const stem = `${vs === "haiku" ? "docs/decisions-race" : `docs/decisions-race-${vs}`}${visual ? "-visual" : ""}`;
   const otherName = vs === "haiku" ? "Haiku" : "Haiku via Claude Code";
   // Provenance keys the other lane by its lane name (haiku, claude-code).
   const named = (s: Scored) => { const { other, otherMatch, ...rest } = s; return { ...rest, [vs]: other, [`${vs === "haiku" ? "haiku" : "claudeCode"}Match`]: otherMatch }; };
@@ -705,8 +1145,8 @@ async function main(): Promise<void> {
       questionList: batches.flatMap((b) => b.questions.map((q) => ({ batch: b.batch, id: q.id, kind: q.kind, label: premiseLabel(q), premise: q.premise, options: q.options?.length ?? 0, stateChars: q.state.length }))),
     },
     lanes: {
-      [vs]: { label: otherName, chooser: vs === "haiku" ? "ModelChooser (stock validation since 8d868fb; a counting subclass records how many picks arrived with an explanation, changing nothing)" : "CliChooser(\"claude\") with ANTHROPIC_API_KEY and every CLAUDE* variable removed", modelId: laneOf(median, vs).modelId, transport: laneOf(median, vs).transport },
-      jev: { label: "Jev", chooser: "JevChooser", modelId: laneOf(median, "jev").modelId, transport: laneOf(median, "jev").transport },
+      [vs]: { label: otherName, chooser: vs === "haiku" ? "ModelChooser (stock validation since 8d868fb; a counting subclass records how many picks arrived with an explanation, changing nothing)" : "CliChooser(\"claude\") with ANTHROPIC_API_KEY and every CLAUDE* variable removed", modelId: laneOf(median, vs).modelId, transport: laneOf(median, vs).transport, ...(visual ? { measuredOnCommit: raceMeta.commit } : {}) },
+      jev: { label: "Jev", chooser: "JevChooser", modelId: laneOf(median, "jev").modelId, transport: laneOf(median, "jev").transport, ...(visual ? { measuredOnCommit: raceMeta.commit } : {}) },
     },
     method: {
       warmUp: "one untimed one-question boolean call per lane immediately before its timed pass (connection setup); warm-up latency recorded below",
@@ -726,6 +1166,14 @@ async function main(): Promise<void> {
     })),
     medianRun: median.run,
     rendered: { perQuestion: scored.map(named), speed, gif: `${stem}.gif`, mp4: `${stem}.mp4` },
+    ...(visuals ? {
+      visual: {
+        screenshots: "one viewport screenshot of navvi's own crawler page per batch, taken through CrawlDeps.onPage inside the capture's chooser wrapper immediately before the batch was asked (read-only: screenshot and bounding-box reads only); not published, the render crops and scales them",
+        boxesSource: "per option, the element navvi's optionContext names, located on that live page at capture time: controls by ARIA role and accessible name (Playwright getByRole(...).boundingBox, falling back to the anchor with the option's href); a result group as the union of `container > item`; a field candidate as the first element on its path whose text or attribute starts with the option's sample-1 value; a list candidate as the union of the path's elements holding sample 1's values; a link by href and text. Coordinates are CSS pixels in the viewport; null means not located",
+        highlight: `${laneLabel({ vs } as RenderInput, "jev").name} outlined green (inner box, label above), ${otherName} purple (outer box, label below); a box appears when that lane's answer for the batch has landed at its measured time; ≠ marks a pick that differs from the reference; op and yes/no picks are written under the page`,
+        batches: visuals.map((v) => ({ batch: v.batch, url: v.url, viewport: v.viewport, takenAtCaptureMs: Math.round(v.takenAtMs), boxes: v.boxes })),
+      },
+    } : {}),
   };
   writeFileSync(join(dir, "provenance.json"), JSON.stringify(provenance, null, 2) + "\n");
   if (process.env.DECISIONS_PUBLISH === "1") {
