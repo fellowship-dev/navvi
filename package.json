@@ -1,6 +1,6 @@
 {
   "name": "navvi",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Scraper compiler with cached prompts, model-free healthy replay and targeted repair.",
   "license": "MIT",
   "repository": {
