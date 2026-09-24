@@ -23,7 +23,7 @@
 - **It heals itself when the site changes.** A field that moved is found again and
   the scraper is updated; a redesign is reported, never guessed.
 
-![Compile, re-run with zero LLM calls, self-heal](docs/product.gif)
+![Compile a Hacker News scraper with Jev, re-run it with zero LLM calls, self-heal after a redesign](docs/product-hn.gif)
 
 ## Why use Jev
 
