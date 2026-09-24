@@ -1,12 +1,12 @@
 # Navvi
 
-> Give it to your agent, get a scraper you can run forever. `npx navvi "<prompt>" <url...>` compiles a plain-words request into JSON records and a reusable scraper file: code enumerates candidates on the page (declared JSON-LD/meta, the page's own JSON payloads, then DOM elements) and a model only picks among them — with Jev (TypeSafe) those picks are typed and cheap: on the same 19 real questions, 3.6x faster than Claude Haiku over the API and 11x faster than Haiku through Claude Code. Re-runs replay the scraper with zero model calls and heal a moved field instead of failing. Add `--work <dir>` to keep every compile step as a readable, editable file; `navvi make` is the same pipeline as a resumable driver. With no key, a signed-in Claude Code or Codex answers on your subscription, or the host coding agent answers over stdio.
+> Give it to your agent, get a scraper you can run forever. `npx navvi "<prompt>" <url...>` compiles a plain-words request into JSON records and a reusable scraper file: code enumerates candidates on the page (declared JSON-LD/meta, the page's own JSON payloads, then DOM elements) and a model only picks among them — with Jev (TypeSafe) those picks are typed and cheap: on the same 19 real questions, 3.6x faster than Claude Haiku over the API and 8-11x faster than Haiku through Claude Code. Re-runs replay the scraper with zero model calls and heal a moved field instead of failing. Add `--work <dir>` to keep every compile step as a readable, editable file; `navvi make` is the same pipeline as a resumable driver. With no key, a signed-in Claude Code or Codex answers on your subscription, or the host coding agent answers over stdio.
 
 ## Start here
 
 - [SKILL.md](SKILL.md): the agent skill. The one command, `--work`, the no-key question protocol on stdio, the file-and-resume path (exit 3), choosers, input contract, output shape, exit codes and limits.
 - [README: Install](README.md#install): from zero to records in three lines.
-- [README: Why use Jev](README.md#why-use-jev): the decision race — the same 19 real navigation questions: Jev 3.5 s, Haiku over the API 12.6 s, Haiku through Claude Code 38.2 s, all 19/19.
+- [README: Why use Jev](README.md#why-use-jev): the decision race — the same 19 real navigation questions: Jev 3.5 s, Haiku over the API 12.6 s, Haiku through Claude Code 31-38 s, all 19/19.
 - [README: How it works](README.md#how-it-works): one compiler, cheapest evidence first, questions instead of guesses, zero-model replay.
 - [README: Choosers](README.md#choosers): jev, claude, codex, model, agent; the default order; Jev's writer and transport fallback.
 - [README: Exit codes](README.md#exit-codes): what each status means and what to do next.

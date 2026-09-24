@@ -212,15 +212,41 @@ batch. The rest is API time: Claude Code adds about 19k tokens of its own
 prompt, and Haiku in Claude Code thinks for 400 to 2,500 tokens before it
 answers.
 
-September 24 result (`docs/decisions-race-claude-code.json`): the same 19
-questions in 7 batches from the published capture, 3 runs. Medians: Jev
-3.5 s, Haiku over the Gateway (stock `ModelChooser`) 12.0 s, Haiku through
-Claude Code 91.6 s. That is 3.4× for Haiku over the API and 26× for Claude
-Code (per-run 22.8 to 33.5×). All three lanes matched the reference 19/19 in
+September 24 results on the same 19 questions in 7 batches from the
+published capture, 3 runs each. Before navvi ran Claude Code without extended
+thinking: Jev 3.5 s, Haiku over the Gateway 12.0 s, Haiku through Claude Code
+91.6 s (26×). After it (commit 4049ee6, `docs/decisions-race-claude-code.json`):
+Jev 3.5 s, Haiku over the Gateway 12.6 s (3.6×), Haiku through Claude Code
+38.2 s (11×). The alternate cut below, raced later the same day, measured
+Claude Code at a 30.9 s median (7.9×): quote the no-key gap as 8–11×. All three lanes matched the reference 19/19 in
 every run. The Claude Code figure varies with the machine, the user's Claude
 Code configuration and how long Haiku thinks: the same batch took 10 s once
 and 29 s another time. Present it as the no-API-key path, not as the speed of
 Haiku.
+
+### Alternate cut: Jev vs Haiku via Claude Code
+
+`DECISIONS_VS` picks the lane that races Jev in capture, race and render
+modes: `haiku` (default, the published cut above) or `claude-code`. The race
+records it in `race.json`, so a render follows the race it reads (a
+`race.json` without `vs` renders as Haiku). With `claude-code` the left lane
+is "Haiku via Claude Code" (navvi's default without a key), the Gateway key is
+not needed for a race from an existing capture, and `DECISIONS_PUBLISH=1`
+writes `docs/decisions-race-claude-code.gif`, `.mp4` and
+`docs/decisions-race-claude-code-provenance.json`. It leaves
+`docs/decisions-race.*` and the bench summary
+`docs/decisions-race-claude-code.json` alone.
+
+```sh
+set -a; . /path/to/.env; set +a   # TYPESAFE_API_KEY; Claude Code signed in
+DECISIONS_MODE=race DECISIONS_VS=claude-code \
+  DECISIONS_CAPTURE=/tmp/navvi-decisions/navvi-decisions-XXXX DECISIONS_OUT=/tmp/navvi-decisions \
+  DECISIONS_PUBLISH=1 npx tsx scripts/record-decisions.ts
+```
+
+The Claude Code lane runs well past 15 s, so both lanes are sped up by the
+same factor and the frame says so. The clocks and the end card show measured
+seconds.
 
 ## Product GIF: compile, zero-call re-run, self-heal
 

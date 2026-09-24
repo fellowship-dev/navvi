@@ -41,7 +41,10 @@ import { FFMPEG } from "./recorder.js";
  *   DECISIONS_REFERENCE_MODEL  capture decider (default claude-sonnet-4-6, via AI Gateway)
  *   DECISIONS_HAIKU_MODEL      default claude-haiku-4-5
  *   DECISIONS_RUNS     default 3
- *   DECISIONS_PUBLISH=1  copy gif/mp4/provenance to docs/decisions-race.*
+ *   DECISIONS_VS       capture/race/render: the lane racing Jev (default haiku; also claude-code). A race.json
+ *                      without `vs` renders as haiku. claude-code publishes to docs/decisions-race-claude-code.{gif,mp4}
+ *                      and docs/decisions-race-claude-code-provenance.json
+ *   DECISIONS_PUBLISH=1  copy gif/mp4/provenance to docs/decisions-race.* (or the DECISIONS_VS names above)
  * Keys: AI_GATEWAY_API_KEY (Haiku lane, reference decider), TYPESAFE_API_KEY (Jev lane).
  * ANTHROPIC_API_KEY is removed from the environment so ModelChooser uses the Gateway.
  */
@@ -93,18 +96,33 @@ interface LaneRun {
 
 interface RaceRun {
   run: number;
-  order: Array<"haiku" | "jev">;
-  lanes: Record<"haiku" | "jev", LaneRun>;
+  order: Lane[];
+  lanes: Partial<Record<Lane, LaneRun>>;
+  /** other lane total / Jev total */
   ratio: number;
 }
+
+type Vs = Exclude<Lane, "jev">;
+
+function vsLane(value: string | undefined): Vs {
+  const v = (value ?? "haiku").trim();
+  if (v !== "haiku" && v !== "claude-code") throw new Error(`DECISIONS_VS: unknown lane ${v} (haiku, claude-code)`);
+  return v;
+}
+
+const laneOf = (run: RaceRun, lane: Lane): LaneRun => {
+  const l = run.lanes[lane];
+  if (!l) throw new Error(`run ${run.run} has no ${lane} lane`);
+  return l;
+};
 
 const esc = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const sh = (cmd: string, args: string[]): string => execFileSync(cmd, args, { encoding: "utf8" }).trim();
 
-function laneEnv(): NodeJS.ProcessEnv {
+function laneEnv(needGateway = true): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   delete env.ANTHROPIC_API_KEY;
-  if (!env.AI_GATEWAY_API_KEY) throw new Error("AI_GATEWAY_API_KEY is required (Haiku lane over the AI Gateway)");
+  if (needGateway && !env.AI_GATEWAY_API_KEY) throw new Error("AI_GATEWAY_API_KEY is required (Haiku lane over the AI Gateway)");
   if (!env.TYPESAFE_API_KEY) throw new Error("TYPESAFE_API_KEY is required (Jev lane over the TypeSafe API)");
   return env;
 }
@@ -249,17 +267,18 @@ async function raceLane(lane: Lane, batches: CapturedBatch[], env: NodeJS.Proces
   };
 }
 
-async function race(batches: CapturedBatch[], env: NodeJS.ProcessEnv, runs: number): Promise<RaceRun[]> {
+async function race(batches: CapturedBatch[], env: NodeJS.ProcessEnv, runs: number, vs: Vs): Promise<RaceRun[]> {
   const haikuModel = process.env.DECISIONS_HAIKU_MODEL ?? "claude-haiku-4-5";
   const out: RaceRun[] = [];
   for (let r = 1; r <= runs; r++) {
-    const order: Array<"haiku" | "jev"> = r % 2 === 1 ? ["haiku", "jev"] : ["jev", "haiku"];
-    const lanes = {} as Record<"haiku" | "jev", LaneRun>;
+    const order: Lane[] = r % 2 === 1 ? [vs, "jev"] : ["jev", vs];
+    const lanes: Partial<Record<Lane, LaneRun>> = {};
     for (const lane of order) {
-      lanes[lane] = await raceLane(lane, batches, env, haikuModel);
-      console.log(`run ${r} ${lane}: ${(lanes[lane].totalMs / 1000).toFixed(2)} s over ${lanes[lane].batches.length} batches${lanes[lane].error ? ` ERROR ${lanes[lane].error}` : ""}`);
+      const lr = await raceLane(lane, batches, env, haikuModel);
+      lanes[lane] = lr;
+      console.log(`run ${r} ${lane}: ${(lr.totalMs / 1000).toFixed(2)} s over ${lr.batches.length} batches (warm-up ${(lr.warmupMs / 1000).toFixed(2)} s)${lr.error ? ` ERROR ${lr.error}` : ""}`);
     }
-    out.push({ run: r, order, lanes, ratio: lanes.haiku.totalMs / lanes.jev.totalMs });
+    out.push({ run: r, order, lanes, ratio: lanes[vs]!.totalMs / lanes.jev!.totalMs });
   }
   return out;
 }
@@ -366,9 +385,10 @@ interface Scored {
   kind: string;
   label: string;
   reference: string;
-  haiku: string;
+  /** the lane racing Jev (DECISIONS_VS) */
+  other: string;
   jev: string;
-  haikuMatch: boolean;
+  otherMatch: boolean;
   jevMatch: boolean;
   agree: boolean;
 }
@@ -417,18 +437,18 @@ function laneMatches(batches: CapturedBatch[], lane: LaneRun): { questions: numb
   return { questions: n, matchesReference: m, mismatches };
 }
 
-function score(batches: CapturedBatch[], run: RaceRun): Scored[] {
+function score(batches: CapturedBatch[], run: RaceRun, vs: Vs): Scored[] {
   const out: Scored[] = [];
   const find = (lane: LaneRun, batch: number, id: string) => lane.batches.find((b) => b.batch === batch)?.answers.find((a) => a.id === id);
   for (const b of batches) {
     for (const q of b.questions) {
       const ref = b.answers.find((a) => a.id === q.id);
-      const h = find(run.lanes.haiku, b.batch, q.id);
-      const j = find(run.lanes.jev, b.batch, q.id);
+      const h = find(laneOf(run, vs), b.batch, q.id);
+      const j = find(laneOf(run, "jev"), b.batch, q.id);
       out.push({
         id: q.id, batch: b.batch, kind: q.kind, label: premiseLabel(q),
-        reference: pickText(q, ref), haiku: pickText(q, h), jev: pickText(q, j),
-        haikuMatch: !!h && h.index === ref?.index, jevMatch: !!j && j.index === ref?.index, agree: !!h && !!j && h.index === j.index,
+        reference: pickText(q, ref), other: pickText(q, h), jev: pickText(q, j),
+        otherMatch: !!h && h.index === ref?.index, jevMatch: !!j && j.index === ref?.index, agree: !!h && !!j && h.index === j.index,
       });
     }
   }
@@ -449,23 +469,29 @@ interface RenderInput {
   speed: number;
   runs: number;
   haikuModel: string;
+  vs: Vs;
 }
 
-function column(inp: RenderInput, lane: "haiku" | "jev", tMs: number): string {
-  const lr = inp.run.lanes[lane];
+/** Name, subtitle and color per lane. The haiku pair keeps its published labels. */
+function laneLabel(inp: RenderInput, lane: Lane): { name: string; sub: string; color: string } {
+  if (lane === "jev") return { name: "Jev", sub: inp.vs === "haiku" ? "Jev · TypeSafe API" : "TypeSafe API", color: "#7ee787" };
+  if (lane === "haiku") return { name: "Haiku", sub: `${inp.haikuModel} · AI Gateway`, color: "#d2a8ff" };
+  return { name: "Haiku via Claude Code", sub: `navvi's default without a key · claude -p --model ${inp.haikuModel}`, color: "#d2a8ff" };
+}
+
+function column(inp: RenderInput, lane: Lane, tMs: number): string {
+  const lr = laneOf(inp.run, lane);
   const done = lr.batches.filter((b) => b.endMs <= tMs);
   const finished = done.length === lr.batches.length;
   const clock = finished ? lr.totalMs : Math.min(tMs, lr.totalMs);
   const answeredBatches = new Set(done.map((b) => b.batch));
   const rows = inp.scored.filter((s) => answeredBatches.has(s.batch));
   const visible = rows.slice(-VISIBLE_ROWS);
-  const color = lane === "jev" ? "#7ee787" : "#d2a8ff";
-  const name = lane === "jev" ? "Jev" : "Haiku";
-  const sub = lane === "jev" ? "Jev · TypeSafe API" : `${inp.haikuModel} · AI Gateway`;
+  const { name, sub, color } = laneLabel(inp, lane);
   const items = visible
     .map((s) => {
-      const pick = lane === "jev" ? s.jev : s.haiku;
-      const match = lane === "jev" ? s.jevMatch : s.haikuMatch;
+      const pick = lane === "jev" ? s.jev : s.other;
+      const match = lane === "jev" ? s.jevMatch : s.otherMatch;
       return `<div class="row"><span class="tick" style="color:${match ? "#7ee787" : "#ffa657"}">${match ? "✓" : "≠"}</span><span class="q">${esc(s.label)}</span><span class="a">${esc(clip(pick, 22))}</span></div>`;
     })
     .join("");
@@ -473,7 +499,7 @@ function column(inp: RenderInput, lane: "haiku" | "jev", tMs: number): string {
     ? `<span style="color:${color}">done · ${rows.length} decisions</span>`
     : `${rows.length} / ${inp.scored.length} decisions`;
   return `<div class="col${finished ? " fin" : ""}">
-    <div class="ch"><div><div class="name" style="color:${color}">${name}</div><div class="sub">${esc(sub)}</div></div><div class="clock" style="color:${finished ? color : "#e6edf3"}">${(clock / 1000).toFixed(1)}s</div></div>
+    <div class="ch"><div><div class="name${name.length > 12 ? " long" : ""}" style="color:${color}">${esc(name)}</div><div class="sub">${esc(sub)}</div></div><div class="clock" style="color:${finished ? color : "#e6edf3"}">${(clock / 1000).toFixed(1)}s</div></div>
     <div class="status">${status}</div>
     <div class="list">${items}</div>
   </div>`;
@@ -487,7 +513,7 @@ const STYLE = `* { box-sizing: border-box } body { margin: 0; width: ${WIDTH}px;
 .col { background: #11161f; border: 1px solid #262c36; border-radius: 12px; padding: 14px 18px; height: 520px; overflow: hidden }
 .col.fin { border-color: #3a4454 }
 .ch { display: flex; justify-content: space-between; align-items: center }
-.name { font-size: 40px; font-weight: 800; line-height: 1 } .sub { font-size: 16px; color: #8b949e; margin-top: 4px }
+.name { font-size: 40px; font-weight: 800; line-height: 1 } .name.long { font-size: 30px } .sub { font-size: 16px; color: #8b949e; margin-top: 4px }
 .clock { font: 800 64px/1 Menlo, Consolas, monospace; letter-spacing: -2px }
 .status { font-size: 19px; color: #8b949e; margin: 8px 0 8px }
 .row { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; font-size: 19px; padding: 6px 0; border-top: 1px solid #1d232d }
@@ -496,6 +522,7 @@ const STYLE = `* { box-sizing: border-box } body { margin: 0; width: ${WIDTH}px;
 
 function footer(inp: RenderInput): string {
   const batches = inp.batches.length;
+  if (inp.vs === "claude-code") return `Same ${inp.scored.length} questions in ${batches} batches · Claude Code: one claude -p per batch, signed-in subscription · measured ${inp.date} · navvi ${inp.commit.slice(0, 7)} · median of ${inp.runs} runs`;
   return `Both lanes · same ${inp.scored.length} questions in ${batches} batches · over HTTP APIs · measured ${inp.date} · navvi ${inp.commit.slice(0, 7)} · median of ${inp.runs} runs`;
 }
 
@@ -504,28 +531,29 @@ function raceFrame(inp: RenderInput, tMs: number): string {
   return `<!doctype html><html><head><meta charset="utf-8"><style>${STYLE}</style></head><body>
   <div class="title"><h1>Same decisions. Same questions.</h1>${speed}</div>
   <div class="task">${esc(`Real questions navvi asked while compiling: "${process.env.DECISIONS_PROMPT_SHOWN ?? inp.site}"`)}</div>
-  <div class="cols">${column(inp, "haiku", tMs)}${column(inp, "jev", tMs)}</div>
+  <div class="cols">${column(inp, inp.vs, tMs)}${column(inp, "jev", tMs)}</div>
   <div class="foot">${esc(footer(inp))}</div></body></html>`;
 }
 
 function endCard(inp: RenderInput): string {
-  const h = inp.run.lanes.haiku.totalMs / 1000;
-  const j = inp.run.lanes.jev.totalMs / 1000;
+  const h = laneOf(inp.run, inp.vs).totalMs / 1000;
+  const j = laneOf(inp.run, "jev").totalMs / 1000;
+  const other = laneLabel(inp, inp.vs).name;
   const ratio = h / j;
   const n = inp.scored.length;
-  const hm = inp.scored.filter((s) => s.haikuMatch).length;
+  const hm = inp.scored.filter((s) => s.otherMatch).length;
   const jm = inp.scored.filter((s) => s.jevMatch).length;
   const ag = inp.scored.filter((s) => s.agree).length;
   return `<!doctype html><html><head><meta charset="utf-8"><style>${STYLE}
   .card { display: flex; flex-direction: column; align-items: center; justify-content: center; height: ${HEIGHT - 44}px; text-align: center; gap: 18px }
-  .big { font-size: 54px; font-weight: 800; color: #e6edf3; letter-spacing: -1px } .big .j { color: #7ee787 } .big .h { color: #d2a8ff }
+  .big { font-size: ${other.length > 12 ? 46 : 54}px; font-weight: 800; color: #e6edf3; letter-spacing: -1px } .big .j { color: #7ee787 } .big .h { color: #d2a8ff }
   .x { font-size: 76px; font-weight: 900; color: #7ee787; letter-spacing: -2px }
   .n { font-size: 26px; color: #c9d1d9 } .acc { font-size: 22px; color: #8b949e } .tag { margin-top: 18px; font-size: 26px; color: #79c0ff; font-weight: 700 }
   </style></head><body><div class="card">
     <div class="n">${n} decisions, ${inp.batches.length} batches</div>
-    <div class="big"><span class="j">Jev: ${j.toFixed(1)}s</span> · <span class="h">Haiku: ${h.toFixed(1)}s</span></div>
+    <div class="big"><span class="j">Jev: ${j.toFixed(1)}s</span> · <span class="h">${esc(other)}: ${h.toFixed(1)}s</span></div>
     <div class="x">${ratio.toFixed(1)}× faster at deciding</div>
-    <div class="acc">Matched the reference answer: Jev ${jm}/${n} · Haiku ${hm}/${n} · lanes agreed ${ag}/${n}</div>
+    <div class="acc">Matched the reference answer: Jev ${jm}/${n} · ${esc(other)} ${hm}/${n} · lanes agreed ${ag}/${n}</div>
     <div class="tag">navvi — prompt → reusable scraper. Zero LLM calls on re-runs.</div>
   </div><div class="foot">${esc(footer(inp))}</div></body></html>`;
 }
@@ -536,7 +564,7 @@ async function render(dir: string, inp: RenderInput): Promise<{ gif: string; mp4
   mkdirSync(frames);
   const browser = await chromium.launch({ headless: true });
   const page = await (await browser.newContext({ viewport: { width: WIDTH, height: HEIGHT }, deviceScaleFactor: 1 })).newPage();
-  const total = Math.max(inp.run.lanes.haiku.totalMs, inp.run.lanes.jev.totalMs);
+  const total = Math.max(laneOf(inp.run, inp.vs).totalMs, laneOf(inp.run, "jev").totalMs);
   let i = 0;
   const shot = async (html: string, count: number) => {
     await page.setContent(html);
@@ -605,18 +633,21 @@ async function main(): Promise<void> {
   let captureDir = join(dir, "capture");
   let runs: RaceRun[];
   let raceMeta: { measuredAt: string; commit: string; workingTree: string };
+  let vs = vsLane(process.env.DECISIONS_VS);
   if (mode === "render") {
     const source = process.env.DECISIONS_SOURCE;
     if (!source) throw new Error("DECISIONS_SOURCE is required in render mode");
     captureDir = join(resolve(source), "capture");
-    const saved = JSON.parse(readFileSync(join(resolve(source), "race.json"), "utf8")) as { runs: RaceRun[]; measuredAt: string; commit: string; workingTree: string };
+    const saved = JSON.parse(readFileSync(join(resolve(source), "race.json"), "utf8")) as { runs: RaceRun[]; measuredAt: string; commit: string; workingTree: string; vs?: Vs };
     runs = saved.runs;
+    // The race decides the pair; a race.json from before DECISIONS_VS is Haiku vs Jev.
+    vs = vsLane(saved.vs ?? "haiku");
     raceMeta = saved;
     // The re-render directory carries the race and capture it was drawn from.
     copyFileSync(join(resolve(source), "race.json"), join(dir, "race.json"));
     cpSync(captureDir, join(dir, "capture"), { recursive: true });
   } else {
-    const env = laneEnv();
+    const env = laneEnv(mode === "capture" || vs === "haiku");
     if (mode === "capture") await capture(captureDir, env);
     else {
       const src = process.env.DECISIONS_CAPTURE;
@@ -625,11 +656,11 @@ async function main(): Promise<void> {
       cpSync(join(resolve(src), "capture"), captureDir, { recursive: true });
     }
     const batches = loadBatches(captureDir);
-    runs = await race(batches, env, Number(process.env.DECISIONS_RUNS ?? 3));
+    runs = await race(batches, env, Number(process.env.DECISIONS_RUNS ?? 3), vs);
     raceMeta = { measuredAt: new Date().toISOString(), commit, workingTree };
-    writeFileSync(join(dir, "race.json"), JSON.stringify({ ...raceMeta, captureDir, runs }, null, 2) + "\n");
+    writeFileSync(join(dir, "race.json"), JSON.stringify({ ...raceMeta, vs, captureDir, runs }, null, 2) + "\n");
   }
-  const failed = runs.flatMap((r) => [r.lanes.haiku, r.lanes.jev].filter((l) => l.error).map((l) => `run ${r.run} ${l.lane}: ${l.error}`));
+  const failed = runs.flatMap((r) => [laneOf(r, vs), laneOf(r, "jev")].filter((l) => l.error).map((l) => `run ${r.run} ${l.lane}: ${l.error}`));
   if (failed.length) throw new Error(`race failed, nothing rendered: ${failed.join("; ")}`);
 
   const batches = loadBatches(captureDir);
@@ -637,17 +668,23 @@ async function main(): Promise<void> {
   const allCaptured = readFileSync(join(captureDir, "questions.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l) as CapturedBatch);
   const sorted = [...runs].sort((a, b) => a.ratio - b.ratio);
   const median = sorted[Math.floor(sorted.length / 2)]!;
-  const scored = score(batches, median);
-  const total = Math.max(median.lanes.haiku.totalMs, median.lanes.jev.totalMs) / 1000;
+  const scored = score(batches, median, vs);
+  const total = Math.max(laneOf(median, vs).totalMs, laneOf(median, "jev").totalMs) / 1000;
   const speed = total <= MAX_ACTIVE_S ? 1 : Math.ceil(total / MAX_ACTIVE_S);
   const date = raceMeta.measuredAt.slice(0, 10);
   process.env.DECISIONS_PROMPT_SHOWN = cap.prompt;
-  const haikuModel = median.lanes.haiku.modelId.replace(/^anthropic\//, "");
-  const media = await render(dir, { batches, run: median, scored, date, commit: raceMeta.commit, site: cap.url, speed, runs: runs.length, haikuModel });
+  const haikuModel = vs === "haiku" ? laneOf(median, "haiku").modelId.replace(/^anthropic\//, "") : laneOf(median, vs).modelId.replace(/^claude --model /, "");
+  const media = await render(dir, { batches, run: median, scored, date, commit: raceMeta.commit, site: cap.url, speed, runs: runs.length, haikuModel, vs });
+  const stem = vs === "haiku" ? "docs/decisions-race" : `docs/decisions-race-${vs}`;
+  const otherName = vs === "haiku" ? "Haiku" : "Haiku via Claude Code";
+  // Provenance keys the other lane by its lane name (haiku, claude-code).
+  const named = (s: Scored) => { const { other, otherMatch, ...rest } = s; return { ...rest, [vs]: other, [`${vs === "haiku" ? "haiku" : "claudeCode"}Match`]: otherMatch }; };
 
   const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
   const provenance = {
-    claim: "Jev vs Haiku on the decision step only: the same captured choice/boolean questions, same batches, sequential per lane, wall clock per batch.",
+    claim: vs === "claude-code"
+      ? "Jev vs Haiku through Claude Code (navvi's CliChooser, the default without an API key) on the decision step only: the same captured choice/boolean questions, same batches, sequential per lane, wall clock per batch; the Claude Code lane includes starting one claude process per batch."
+      : "Jev vs Haiku on the decision step only: the same captured choice/boolean questions, same batches, sequential per lane, wall clock per batch.",
     measuredAt: raceMeta.measuredAt,
     navviCommit: raceMeta.commit,
     workingTreeAtMeasurement: raceMeta.workingTree || "clean",
@@ -668,36 +705,36 @@ async function main(): Promise<void> {
       questionList: batches.flatMap((b) => b.questions.map((q) => ({ batch: b.batch, id: q.id, kind: q.kind, label: premiseLabel(q), premise: q.premise, options: q.options?.length ?? 0, stateChars: q.state.length }))),
     },
     lanes: {
-      haiku: { chooser: "ModelChooser (stock validation since 8d868fb; a counting subclass records how many picks arrived with an explanation, changing nothing)", modelId: median.lanes.haiku.modelId, transport: median.lanes.haiku.transport },
-      jev: { chooser: "JevChooser", modelId: median.lanes.jev.modelId, transport: median.lanes.jev.transport },
+      [vs]: { label: otherName, chooser: vs === "haiku" ? "ModelChooser (stock validation since 8d868fb; a counting subclass records how many picks arrived with an explanation, changing nothing)" : "CliChooser(\"claude\") with ANTHROPIC_API_KEY and every CLAUDE* variable removed", modelId: laneOf(median, vs).modelId, transport: laneOf(median, vs).transport },
+      jev: { label: "Jev", chooser: "JevChooser", modelId: laneOf(median, "jev").modelId, transport: laneOf(median, "jev").transport },
     },
     method: {
       warmUp: "one untimed one-question boolean call per lane immediately before its timed pass (connection setup); warm-up latency recorded below",
-      order: "lanes run one after the other, never concurrently; order alternates per run (run 1 Haiku first, run 2 Jev first, ...)",
+      order: `lanes run one after the other, never concurrently; order alternates per run (run 1 ${otherName} first, run 2 Jev first, ...)`,
       timing: "performance.now() around chooser.ask(batch) for each captured batch; lane total is wall clock over all batches; BaseChooser retries (if any) are inside the timing, apiBatches counts backend calls",
-      medianRun: "the run with the median Haiku/Jev ratio is the one rendered",
+      medianRun: `the run with the median ${otherName}/Jev ratio is the one rendered`,
       reference: "the answer the reference decider gave during the capture run, whose navigation and extraction succeeded; matching it is agreement with that run, not ground truth",
       display: speed > 1 ? `time-compressed uniformly by ${speed}× for both lanes, stated on screen` : "real time",
     },
     runs: runs.map((r) => ({
       run: r.run, order: r.order, ratio: Number(r.ratio.toFixed(2)),
-      lanes: Object.fromEntries((["haiku", "jev"] as const).map((k) => [k, {
-        totalMs: Math.round(r.lanes[k].totalMs), warmupMs: Math.round(r.lanes[k].warmupMs), ...(r.lanes[k].warmupError ? { warmupError: r.lanes[k].warmupError } : {}), apiBatches: r.lanes[k].apiBatches, ...(r.lanes[k].explanationTexts !== undefined ? { explanationTexts: r.lanes[k].explanationTexts } : {}),
-        batches: r.lanes[k].batches.map((b) => ({ batch: b.batch, ms: Math.round(b.ms), answers: b.answers })),
-      }])),
-      agreement: (() => { const s = score(batches, r); return { questions: s.length, haikuMatchesReference: s.filter((x) => x.haikuMatch).length, jevMatchesReference: s.filter((x) => x.jevMatch).length, lanesAgree: s.filter((x) => x.agree).length }; })(),
+      lanes: Object.fromEntries(([vs, "jev"] as const).map((k) => { const l = laneOf(r, k); return [k, {
+        totalMs: Math.round(l.totalMs), warmupMs: Math.round(l.warmupMs), ...(l.warmupError ? { warmupError: l.warmupError } : {}), apiBatches: l.apiBatches, ...(l.explanationTexts !== undefined ? { explanationTexts: l.explanationTexts } : {}),
+        batches: l.batches.map((b) => ({ batch: b.batch, ms: Math.round(b.ms), answers: b.answers })),
+      }]; })),
+      agreement: (() => { const s = score(batches, r, vs); return { questions: s.length, [`${vs === "haiku" ? "haiku" : "claudeCode"}MatchesReference`]: s.filter((x) => x.otherMatch).length, jevMatchesReference: s.filter((x) => x.jevMatch).length, lanesAgree: s.filter((x) => x.agree).length }; })(),
     })),
     medianRun: median.run,
-    rendered: { perQuestion: scored, speed, gif: "docs/decisions-race.gif", mp4: "docs/decisions-race.mp4" },
+    rendered: { perQuestion: scored.map(named), speed, gif: `${stem}.gif`, mp4: `${stem}.mp4` },
   };
   writeFileSync(join(dir, "provenance.json"), JSON.stringify(provenance, null, 2) + "\n");
   if (process.env.DECISIONS_PUBLISH === "1") {
-    copyFileSync(media.gif, "docs/decisions-race.gif");
-    copyFileSync(media.mp4, "docs/decisions-race.mp4");
-    copyFileSync(join(dir, "provenance.json"), "docs/decisions-race-provenance.json");
-    console.log("published docs/decisions-race.{gif,mp4} and docs/decisions-race-provenance.json");
+    copyFileSync(media.gif, `${stem}.gif`);
+    copyFileSync(media.mp4, `${stem}.mp4`);
+    copyFileSync(join(dir, "provenance.json"), `${stem}-provenance.json`);
+    console.log(`published ${stem}.{gif,mp4} and ${stem}-provenance.json`);
   }
-  for (const r of runs) console.log(`run ${r.run}: Haiku ${(r.lanes.haiku.totalMs / 1000).toFixed(2)} s · Jev ${(r.lanes.jev.totalMs / 1000).toFixed(2)} s · ${r.ratio.toFixed(2)}×`);
+  for (const r of runs) console.log(`run ${r.run}: ${otherName} ${(laneOf(r, vs).totalMs / 1000).toFixed(2)} s · Jev ${(laneOf(r, "jev").totalMs / 1000).toFixed(2)} s · ${r.ratio.toFixed(2)}×`);
   console.log(`median run ${median.run}; evidence in ${dir}`);
   if (existsSync(join(dir, "frames"))) console.log(`frames: ${join(dir, "frames")}`);
 }

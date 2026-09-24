@@ -35,7 +35,7 @@ One compiler, Jev first.
   in ~4.5 s instead of ~22 s. `MAX_THINKING_TOKENS` or `NAVVI_CLAUDE_THINKING=1`
   restores it.
 - **Docs and demos.** New README; `docs/decisions-race.gif` (the same 19 real
-  navigation decisions: Jev 3.6× faster than Haiku over the API, 11× faster than
+  navigation decisions: Jev 3.6× faster than Haiku over the API, 8–11× faster than
   Haiku through Claude Code); `docs/product.gif` (compile, zero-model re-run,
   self-heal); Apify detail in `docs/apify.md`.
 

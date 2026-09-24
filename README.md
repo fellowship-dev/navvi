@@ -41,11 +41,13 @@ of each backend, one after another, median of three runs:
 | --- | --- | --- | --- |
 | **Jev** (TypeSafe API) | **3.5 s** | — | 19/19 |
 | Claude Haiku 4.5 over the API (AI Gateway) | 12.6 s | **3.6× faster** | 19/19 |
-| Claude Haiku through Claude Code — navvi's default without a key | 38.2 s | **11× faster** | 19/19 |
+| Claude Haiku through Claude Code — navvi's default without a key | 31–38 s | **8–11× faster** | 19/19 |
 
 Same answers, a fraction of the wait. The Claude Code row is already the fast
 version: navvi now runs it without extended thinking, which took it from 91.6 s to
-38.2 s with the same 19/19. Method, every batch's
+31–38 s with the same 19/19 (two sets of runs the same day; Claude Code's time varies).
+
+![Jev versus Haiku through Claude Code on the same 19 decisions](docs/decisions-race-claude-code.gif) Method, every batch's
 latency and the captured questions:
 [`decisions-race-provenance.json`](docs/decisions-race-provenance.json) (the video, an earlier set of runs: 3.2 s against 11.0 s)
 and [`decisions-race-claude-code.json`](docs/decisions-race-claude-code.json) (the
