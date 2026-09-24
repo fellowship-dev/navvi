@@ -1,10 +1,10 @@
 {
   "claim": "Decision-step latency only, lanes jev, haiku, claude-code: the same captured choice/boolean questions, same batches, sequential per lane, wall clock per batch.",
-  "measuredAt": "2026-09-24T03:20:16.693Z",
-  "navviCommit": "11347076660c8649db584a5451b567c324568721",
-  "workingTreeAtMeasurement": "M README.md\n M SKILL.md\n M docs/architecture.md\n M docs/testing.md\n M llms.txt\n M scripts/record-decisions.ts\n M src/cli/args.ts\n?? docs/apify.md",
+  "measuredAt": "2026-09-24T03:53:07.858Z",
+  "navviCommit": "4049ee646de20f99a065cb5a48129b7f9ef2d840",
+  "workingTreeAtMeasurement": "M bin/cli.ts\n M src/browser/relaunch.ts\n M src/browser/snapshot.inject.js\n M src/browser/snapshot.ts\n M src/chooser/questions.ts\n M src/cli/render.ts\n M src/compile/compile.ts\n M src/compile/fields.ts\n M src/compile/index.ts\n M src/compile/links.ts\n M src/compile/proven.ts\n M src/scraper/extract.ts\n M src/scraper/schema.ts\n M tests/cli.test.ts\n M tests/compile-proven.test.ts\n M tests/make.test.ts\n M tests/relaunch.test.ts\n?? tests/fixtures/multi/\n?? tests/multi-valued.test.ts",
   "capture": {
-    "dir": "/private/tmp/claude-501/-Users-maxfindel-Projects-fellowship-dev-claude-buddy/e03339d2-236c-4596-968c-7aac32f5da45/scratchpad/runs/navvi-decisions-L0R0bg/capture",
+    "dir": "<scratch>/navvi-decisions-4mYTdq/capture",
     "site": "https://hn.algolia.com/",
     "task": "Search Hacker News for Python stories and extract up to 10 results with title, author, points and story link.",
     "capturedAt": "2026-09-24T03:07:26.806Z",
@@ -120,16 +120,16 @@
       "transport": "TypeSafe API https://api.typesafe.ai/v1/systemone (JevChooser, provider typesafe)",
       "failedRuns": [],
       "totalMsPerRun": [
-        3339,
-        3482,
-        4017
+        3459,
+        3531,
+        3447
       ],
-      "medianTotalMs": 3482,
-      "medianBatchMs": 575,
+      "medianTotalMs": 3459,
+      "medianBatchMs": 441,
       "warmupMsPerRun": [
-        915,
-        791,
-        834
+        870,
+        923,
+        732
       ],
       "agreementPerRun": [
         {
@@ -154,16 +154,16 @@
       "transport": "Vercel AI Gateway (stock ModelChooser, AI SDK generateObject)",
       "failedRuns": [],
       "totalMsPerRun": [
-        14725,
-        11964,
-        11744
+        12593,
+        12163,
+        17379
       ],
-      "medianTotalMs": 11964,
-      "medianBatchMs": 1522,
+      "medianTotalMs": 12593,
+      "medianBatchMs": 1515,
       "warmupMsPerRun": [
-        1628,
-        1301,
-        1692
+        1672,
+        1212,
+        1273
       ],
       "agreementPerRun": [
         {
@@ -188,16 +188,16 @@
       "transport": "Claude Code CLI on the signed-in subscription (CliChooser claude: `claude -p <prompt> --output-format json --model <m>`, one process per batch)",
       "failedRuns": [],
       "totalMsPerRun": [
-        111982,
-        87296,
-        91619
+        38167,
+        39068,
+        32433
       ],
-      "medianTotalMs": 91619,
-      "medianBatchMs": 11626,
+      "medianTotalMs": 38167,
+      "medianBatchMs": 5258,
       "warmupMsPerRun": [
-        6351,
-        6021,
-        5514
+        4970,
+        6200,
+        4396
       ],
       "agreementPerRun": [
         {
@@ -220,22 +220,22 @@
   },
   "ratios": {
     "haiku/jev": {
-      "ofMedians": 3.44,
+      "ofMedians": 3.64,
       "perRun": [
-        4.41,
+        3.64,
         3.44,
-        2.92
+        5.04
       ],
-      "medianOfPerRun": 3.44
+      "medianOfPerRun": 3.64
     },
     "claude-code/jev": {
-      "ofMedians": 26.31,
+      "ofMedians": 11.03,
       "perRun": [
-        33.54,
-        25.07,
-        22.81
+        11.03,
+        11.06,
+        9.41
       ],
-      "medianOfPerRun": 25.07
+      "medianOfPerRun": 11.03
     }
   },
   "runs": [
@@ -248,13 +248,13 @@
       ],
       "lanes": {
         "jev": {
-          "totalMs": 3339,
-          "warmupMs": 915,
+          "totalMs": 3459,
+          "warmupMs": 870,
           "apiBatches": 7,
           "batches": [
             {
               "batch": 2,
-              "ms": 709,
+              "ms": 826,
               "answers": [
                 {
                   "id": "nav.0.op",
@@ -272,7 +272,7 @@
             },
             {
               "batch": 3,
-              "ms": 642,
+              "ms": 587,
               "answers": [
                 {
                   "id": "nav.1.op",
@@ -290,7 +290,7 @@
             },
             {
               "batch": 5,
-              "ms": 659,
+              "ms": 588,
               "answers": [
                 {
                   "id": "nav.2.op",
@@ -308,7 +308,7 @@
             },
             {
               "batch": 6,
-              "ms": 396,
+              "ms": 365,
               "answers": [
                 {
                   "id": "nav.3.op",
@@ -326,7 +326,7 @@
             },
             {
               "batch": 7,
-              "ms": 335,
+              "ms": 417,
               "answers": [
                 {
                   "id": "nav.3.done",
@@ -336,7 +336,7 @@
             },
             {
               "batch": 8,
-              "ms": 300,
+              "ms": 298,
               "answers": [
                 {
                   "id": "group",
@@ -346,7 +346,7 @@
             },
             {
               "batch": 9,
-              "ms": 298,
+              "ms": 376,
               "answers": [
                 {
                   "id": "field.title",
@@ -373,14 +373,14 @@
           ]
         },
         "haiku": {
-          "totalMs": 14725,
-          "warmupMs": 1628,
+          "totalMs": 12593,
+          "warmupMs": 1672,
           "apiBatches": 7,
           "explanationTexts": 7,
           "batches": [
             {
               "batch": 2,
-              "ms": 1441,
+              "ms": 1128,
               "answers": [
                 {
                   "id": "nav.0.op",
@@ -398,7 +398,7 @@
             },
             {
               "batch": 3,
-              "ms": 3709,
+              "ms": 3841,
               "answers": [
                 {
                   "id": "nav.1.op",
@@ -416,7 +416,7 @@
             },
             {
               "batch": 5,
-              "ms": 3762,
+              "ms": 2122,
               "answers": [
                 {
                   "id": "nav.2.op",
@@ -434,7 +434,7 @@
             },
             {
               "batch": 6,
-              "ms": 1634,
+              "ms": 1515,
               "answers": [
                 {
                   "id": "nav.3.op",
@@ -452,7 +452,7 @@
             },
             {
               "batch": 7,
-              "ms": 1386,
+              "ms": 1393,
               "answers": [
                 {
                   "id": "nav.3.done",
@@ -462,7 +462,7 @@
             },
             {
               "batch": 8,
-              "ms": 1279,
+              "ms": 1071,
               "answers": [
                 {
                   "id": "group",
@@ -472,7 +472,7 @@
             },
             {
               "batch": 9,
-              "ms": 1514,
+              "ms": 1523,
               "answers": [
                 {
                   "id": "field.title",
@@ -499,13 +499,13 @@
           ]
         },
         "claude-code": {
-          "totalMs": 111982,
-          "warmupMs": 6351,
+          "totalMs": 38167,
+          "warmupMs": 4970,
           "apiBatches": 7,
           "batches": [
             {
               "batch": 2,
-              "ms": 9727,
+              "ms": 5248,
               "answers": [
                 {
                   "id": "nav.0.op",
@@ -523,7 +523,7 @@
             },
             {
               "batch": 3,
-              "ms": 22178,
+              "ms": 5273,
               "answers": [
                 {
                   "id": "nav.1.op",
@@ -541,7 +541,7 @@
             },
             {
               "batch": 5,
-              "ms": 22174,
+              "ms": 5561,
               "answers": [
                 {
                   "id": "nav.2.op",
@@ -559,7 +559,7 @@
             },
             {
               "batch": 6,
-              "ms": 14968,
+              "ms": 6536,
               "answers": [
                 {
                   "id": "nav.3.op",
@@ -577,7 +577,7 @@
             },
             {
               "batch": 7,
-              "ms": 11626,
+              "ms": 5845,
               "answers": [
                 {
                   "id": "nav.3.done",
@@ -587,7 +587,7 @@
             },
             {
               "batch": 8,
-              "ms": 8782,
+              "ms": 4994,
               "answers": [
                 {
                   "id": "group",
@@ -597,7 +597,7 @@
             },
             {
               "batch": 9,
-              "ms": 22527,
+              "ms": 4710,
               "answers": [
                 {
                   "id": "field.title",
@@ -634,14 +634,14 @@
       ],
       "lanes": {
         "haiku": {
-          "totalMs": 11964,
-          "warmupMs": 1301,
+          "totalMs": 12163,
+          "warmupMs": 1212,
           "apiBatches": 7,
-          "explanationTexts": 5,
+          "explanationTexts": 10,
           "batches": [
             {
               "batch": 2,
-              "ms": 1438,
+              "ms": 1335,
               "answers": [
                 {
                   "id": "nav.0.op",
@@ -659,7 +659,7 @@
             },
             {
               "batch": 3,
-              "ms": 1499,
+              "ms": 1856,
               "answers": [
                 {
                   "id": "nav.1.op",
@@ -677,7 +677,7 @@
             },
             {
               "batch": 5,
-              "ms": 1695,
+              "ms": 2342,
               "answers": [
                 {
                   "id": "nav.2.op",
@@ -695,7 +695,7 @@
             },
             {
               "batch": 6,
-              "ms": 1592,
+              "ms": 1487,
               "answers": [
                 {
                   "id": "nav.3.op",
@@ -713,7 +713,7 @@
             },
             {
               "batch": 7,
-              "ms": 1753,
+              "ms": 2571,
               "answers": [
                 {
                   "id": "nav.3.done",
@@ -723,7 +723,7 @@
             },
             {
               "batch": 8,
-              "ms": 1594,
+              "ms": 1161,
               "answers": [
                 {
                   "id": "group",
@@ -733,7 +733,7 @@
             },
             {
               "batch": 9,
-              "ms": 2393,
+              "ms": 1409,
               "answers": [
                 {
                   "id": "field.title",
@@ -760,13 +760,13 @@
           ]
         },
         "claude-code": {
-          "totalMs": 87296,
-          "warmupMs": 6021,
+          "totalMs": 39068,
+          "warmupMs": 6200,
           "apiBatches": 7,
           "batches": [
             {
               "batch": 2,
-              "ms": 9580,
+              "ms": 6391,
               "answers": [
                 {
                   "id": "nav.0.op",
@@ -784,7 +784,7 @@
             },
             {
               "batch": 3,
-              "ms": 11580,
+              "ms": 5861,
               "answers": [
                 {
                   "id": "nav.1.op",
@@ -802,7 +802,7 @@
             },
             {
               "batch": 5,
-              "ms": 19894,
+              "ms": 5594,
               "answers": [
                 {
                   "id": "nav.2.op",
@@ -820,7 +820,7 @@
             },
             {
               "batch": 6,
-              "ms": 16698,
+              "ms": 5258,
               "answers": [
                 {
                   "id": "nav.3.op",
@@ -838,7 +838,7 @@
             },
             {
               "batch": 7,
-              "ms": 10370,
+              "ms": 5433,
               "answers": [
                 {
                   "id": "nav.3.done",
@@ -848,7 +848,7 @@
             },
             {
               "batch": 8,
-              "ms": 7616,
+              "ms": 4973,
               "answers": [
                 {
                   "id": "group",
@@ -858,7 +858,7 @@
             },
             {
               "batch": 9,
-              "ms": 11557,
+              "ms": 5560,
               "answers": [
                 {
                   "id": "field.title",
@@ -885,13 +885,13 @@
           ]
         },
         "jev": {
-          "totalMs": 3482,
-          "warmupMs": 791,
+          "totalMs": 3531,
+          "warmupMs": 923,
           "apiBatches": 7,
           "batches": [
             {
               "batch": 2,
-              "ms": 699,
+              "ms": 779,
               "answers": [
                 {
                   "id": "nav.0.op",
@@ -909,7 +909,7 @@
             },
             {
               "batch": 3,
-              "ms": 575,
+              "ms": 625,
               "answers": [
                 {
                   "id": "nav.1.op",
@@ -927,7 +927,7 @@
             },
             {
               "batch": 5,
-              "ms": 575,
+              "ms": 603,
               "answers": [
                 {
                   "id": "nav.2.op",
@@ -945,7 +945,7 @@
             },
             {
               "batch": 6,
-              "ms": 656,
+              "ms": 441,
               "answers": [
                 {
                   "id": "nav.3.op",
@@ -963,7 +963,7 @@
             },
             {
               "batch": 7,
-              "ms": 386,
+              "ms": 358,
               "answers": [
                 {
                   "id": "nav.3.done",
@@ -973,7 +973,7 @@
             },
             {
               "batch": 8,
-              "ms": 278,
+              "ms": 380,
               "answers": [
                 {
                   "id": "group",
@@ -983,7 +983,7 @@
             },
             {
               "batch": 9,
-              "ms": 313,
+              "ms": 344,
               "answers": [
                 {
                   "id": "field.title",
@@ -1020,13 +1020,13 @@
       ],
       "lanes": {
         "claude-code": {
-          "totalMs": 91619,
-          "warmupMs": 5514,
+          "totalMs": 32433,
+          "warmupMs": 4396,
           "apiBatches": 7,
           "batches": [
             {
               "batch": 2,
-              "ms": 20515,
+              "ms": 4858,
               "answers": [
                 {
                   "id": "nav.0.op",
@@ -1044,7 +1044,7 @@
             },
             {
               "batch": 3,
-              "ms": 9878,
+              "ms": 4676,
               "answers": [
                 {
                   "id": "nav.1.op",
@@ -1062,7 +1062,7 @@
             },
             {
               "batch": 5,
-              "ms": 15336,
+              "ms": 5356,
               "answers": [
                 {
                   "id": "nav.2.op",
@@ -1080,7 +1080,7 @@
             },
             {
               "batch": 6,
-              "ms": 13031,
+              "ms": 4665,
               "answers": [
                 {
                   "id": "nav.3.op",
@@ -1098,7 +1098,7 @@
             },
             {
               "batch": 7,
-              "ms": 9611,
+              "ms": 4141,
               "answers": [
                 {
                   "id": "nav.3.done",
@@ -1108,7 +1108,7 @@
             },
             {
               "batch": 8,
-              "ms": 7356,
+              "ms": 4240,
               "answers": [
                 {
                   "id": "group",
@@ -1118,7 +1118,7 @@
             },
             {
               "batch": 9,
-              "ms": 15892,
+              "ms": 4497,
               "answers": [
                 {
                   "id": "field.title",
@@ -1145,13 +1145,13 @@
           ]
         },
         "jev": {
-          "totalMs": 4017,
-          "warmupMs": 834,
+          "totalMs": 3447,
+          "warmupMs": 732,
           "apiBatches": 7,
           "batches": [
             {
               "batch": 2,
-              "ms": 767,
+              "ms": 760,
               "answers": [
                 {
                   "id": "nav.0.op",
@@ -1169,7 +1169,7 @@
             },
             {
               "batch": 3,
-              "ms": 598,
+              "ms": 593,
               "answers": [
                 {
                   "id": "nav.1.op",
@@ -1187,7 +1187,7 @@
             },
             {
               "batch": 5,
-              "ms": 630,
+              "ms": 617,
               "answers": [
                 {
                   "id": "nav.2.op",
@@ -1205,7 +1205,7 @@
             },
             {
               "batch": 6,
-              "ms": 596,
+              "ms": 453,
               "answers": [
                 {
                   "id": "nav.3.op",
@@ -1223,7 +1223,7 @@
             },
             {
               "batch": 7,
-              "ms": 395,
+              "ms": 361,
               "answers": [
                 {
                   "id": "nav.3.done",
@@ -1233,7 +1233,7 @@
             },
             {
               "batch": 8,
-              "ms": 321,
+              "ms": 310,
               "answers": [
                 {
                   "id": "group",
@@ -1243,7 +1243,7 @@
             },
             {
               "batch": 9,
-              "ms": 711,
+              "ms": 352,
               "answers": [
                 {
                   "id": "field.title",
@@ -1270,14 +1270,14 @@
           ]
         },
         "haiku": {
-          "totalMs": 11744,
-          "warmupMs": 1692,
+          "totalMs": 17379,
+          "warmupMs": 1273,
           "apiBatches": 7,
-          "explanationTexts": 8,
+          "explanationTexts": 7,
           "batches": [
             {
               "batch": 2,
-              "ms": 1591,
+              "ms": 1237,
               "answers": [
                 {
                   "id": "nav.0.op",
@@ -1295,7 +1295,7 @@
             },
             {
               "batch": 3,
-              "ms": 1509,
+              "ms": 2150,
               "answers": [
                 {
                   "id": "nav.1.op",
@@ -1313,7 +1313,7 @@
             },
             {
               "batch": 5,
-              "ms": 3214,
+              "ms": 7671,
               "answers": [
                 {
                   "id": "nav.2.op",
@@ -1331,7 +1331,7 @@
             },
             {
               "batch": 6,
-              "ms": 1522,
+              "ms": 2470,
               "answers": [
                 {
                   "id": "nav.3.op",
@@ -1349,7 +1349,7 @@
             },
             {
               "batch": 7,
-              "ms": 1215,
+              "ms": 1278,
               "answers": [
                 {
                   "id": "nav.3.done",
@@ -1359,7 +1359,7 @@
             },
             {
               "batch": 8,
-              "ms": 1233,
+              "ms": 1041,
               "answers": [
                 {
                   "id": "group",
@@ -1369,7 +1369,7 @@
             },
             {
               "batch": 9,
-              "ms": 1459,
+              "ms": 1531,
               "answers": [
                 {
                   "id": "field.title",
@@ -1397,50 +1397,5 @@
         }
       }
     }
-  ],
-  "claudeCodeInvocation": {
-    "chooser": "CliChooser(\"claude\") from src/chooser/cli.ts, unmodified",
-    "command": "claude -p <rendered batch prompt> --output-format json --model haiku",
-    "model": "haiku (NAVVI_CLAUDE_MODEL unset, so DEFAULT_CLAUDE_MODEL)",
-    "cliVersion": "2.1.281 (Claude Code)",
-    "auth": "the signed-in Claude subscription (macOS keychain); ANTHROPIC_API_KEY and every CLAUDE*/ANTHROPIC* variable removed from the child env so it is neither API-key billed nor a nested session of the Claude Code session that ran the script",
-    "cwd": "the navvi checkout (the process cwd, as for a navvi user running from their project); the user-level Claude Code configuration on this machine applies",
-    "processPerBatch": true,
-    "timingNote": "each lane batch time includes starting a new Claude Code process, its own system prompt and the model call. That is the user-facing cost of the no-API-key path, but it is not model latency alone."
-  },
-  "claudeCodeTimeSplit": {
-    "note": "separate diagnostic after the bench, same machine, same clean env, not part of the medians: the rendered batch prompts run directly through `claude -p ... --output-format json --model haiku`; wall clock vs the envelope duration_api_ms",
-    "samples": [
-      {
-        "batch": 6,
-        "wallMs": 8111,
-        "durationApiMs": 5469,
-        "inputTokens": 20497,
-        "outputTokens": 457,
-        "thinkingTokens": 413
-      },
-      {
-        "batch": 2,
-        "wallMs": 10336,
-        "durationApiMs": 7647,
-        "inputTokens": 31390,
-        "outputTokens": 643,
-        "thinkingTokens": 588
-      },
-      {
-        "batch": 2,
-        "wallMs": 29335,
-        "durationApiMs": 26820,
-        "inputTokens": 31390,
-        "outputTokens": 2515,
-        "thinkingTokens": 2461
-      }
-    ],
-    "reading": "process startup and exit add about 2.5 s per batch. The rest is API time: Claude Code sends roughly 19k tokens of its own prompt with each batch, and Haiku inside Claude Code spends 400 to 2,500 tokens thinking before it answers, which also makes the per-batch time vary widely (the same batch took 10.3 s and 29.3 s)."
-  },
-  "reading": {
-    "haikuApiVsJev": "3.4x by median (per run 2.9 to 4.4x); reproduces the published 3.4x",
-    "claudeCodeVsJev": "26x by median (per run 22.8 to 33.5x); dominated by Claude Code API time with thinking, not by process startup",
-    "scope": "decision step only, one task (HN search), one network location, 19 questions; not end-to-end compile time, not a general accuracy claim"
-  }
+  ]
 }

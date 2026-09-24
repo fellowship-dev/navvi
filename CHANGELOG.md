@@ -30,8 +30,12 @@ One compiler, Jev first.
 - **`make` ergonomics.** Start URLs answer the input shape and the site; a model
   that does not answer ends `model_unavailable` (exit 4), not as a defect; a flag
   that belongs to the other command is refused by name.
+- **Claude Code runs without extended thinking**: the same 19/19 answers on the
+  captured navigation questions in 38 s instead of 92 s; the prompt-parse question
+  in ~4.5 s instead of ~22 s. `MAX_THINKING_TOKENS` or `NAVVI_CLAUDE_THINKING=1`
+  restores it.
 - **Docs and demos.** New README; `docs/decisions-race.gif` (the same 19 real
-  navigation decisions: Jev 3.4× faster than Haiku over the API, ~25× faster than
+  navigation decisions: Jev 3.6× faster than Haiku over the API, 11× faster than
   Haiku through Claude Code); `docs/product.gif` (compile, zero-model re-run,
   self-heal); Apify detail in `docs/apify.md`.
 

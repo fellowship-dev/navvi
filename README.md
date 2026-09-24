@@ -17,7 +17,7 @@
 - **Your agent asks in plain words.** `navvi "extract the title, price and availability" <url>`.
 - **Navvi compiles a scraper, fast and accurately.** Code finds the candidates on the
   page; a model only *picks* among them. With [Jev](#why-use-jev) those picks are
-  typed, cheap and [3.4× faster than Haiku](#why-use-jev).
+  typed, cheap and [several times faster than Haiku](#why-use-jev).
 - **Re-runs make zero LLM calls.** The compiled scraper is a JSON file of selectors
   and fingerprints. Run it in cron, in CI, on Apify.
 - **It heals itself when the site changes.** A field that moved is found again and
@@ -40,11 +40,12 @@ of each backend, one after another, median of three runs:
 | Who decides | Time for 19 decisions | Jev is | Matched the reference |
 | --- | --- | --- | --- |
 | **Jev** (TypeSafe API) | **3.5 s** | — | 19/19 |
-| Claude Haiku 4.5 over the API (AI Gateway) | 12.0 s | **3.4× faster** | 19/19 |
-| Claude Haiku through Claude Code — navvi's default without a key | 91.6 s | **~25× faster** | 19/19 |
+| Claude Haiku 4.5 over the API (AI Gateway) | 12.6 s | **3.6× faster** | 19/19 |
+| Claude Haiku through Claude Code — navvi's default without a key | 38.2 s | **11× faster** | 19/19 |
 
-Same answers, a fraction of the wait. Claude Code's time is mostly its own prompt
-and Haiku's thinking on every batch, not process start-up. Method, every batch's
+Same answers, a fraction of the wait. The Claude Code row is already the fast
+version: navvi now runs it without extended thinking, which took it from 91.6 s to
+38.2 s with the same 19/19. Method, every batch's
 latency and the captured questions:
 [`decisions-race-provenance.json`](docs/decisions-race-provenance.json) (the video, an earlier set of runs: 3.2 s against 11.0 s)
 and [`decisions-race-claude-code.json`](docs/decisions-race-claude-code.json) (the
