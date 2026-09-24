@@ -5,7 +5,7 @@ import { Actor } from "apify";
 import { MemoryStorage } from "crawlee";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ConfigurationError, InvalidAnswerError, type Question } from "../src/chooser/chooser.js";
-import { CliChooser, extractJsonObject, probeCli, readCodexEvents, renderPrompt, resetProbeCache, type CliRunResult, type CliRunner } from "../src/chooser/cli.js";
+import { CliChooser, extractJsonObject, harnessEnv, probeCli, readCodexEvents, renderPrompt, resetProbeCache, type CliRunResult, type CliRunner } from "../src/chooser/cli.js";
 import { createChooser, resolveDefaultChooser } from "../src/chooser/index.js";
 import { Budget, ModelUnavailableError } from "../src/billing/budget.js";
 import { defaultChooser } from "../src/input/schema.js";
@@ -206,6 +206,16 @@ describe("claude chooser", () => {
     const err = await new CliChooser("claude", { runner: slow, env: { NAVVI_CLI_TIMEOUT_MS: "20" }, backoffMs: [0] }).ask(text).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ModelUnavailableError);
     expect((err as Error).message).toContain("no reply within 20 ms");
+  });
+
+  it("Claude Code answers without extended thinking unless the user asked for it", () => {
+    // Measured 2026-09-24 on 19 captured navigation questions: thinking off answered
+    // 19/19 like thinking on, in 32 s instead of 99.5 s; the prompt-parse text question
+    // fell from ~22 s to ~4.5 s. Haiku was spending 2-3k output tokens thinking about a pick.
+    expect(harnessEnv("claude", {}).MAX_THINKING_TOKENS).toBe("0");
+    expect(harnessEnv("claude", { MAX_THINKING_TOKENS: "4000" }).MAX_THINKING_TOKENS).toBe("4000");
+    expect(harnessEnv("claude", { NAVVI_CLAUDE_THINKING: "1" }).MAX_THINKING_TOKENS).toBeUndefined();
+    expect(harnessEnv("codex", {}).MAX_THINKING_TOKENS).toBeUndefined();
   });
 
   it("a very long prompt travels on stdin instead of argv", async () => {

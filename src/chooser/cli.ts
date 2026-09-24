@@ -65,6 +65,21 @@ class CliTimeoutError extends Error {
   }
 }
 
+/**
+ * The environment the harness runs in.
+ *
+ * Claude Code without extended thinking. Measured 2026-09-24 on 19 captured
+ * navigation questions: thinking off answered 19/19 exactly like thinking on,
+ * in 32 s instead of 99.5 s, and the prompt-parse text question fell from ~22 s
+ * to ~4.5 s — Haiku was spending two to three thousand output tokens thinking
+ * about which of five options to pick. A user who set MAX_THINKING_TOKENS, or
+ * NAVVI_CLAUDE_THINKING=1, gets what they asked for.
+ */
+export function harnessEnv(harness: CliHarness, env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (harness !== "claude" || env.MAX_THINKING_TOKENS !== undefined || env.NAVVI_CLAUDE_THINKING) return env;
+  return { ...env, MAX_THINKING_TOKENS: "0" };
+}
+
 /** The default runner: a child process with a kill-on-timeout, stdin closed unless `input` is given (codex reads a piped stdin). */
 export function processRunner(timeoutMs: number, env: NodeJS.ProcessEnv = process.env): CliRunner {
   return (cmd, args, input) =>
@@ -321,7 +336,7 @@ export class CliChooser extends BaseChooser {
     const override = Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : undefined;
     this.timeoutMs = options.timeoutMs ?? override ?? CLI_TIMEOUT_MS;
     this.textTimeoutMs = options.textTimeoutMs ?? override ?? Math.max(this.timeoutMs, CLI_TEXT_TIMEOUT_MS);
-    this.runner = options.runner ?? processRunner(Math.max(this.timeoutMs, this.textTimeoutMs), env);
+    this.runner = options.runner ?? processRunner(Math.max(this.timeoutMs, this.textTimeoutMs), harnessEnv(harness, env));
   }
 
   usage(): ChooserUsage {
