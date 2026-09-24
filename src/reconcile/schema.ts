@@ -110,6 +110,8 @@ export interface NotObtainableField {
   stillAsked: boolean;
   /** For `type-gap`: the ambiguity that carries both types and the decision. */
   ambiguity?: string;
+  /** U6: a chooser was asked which reading this field is and declined every one. */
+  decision?: TierDecision;
 }
 
 // ------------------------------------------------- available but not requested
@@ -183,6 +185,16 @@ export interface Reading {
   source?: FieldSource;
   match?: string;
   path: string;
+  /**
+   * U6: how the reading is read, when it is a declaration of its own -- the
+   * same three words `FieldAlias` carries. What lets a chooser's pick of a
+   * reading that lost at tier 1 be compiled through its own selector. Absent
+   * for `network`, where `match` and `path` are the whole of it, and for a
+   * tier-1 loser the manuscript recorded no declaration for.
+   */
+  selector?: string;
+  attr?: string;
+  entity?: string;
   values: TypedValue[];
   /** `true` when this is the reading the investigation bound. */
   bound: boolean;
@@ -216,6 +228,12 @@ export interface Ambiguity {
   resolved?: string;
   /** What a client has to decide, when nothing settles it. */
   decision?: string;
+  /**
+   * U6 (KTD5): the chooser that decided it, asked over `readings`, and what it
+   * chose. A decided ambiguity is not open whatever the spec's rubrics say:
+   * the decision is recorded, which is the whole of what a silent pick lacked.
+   */
+  decidedBy?: TierDecision;
   because: string;
 }
 

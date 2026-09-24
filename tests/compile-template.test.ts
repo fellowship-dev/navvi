@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join as joinPath, resolve as resolvePath } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Page } from "playwright";
 import { launch, type LaunchedBrowser } from "../src/browser/launch.js";
@@ -267,5 +269,139 @@ describe("tier 3 without a chooser", () => {
     const tier3 = result.manuscript.tiers.find((tier) => tier.tier === 3)!;
     expect(tier3.outcome).toBe("requested");
     expect(tier3.because).toContain("no credential for any chooser");
+  });
+});
+
+// ------------------------------------------------------ U6: open ambiguity
+
+/**
+ * U6 (R5, KTD5): an open ambiguity is a question for the chooser, asked by the
+ * core, and not a silent pick or a hard stop.
+ *
+ * The shape is the one a live run met on 2026-09-23: a payload endpoint that
+ * states eight text leaves which could each be `productName` on every sample
+ * -- the name, the SEO title, the laboratory, the active ingredient, a unit,
+ * three numbers. Tier 2 bound one of them and the reconciliation said eight
+ * readings compete. These run offline off the synthetic Store-B-shaped
+ * payloads in `tests/fixtures/investigate/`: invented values, real key names.
+ */
+describe("an open ambiguity is a chooser question, asked by the core", () => {
+  const DIR = resolvePath(import.meta.dirname, "fixtures", "investigate");
+  const detail = (n: "" | "-2"): unknown => JSON.parse(readFileSync(joinPath(DIR, `store-b-detail${n}.json`), "utf8"));
+  const shell = readFileSync(joinPath(DIR, "store-b-shell.html"), "utf8");
+  const URLS = ["https://example.test/p/100001", "https://example.test/p/100002"];
+  const TEXT = [
+    "Ejemplo Comprimidos 100 mg 30 Comprimidos $ 4.990 $ 4.491 Club Store B $ 3.992 Precio por Unidad Fraccionada: $ 166 por Comprimido Laboratorio Ejemplo",
+    "Otro Jarabe 120 ml $ 12.990 $ 11.691 Precio por Unidad Fraccionada: $ 108 por ml Laboratorio Otro",
+  ];
+  const FIELDS: RequestedField[] = [
+    { name: "productName", type: "text" },
+    { name: "sku", type: "text" },
+  ];
+  const RUBRIC = { id: "client/product-name", rule: "the product name is the short title the store shows search engines", source: "brief" };
+
+  function payloadSources(): TemplateSources {
+    const bodies = [detail(""), detail("-2")];
+    return {
+      fetch: (target) => Promise.resolve({ url: target, status: 200, body: shell }),
+      capture: (target) => {
+        const index = URLS.indexOf(target);
+        return Promise.resolve({
+          responses: [{ url: `https://api.example.test/catalog-svc/products/detail/${target.split("/").at(-1)}`, status: 200, body: bodies[index] }],
+          text: TEXT[index]!,
+        });
+      },
+    };
+  }
+
+  const payloadSample = (): SampleChoice =>
+    chooseSample(
+      URLS.map((target) => ({ url: target, status: 200, hasDeclaredProduct: undefined, priceCount: 2, inStock: true })),
+      { size: 2 },
+    );
+
+  const run = (chooser: Chooser | undefined, rubrics: Spec["rubrics"] = [RUBRIC], fields: RequestedField[] = FIELDS): Promise<TemplateCompile> =>
+    compileTemplate({
+      spec: specFor(fields, rubrics),
+      fields,
+      sample: payloadSample(),
+      sources: payloadSources(),
+      ...(chooser === undefined ? {} : { chooser }),
+      now: NOW,
+      templateKey: "example.test/p/{id}",
+      entry: { mode: "direct", url: URLS[0]! },
+    });
+
+  /** Answers `reading.<field>` by pattern, like `PatternChooser` answers `field.<field>`. */
+  class ReadingChooser implements Chooser {
+    readonly name = "jev" as const;
+    readonly batches: Question[][] = [];
+    constructor(private readonly patterns: Record<string, RegExp | null>) {}
+    async ask(batch: Question[]): Promise<Answer[]> {
+      this.batches.push(batch);
+      return batch.map((question) => {
+        const pattern = this.patterns[question.id.replace(/^reading\./, "")];
+        const index = pattern === null || pattern === undefined ? -1 : (question.options ?? []).findIndex((option) => pattern.test(option));
+        return { id: question.id, index: index < 0 ? null : index };
+      });
+    }
+    usage(): ChooserUsage {
+      const questions = this.batches.flat().length;
+      return { chooser: this.name, questions, textQuestions: 0, batches: this.batches.length, inputTokens: 0, outputTokens: 0, waitMs: 0, costUsd: 0, zeroDataRetention: "not_applicable" };
+    }
+  }
+
+  it("asks one choice question over all eight readings, with the rubric in its premise, and binds the reading chosen", async () => {
+    const chooser = new ReadingChooser({ productName: /productData\.seo\.metaTitle/ });
+    const result = ok(await run(chooser));
+
+    // One batch, one question: the field with competing readings and nothing else.
+    expect(chooser.batches).toHaveLength(1);
+    const [question] = chooser.batches[0]!;
+    expect(chooser.batches[0]!.map((entry) => entry.id)).toEqual(["reading.productName"]);
+    expect(question!.kind).toBe("choice");
+    expect(question!.options).toHaveLength(8);
+    expect(question!.premise).toContain(`rule client/product-name: "${RUBRIC.rule}"`);
+    // Each option says where the reading comes from and what it read on each sample.
+    expect(question!.options!.find((option) => option.includes("productData.seo.metaTitle"))).toContain("Ejemplo Comprimidos | Otro Jarabe");
+    expect(question!.options!.every((option) => option.startsWith("tier 2 network catalog-svc/products/detail "))).toBe(true);
+
+    // The answer binds that reading, and says who chose it.
+    const productName = result.manuscript.fields.find((field) => field.field === "productName")!;
+    expect(productName.path).toBe("productData.seo.metaTitle");
+    expect(productName.decision).toMatchObject({ question: "reading.productName", options: 8, answeredBy: "jev", settles: "productName/competing-values" });
+    expect(result.reconciliation.verdict).not.toBe("open");
+    expect(result.reconciliation.ambiguities.find((entry) => entry.id === "productName/competing-values")?.decidedBy?.answeredBy).toBe("jev");
+    expect(result.compiled.scraper.fields.productName!.alternatives[0]!.path).toBe("productData.seo.metaTitle");
+    expect(result.compiled.scraper.chooser).toBe("jev");
+
+    const rationale = renderRationale(result.compiled.rationale);
+    expect(rationale).toContain("Decided by **jev**, asked `reading.productName` over 8 candidate(s)");
+    expect(rationale).toContain("It chose `tier 2 network catalog-svc/products/detail productData.seo.metaTitle");
+  });
+
+  it("answered none, leaves the field unbound with the chooser's reason and compiles the rest", async () => {
+    // Two open fields, so two questions -- asked together, in one batch.
+    const chooser = new ReadingChooser({ productName: null, listPrice: /price-list-std/ });
+    const result = ok(await run(chooser, [], [{ name: "productName", type: "text" }, { name: "listPrice", type: "money" }]));
+    expect(chooser.batches.map((batch) => batch.map((question) => question.id))).toEqual([["reading.productName", "reading.listPrice"]]);
+
+    const productName = result.manuscript.fields.find((field) => field.field === "productName")!;
+    expect(productName.path).toBeUndefined();
+    expect(productName.decision).toMatchObject({ question: "reading.productName", chose: "none", answeredBy: "jev" });
+    const notObtainable = result.reconciliation.notObtainable.find((field) => field.field === "productName");
+    expect(notObtainable?.because).toContain("the chooser declined every reading");
+    expect(result.reconciliation.verdict).toBe("partial");
+    expect(Object.keys(result.compiled.scraper.fields)).toEqual(["listPrice"]);
+    expect(result.compiled.scraper.fields.listPrice!.alternatives[0]!.path).toBe("productData.prices[price-list-std]");
+    expect(renderRationale(result.compiled.rationale)).toContain("the chooser declined every reading");
+  });
+
+  it("with no chooser, stops open and names the question it could not ask", async () => {
+    const result = await run(undefined, []);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.status).toBe("open");
+    expect(result.open?.questions.map((item) => item.id)).toContain("productName/competing-values");
   });
 });

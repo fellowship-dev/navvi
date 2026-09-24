@@ -11,6 +11,18 @@ export const premises = {
   fieldChoice: (field: string, description?: string): string =>
     `Which candidate holds the ${field}${description ? ` (${description})` : ""} value on every sample? Pick none when no candidate is right on all samples.`,
 
+  /**
+   * U6 (KTD5): which of the readings the cheap tiers found is the field.
+   *
+   * Asked when a field has competing readings -- values the site itself
+   * states on every sample, each from its own declaration or payload leaf --
+   * and the description carries the spec's words for the field and every
+   * rubric that names it, quoted. The readings are the options; the chooser
+   * picks one or none, and nothing is bound on a guess.
+   */
+  readingChoice: (field: string, description?: string): string =>
+    `Which of these readings is the ${field}${description ? ` (${description})` : ""}? Each is a value the site states on every sample, with where it is read from. Pick none when no reading is the ${field}.`,
+
   /** List mode: which link or control leads to the next listing page. */
   nextLinkChoice: (): string =>
     "Which control leads to the next page of the same listing? Pick none when this is the last page or no control does.",
@@ -122,6 +134,8 @@ export const jevFraming = {
       case "field_value":
       case "heal_field_value":
         return { what: "No candidate holds this field's value at all", not_for: "Two candidates both hold the value: pick the one whose values are exactly the field, not the breadcrumb, a related item or a label" };
+      case "field_reading":
+        return { what: "No offered reading is this field", not_for: "Two readings both look right: follow the quoted rule, then the field's description, and pick one" };
       case "list_group":
         return { what: "No candidate group is the list of records", not_for: "A single candidate that does hold one record per item: pick it" };
       case "next_page_link":
@@ -175,6 +189,8 @@ export const jevFraming = {
     switch (decision) {
       case "field_value":
         return "The right candidate shows the field's value and nothing else on every sample. A candidate showing a label (such as 'Price:'), a related record, a breadcrumb or a longer text that merely contains the value is not it.";
+      case "field_reading":
+        return "Each option is a value the site itself states on every sample, read from its own declaration or payload key. The right reading is the one the field and the case's rules describe. Another fact of the same record (a second price, a laboratory, an ingredient, a title written for search engines, a unit) is not it however alike the values look. A quoted rule outranks every other signal.";
       case "heal_field_value":
         return "The page was redesigned; the field may still be shown. Earlier values come from other pages: they show the kind and shape of value to look for, not the value to find. The right candidate shows this page's own value of the field, not a label, a breadcrumb, or a value from a list of other records (several candidates on one path).";
       case "list_group":

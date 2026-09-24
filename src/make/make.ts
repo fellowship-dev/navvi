@@ -1,13 +1,14 @@
 import { bulletWidth, chooserLines, makeArtifact, makeBullet, makeNote, makeRow, makeStage } from "../cli/render.js";
 import { chooseSample, probeFrom, render as renderManuscript, type Manuscript, type RequestedField, type SampleChoice, type Stratum } from "../investigate/index.js";
 import { outputSchema, reconcile, render as renderReconcile, summarize as summarizeReconcile, type Reconciliation } from "../reconcile/index.js";
-import { NothingCompilableError, chooserOf, compileFromReconciliation, investigateTemplate, renderRationale, type ProvenCompile } from "../compile/index.js";
+import { NothingCompilableError, chooserOf, compileFromReconciliation, decideOpen, investigateTemplate, openItems, renderRationale, type OpenItem, type ProvenCompile } from "../compile/index.js";
 import { DEFAULT_REPLAYS, DEFAULT_SAMPLE_URLS, loadListSources, measureDeterminism, summarizeDeterminism, unstableFields, type Determinism, type PageReading } from "../replay/index.js";
 import { canaryOrigin, fieldTypesOf, readValues, renderMachine, type CompiledScraper } from "../scraper/index.js";
 import { groupByTemplate } from "../template/index.js";
 import { SpecSchema, blockingQuestions, requestedFields, type Rubric, type Spec } from "../spec/schema.js";
 import { briefToSpec } from "../spec/spec.js";
 import { summarizeUsage, type Chooser } from "../chooser/chooser.js";
+import { NeedsHumanError } from "../chooser/index.js";
 import type { FieldType } from "../input/schema.js";
 import { AnswerError, applyAnswers, parseAnswer, type FieldTypes, type MatchedAnswer } from "./answers.js";
 import { ARTIFACTS, PRIMARY, STAGES, Work, type StageName } from "./work.js";
@@ -93,48 +94,35 @@ const DETERMINISM_READING = "resolved";
 
 // ------------------------------------------------------------ open decisions
 
-/** One thing a reconciliation left for a person, as the stop block names it. */
-export interface OpenItem {
-  /** The ambiguity id, `<field>/disagreement`, or `obstacle/<kind>`. */
-  id: string;
-  because: string;
-}
+/** One thing a reconciliation left for a person, as the stop block names it. The compile core's own type since U6. */
+export type { OpenItem };
 
 export type OpenDecision =
   | { action: "proceed" }
   | { action: "stop"; status: MakeStatus; because: string; items: OpenItem[] };
 
 /**
- * What the driver does with a reconciliation's open items.
+ * What the driver does with what is still open after the chooser was asked.
  *
- * Today there is exactly one answer — stop — and it is written as a function
- * anyway because it is about to have a second. KTD5 turns an open ambiguity
- * into a choice question for the chooser, with the case's rubrics as premise;
- * when that lands, this is where it is asked, and a chooser answer becomes
- * `proceed` with the answer recorded. Until then an unanswered choice is a
- * stop, never a silent pick: the compile used to bind one reading of an open
- * field and write "the compile bound one reading anyway" in the rationale,
- * which is the defect saying out loud that it happened.
+ * A thin mapping since U6. The asking happens in the compile core --
+ * `decideOpen` in `src/compile/template.ts`, the same call `compileTemplate`
+ * makes for the plain command -- and a chooser's answer has already become a
+ * binding and a recorded decision by the time this runs, so what arrives here
+ * is only what nobody could answer: no chooser, one that could not be opened
+ * (`unasked` says which), a type gap, a disagreement no split settled, or an
+ * obstacle. It used to be where the stop *was* the decision, and before that
+ * the compile bound one reading of an open field and wrote "the compile bound
+ * one reading anyway" in the rationale.
  *
  * Two kinds of open item, two statuses. A reading nothing settles is a
- * question a person answers — `needs_answers`, exit 3, like the spec's
- * blocking questions — and a rubric for that field settles it on the next run.
- * A blocking obstacle is not a question at all, and nothing typed at the
- * prompt removes it, so a run held only by one is `short`.
+ * question — `needs_answers`, exit 3, like the spec's blocking questions —
+ * answered by a chooser on the next run, or by a rubric for that field. A
+ * blocking obstacle is not a question at all, and nothing typed at the prompt
+ * removes it, so a run held only by one is `short`.
  */
-export function openDecision(reconciliation: Reconciliation): OpenDecision {
+export function openDecision(reconciliation: Reconciliation, unasked?: string): OpenDecision {
   if (reconciliation.verdict !== "open") return { action: "proceed" };
-  const questions: OpenItem[] = [
-    ...reconciliation.ambiguities
-      .filter((ambiguity) => ambiguity.settledBy.length === 0)
-      .map((ambiguity) => ({ id: ambiguity.id, because: ambiguity.decision ?? ambiguity.because })),
-    ...(reconciliation.disagreements ?? [])
-      .filter((record) => record.decision !== undefined)
-      .map((record) => ({ id: `${record.field}/disagreement`, because: record.decision! })),
-  ];
-  const obstacles: OpenItem[] = reconciliation.obstacles
-    .filter((obstacle) => obstacle.blocking)
-    .map((obstacle) => ({ id: `obstacle/${obstacle.kind}`, because: obstacle.cost }));
+  const { questions, obstacles } = openItems(reconciliation);
   const items = [...questions, ...obstacles];
   if (items.length === 0) {
     // `open` with nothing to name is a reconciliation this function cannot
@@ -145,7 +133,9 @@ export function openDecision(reconciliation: Reconciliation): OpenDecision {
   const fields = [...new Set(questions.map((item) => item.id.split("/")[0]!))];
   const because =
     questions.length > 0
-      ? `${questions.length} open decision${questions.length === 1 ? "" : "s"} (${fields.join(", ")}) — nothing in the spec settles ${questions.length === 1 ? "it" : "them"}; add a rubric for ${fields.length === 1 ? "that field" : "those fields"} and re-run`
+      ? `${questions.length} open decision${questions.length === 1 ? "" : "s"} (${fields.join(", ")}) — nothing in the spec settles ${questions.length === 1 ? "it" : "them"}` +
+        (unasked === undefined ? "" : ` and ${unasked}`) +
+        `; re-run with a chooser, or add a rubric for ${fields.length === 1 ? "that field" : "those fields"}`
       : `${obstacles.length} blocking obstacle${obstacles.length === 1 ? "" : "s"} (${obstacles.map((item) => item.id).join(", ")})`;
   return { action: "stop", status: questions.length > 0 ? "needs_answers" : "short", because, items };
 }
@@ -497,16 +487,43 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
     }
 
     /**
+     * U6 (KTD5): an open ambiguity is a question before it is a stop.
+     *
+     * `decideOpen` is the compile core's, the same call the plain command's
+     * `compileTemplate` makes: every competing-values ambiguity nobody has
+     * decided goes to the chooser in one batch, and the answers become
+     * bindings with the decision recorded. The chooser is the run's one lazy
+     * box, so a reconciliation with nothing to ask opens nothing.
+     *
+     * The decided reconciliation is what gets written, over the one the stage
+     * just wrote or reused. `investigation.json` is left as the investigation
+     * wrote it -- it may be the client's edit, and it is the record of what
+     * the tiers found -- so the answer lives in `reconcile.json`
+     * (`decidedBy`, and the binding it chose), which is what every stage
+     * below reads, and a re-run reuses it rather than asking again. The agent
+     * chooser in file mode parks here with exit 3; its resume reaches this
+     * line with the same reconciliation and so the same questions.
+     */
+    const decided = await decideOpen({ manuscript, reconciliation, spec, ...(needChooser === undefined ? {} : { chooser: needChooser }), now: now() });
+    if (decided.asked > 0) {
+      const guard = overwriteGuard(work, "reconcile", reconcileState.current && !options.force ? reconcileState.edited : [], options.force);
+      if (guard) return stop("reconcile", guard, "configuration");
+      manuscript = decided.manuscript;
+      reconciliation = decided.reconciliation;
+      work.writeJson(PRIMARY.reconcile, reconciliation);
+      work.write("reconcile.md", renderReconcile(reconciliation));
+      work.record("reconcile", ["spec.json", "investigation.json"], {});
+      const width = bulletWidth(decided.decisions.map((entry) => entry.ambiguity));
+      for (const entry of decided.decisions) say(makeBullet(entry.ambiguity, `${entry.outcome} — ${entry.because}`, "-", width));
+    }
+
+    /**
      * R4, the third half: an open reconciliation does not compile.
      *
-     * `reconcile` says `open` — "a person decides before this compiles" — and
-     * until 2026-09-23 nothing read it: the driver checked the manuscript for
-     * `blocked` and the reconciliation for an empty `obtainable`, and a field
-     * with eight competing readings and no rule compiled one of them anyway.
-     * `openDecision` is the one place that says what happens to open items, so
-     * the chooser that answers them (KTD5) has one function to change.
+     * What is still open once the chooser was asked (or could not be) stops
+     * here. `openDecision` is the one place that maps it onto a status.
      */
-    const decision = openDecision(reconciliation);
+    const decision = openDecision(reconciliation, decided.unasked);
     if (decision.action === "stop") {
       const width = bulletWidth(decision.items.map((item) => item.id));
       for (const item of decision.items) say(makeBullet(item.id, item.because, "!", width));
@@ -548,7 +565,7 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
     // Who picked the tier-3 selectors, when anyone did. `scraper.chooser` means
     // "who the compile paid", and before U4 a make-built scraper said `agent`
     // whatever happened, because nobody was paid.
-    const decidedBy = chooserOf(manuscript);
+    const decidedBy = chooserOf(manuscript, reconciliation);
     const compileOptions = { templateKey, entry: { mode: "direct" as const, url: entryUrl }, ...(decidedBy === undefined ? {} : { chooser: decidedBy }) };
 
     const replayUrls = bindingUrls(manuscript).slice(0, DEFAULT_SAMPLE_URLS);
@@ -783,6 +800,21 @@ export async function make(options: MakeOptions, deps: MakeDeps): Promise<MakeRe
 
     return { status: "delivered", stages, work: work.dir };
   } catch (error) {
+    /**
+     * U6: the agent chooser parked its questions (file mode, or no process on
+     * stdin). That is not a defect in navvi and not a short run: it is the
+     * same exit 3 as an unanswered spec question, with the questions file and
+     * the token the resume needs, and it can happen at whichever stage asked
+     * -- the spec's draft, tier 3, or the open ambiguities after reconcile.
+     */
+    if (error instanceof NeedsHumanError) {
+      if (!stages.some((entry) => entry.stage === running)) record(running, "stopped", error.message);
+      for (const later of STAGES.slice(STAGES.indexOf(running) + 1)) {
+        if (!stages.some((entry) => entry.stage === later)) record(later, "not reached", `the chooser parked its questions at ${running}`);
+      }
+      say(makeBullet("parked", error.message, "!"));
+      return { status: "needs_answers", stoppedAt: running, because: error.message, stages, work: work.dir };
+    }
     /**
      * F7: an exception is a stage outcome, not an escape from the transcript.
      *

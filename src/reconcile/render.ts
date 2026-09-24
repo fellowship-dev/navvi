@@ -108,11 +108,13 @@ export function summarize(reconciliation: Reconciliation, dataLine = ""): string
   }
 
   for (const ambiguity of reconciliation.ambiguities) {
-    const settled = ambiguity.settledBy.length > 0;
-    lines.push(`  ${pad(settled ? "ambiguity resolved" : "ambiguity open")}${ambiguity.field}: ${readingsLine(ambiguity.readings)}`);
+    const decided = ambiguity.decidedBy;
+    const settled = ambiguity.settledBy.length > 0 || decided !== undefined;
+    lines.push(`  ${pad(decided !== undefined ? "ambiguity decided" : settled ? "ambiguity resolved" : "ambiguity open")}${ambiguity.field}: ${readingsLine(ambiguity.readings)}`);
     if (ambiguity.kind === "type-gap") bullet(`the spec asks for ${ambiguity.declaredType ?? "no type"}, the site states ${ambiguity.statedType}`);
     for (const rubric of ambiguity.settledBy) bullet(`rubric ${rubric.id}: "${rubric.rule}"`);
-    if (settled && ambiguity.resolved !== undefined) bullet(`-> ${tail(ambiguity.resolved)}   (without the rubric this stops)`);
+    if (decided !== undefined) bullet(`decided by ${decided.answeredBy}, asked ${decided.question}: ${decided.chose}`);
+    else if (settled && ambiguity.resolved !== undefined) bullet(`-> ${tail(ambiguity.resolved)}   (without the rubric this stops)`);
     if (!settled && ambiguity.decision !== undefined) bullet(`? ${ambiguity.decision}`);
   }
 
@@ -351,10 +353,19 @@ function renderAmbiguity(ambiguity: Ambiguity): string[] {
       out.push(`- **\`${rubric.id}\`** (${rubric.source}): "${rubric.rule}"`);
       out.push(`  - matched because ${rubric.because}`);
     }
-    if (ambiguity.resolved !== undefined) {
+    if (ambiguity.resolved !== undefined && ambiguity.decidedBy === undefined) {
       out.push("");
       out.push(`Bound to \`${ambiguity.resolved}\`. **Without the rule this stops.**`);
     }
+  }
+  if (ambiguity.decidedBy !== undefined) {
+    const decided = ambiguity.decidedBy;
+    out.push("");
+    out.push(`Decided by **${decided.answeredBy}**, asked \`${decided.question}\` over ${decided.options} reading(s) (and \`none\`):`);
+    out.push("");
+    out.push(`> ${decided.premise}`);
+    out.push("");
+    out.push(`It chose \`${cell(decided.chose)}\`.`);
   }
   if (ambiguity.decision !== undefined) {
     out.push("");

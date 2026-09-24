@@ -442,6 +442,48 @@ describe("reconcile: ambiguities and the rubric that settled them", () => {
   });
 });
 
+describe("reconcile: an ambiguity a chooser decided (U6)", () => {
+  /** The manuscript with `field`'s record carrying a chooser's answer to its competing readings. */
+  function decided(field: string): Manuscript {
+    const book = manuscript();
+    const record = book.fields.find((entry) => entry.field === field)!;
+    record.decision = { question: `reading.${field}`, premise: `Which of these readings is the ${field}?`, options: 3, chose: `tier 2 network ${MATCH} ${record.path}`, answeredBy: "jev", settles: `${field}/competing-values` };
+    return book;
+  }
+
+  it("records who decided, and is no longer open for want of a rule", () => {
+    const result = reconcile(decided("listPrice"), { ...SPEC, rubrics: [] }, { now: AT });
+    const ambiguity = result.ambiguities.find((entry) => entry.id === "listPrice/competing-values")!;
+    expect(ambiguity.settledBy).toEqual([]);
+    expect(ambiguity.decidedBy).toMatchObject({ answeredBy: "jev", question: "reading.listPrice" });
+    expect(ambiguity.decision).toBeUndefined();
+    expect(ambiguity.because).toContain("jev was asked `reading.listPrice`");
+    expect(render(result)).toContain("Decided by **jev**, asked `reading.listPrice`");
+    // A decision settles the ambiguity it names and nothing else: promoPrice
+    // is still undecided and the type gap is still the spec's to answer.
+    expect(result.ambiguities.find((entry) => entry.id === "promoPrice/competing-values")!.decidedBy).toBeUndefined();
+    expect(result.verdict).toBe("open");
+  });
+
+  it("carries how a tier-1 loser is read, so a chooser's pick of it can be compiled", () => {
+    const book = manuscript();
+    const record = book.fields.find((entry) => entry.field === "productName")!;
+    Object.assign(record, { tier: 1, source: "json-ld", selector: 'script[type="application/ld+json"]', entity: "Product", path: "name", match: undefined });
+    record.rejected = [
+      {
+        tier: 1,
+        path: "og:title",
+        values: (record.values ?? []).map((value) => `${String(value)} | Tienda`),
+        because: "name was bound instead",
+        read: { path: "og:title", source: "dom", selector: 'meta[property="og:title"]', attr: "content" },
+      },
+    ];
+    const ambiguity = reconcile(book, SPEC, { now: AT }).ambiguities.find((entry) => entry.id === "productName/competing-values")!;
+    expect(ambiguity.readings[0]).toMatchObject({ bound: true, source: "json-ld", entity: "Product", selector: 'script[type="application/ld+json"]' });
+    expect(ambiguity.readings[1]).toMatchObject({ bound: false, source: "dom", path: "og:title", selector: 'meta[property="og:title"]', attr: "content" });
+  });
+});
+
 describe("reconcile: obstacles with cost", () => {
   it("says what each one keeps charging, not only that it was met", () => {
     const result = reconcile(manuscript(), SPEC, { now: AT });

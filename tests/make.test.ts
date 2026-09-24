@@ -655,6 +655,153 @@ describe("re-running", () => {
     expect(stderr.text).toContain("stopped at reconcile");
   });
 
+  // ---------------------------------------------------------------- U6
+
+  /**
+   * U6 (KTD5): with a chooser, the open ambiguity is a question.
+   *
+   * The same edit as the U3 case above, at the scale the live run met: seven
+   * more declarations of the page that could each be `productName`, one of
+   * them the OpenGraph title, each recording how it is read (`read`). The
+   * chooser is asked once, in one batch; its answer is the binding; the
+   * rationale names who answered; and nothing after reconcile -- two replays
+   * of determinism, the verify fill -- asks it anything.
+   */
+  const PRODUCT_RUBRIC = { id: "client/product-name", rule: "the product name is the title the page shares on social networks", source: "client/rubrics.json" };
+
+  function competingProductNames(): void {
+    const file = join(work(), "investigation.json");
+    const manuscript = JSON.parse(readFileSync(file, "utf8")) as Manuscript;
+    const productName = manuscript.fields.find((entry) => entry.field === "productName")!;
+    expect(productName.tier, "the fixtures bind productName at tier 1").toBe(1);
+    const values = (productName.values ?? []) as string[];
+    const others = ["brand.name", "description", "category", "alternateName", "slogan", "disambiguatingDescription"].map((path) => ({
+      tier: 1 as const,
+      path,
+      values: values.map((value) => `${path} of ${value}`),
+      because: `${productName.path} was bound instead`,
+      read: { path, source: "json-ld" as const, selector: 'script[type="application/ld+json"]', entity: "Product" },
+    }));
+    productName.rejected.push(...others, {
+      tier: 1,
+      path: "og:title",
+      values: values.map((value) => `${value} | Ejemplo Farmacia`),
+      because: `${productName.path} was bound instead`,
+      read: { path: "og:title", source: "dom", selector: 'meta[property="og:title"]', attr: "content" },
+    });
+    writeFileSync(file, JSON.stringify(manuscript, null, 2) + "\n");
+  }
+
+  /** Answers `reading.<field>` by pattern; `null` answers none. */
+  class ReadingChooser implements Chooser {
+    readonly name = "jev" as const;
+    readonly batches: Question[][] = [];
+    constructor(private readonly patterns: Record<string, RegExp | null>) {}
+    async ask(batch: Question[]): Promise<Answer[]> {
+      this.batches.push(batch);
+      return batch.map((question) => {
+        const pattern = this.patterns[question.id.replace(/^reading\./, "")];
+        const index = pattern === null || pattern === undefined ? -1 : (question.options ?? []).findIndex((option) => pattern.test(option));
+        return { id: question.id, index: index < 0 ? null : index };
+      });
+    }
+    usage(): ChooserUsage {
+      const questions = this.batches.flat().length;
+      return { chooser: this.name, questions, textQuestions: 0, batches: this.batches.length, inputTokens: 0, outputTokens: 0, waitMs: 0, costUsd: 0, zeroDataRetention: "not_applicable" };
+    }
+  }
+
+  const resumed = (over: Partial<Parameters<typeof make>[0]> = {}) =>
+    options({ answers: ["fields=productName,sku,listPrice:money,promoPrice:money,stock", "inputs=url_list"], urls: URLS, rubrics: [PRODUCT_RUBRIC], ...over });
+
+  it("asks the chooser once over the eight readings, binds its answer, and the replays ask it nothing", async () => {
+    await seeded();
+    // The rubric is part of the spec, so it goes in before the edit: a changed
+    // spec re-runs the investigation, which would refuse to overwrite it.
+    expect((await make(resumed(), deps({ openPages: () => Promise.resolve(fixturePages()) }))).status, transcript()).toBe("delivered");
+    out = [];
+    competingProductNames();
+    const chooser = new ReadingChooser({ productName: /og:title/ });
+
+    const result = await make(resumed(), deps({ openPages: () => Promise.resolve(fixturePages()), openChooser: () => Promise.resolve(chooser) }));
+    expect(result.status, transcript()).toBe("delivered");
+
+    // One batch, one question, eight readings, the rubric in the premise.
+    expect(chooser.batches.map((batch) => batch.map((question) => question.id))).toEqual([["reading.productName"]]);
+    const question = chooser.batches[0]![0]!;
+    expect(question.options).toHaveLength(8);
+    expect(question.premise).toContain(`"${PRODUCT_RUBRIC.rule}"`);
+
+    // The answer is the binding, and the artifacts say who gave it.
+    const scraper = JSON.parse(readFileSync(join(work(), "scraper.json"), "utf8")) as CompiledScraper;
+    expect(scraper.fields.productName!.alternatives[0]).toMatchObject({ selector: 'meta[property="og:title"]', attr: "content" });
+    expect(scraper.chooser).toBe("jev");
+    const reconciliation = JSON.parse(readFileSync(join(work(), "reconcile.json"), "utf8")) as Reconciliation;
+    expect(reconciliation.ambiguities.find((entry) => entry.id === "productName/competing-values")?.decidedBy).toMatchObject({ answeredBy: "jev", question: "reading.productName" });
+    const rationale = readFileSync(join(work(), "rationale.md"), "utf8");
+    expect(rationale).toContain("Decided by **jev**, asked `reading.productName`");
+    expect(rationale).toContain("It chose `tier 1 dom og:title");
+    expect(transcript()).toContain("productName/competing-values");
+    expect(transcript()).toContain("decider jev: 1 decision");
+
+    // Determinism and verify replayed the scraper and asked nobody; a re-run
+    // reuses the decided reconciliation and asks nobody either.
+    expect(chooser.batches.flat()).toHaveLength(1);
+    out = [];
+    const again = await make(resumed(), deps({ openPages: () => Promise.resolve(fixturePages()), openChooser: () => Promise.resolve(chooser) }));
+    expect(again.status, transcript()).toBe("delivered");
+    expect(outcome(again, "reconcile")).toBe("reused");
+    expect(outcome(again, "compile")).toBe("reused");
+    expect(chooser.batches.flat()).toHaveLength(1);
+  });
+
+  it("answered none, delivers the other fields and names the field the chooser declined", async () => {
+    await seeded();
+    competingProductNames();
+    const chooser = new ReadingChooser({ productName: null });
+
+    const result = await make(resumed({ rubrics: [] }), deps({ openPages: () => Promise.resolve(fixturePages()), openChooser: () => Promise.resolve(chooser) }));
+    expect(result.status, transcript()).toBe("delivered");
+    const scraper = JSON.parse(readFileSync(join(work(), "scraper.json"), "utf8")) as CompiledScraper;
+    expect(scraper.fields.productName).toBeUndefined();
+    expect(Object.keys(scraper.fields).sort()).toEqual(["listPrice", "promoPrice", "sku", "stock"]);
+    const reconciliation = JSON.parse(readFileSync(join(work(), "reconcile.json"), "utf8")) as Reconciliation;
+    expect(reconciliation.notObtainable.find((entry) => entry.field === "productName")?.because).toContain("the chooser declined every reading");
+    expect(readFileSync(join(work(), "rationale.md"), "utf8")).toContain("the chooser declined every reading");
+  });
+
+  it("through the binary, the agent in file mode parks the question with exit 3 and the resume binds the answer", async () => {
+    await seeded();
+    competingProductNames();
+    const before = readFileSync(join(work(), "scraper.json"), "utf8");
+
+    const parked = new Capture();
+    const first = await main(["make", "--work", work(), "--offline", "--decider", "agent", "--agent-mode", "file", ...URLS], io({ stderr: parked }));
+    expect(first, parked.text).toBe(3);
+    expect(parked.text).toContain("stopped at reconcile");
+    const token = /--resume ([0-9a-f]+)/.exec(parked.text)?.[1];
+    expect(token, parked.text).toBeDefined();
+    expect(readFileSync(join(work(), "scraper.json"), "utf8"), "a parked question must not reach the compile").toBe(before);
+
+    // Answer the parked question the way an agent would: read the file, pick an index.
+    const batch = JSON.parse(readFileSync(join(dir, "storage", "questions", `${token}.json`), "utf8")) as { questions: Question[] };
+    expect(batch.questions.map((question) => question.id)).toEqual(["reading.productName"]);
+    const index = batch.questions[0]!.options!.findIndex((option) => option.includes("og:title"));
+    expect(index).toBeGreaterThanOrEqual(0);
+    const answers = join(dir, "answers.json");
+    writeFileSync(answers, JSON.stringify({ answers: [{ id: "reading.productName", index }] }));
+
+    const resumedErr = new Capture();
+    const second = await main(
+      ["make", "--work", work(), "--offline", "--decider", "agent", "--agent-mode", "file", "--answers", answers, "--resume", token!, ...URLS],
+      io({ stderr: resumedErr }),
+    );
+    expect(second, resumedErr.text).toBe(0);
+    const scraper = JSON.parse(readFileSync(join(work(), "scraper.json"), "utf8")) as CompiledScraper;
+    expect(scraper.fields.productName!.alternatives[0]).toMatchObject({ selector: 'meta[property="og:title"]' });
+    expect(scraper.chooser).toBe("agent");
+  });
+
   /**
    * `determinism.json` keeps its shape and its `version: 1` across the reading
    * change, so an artifact written before it is indistinguishable to a reader

@@ -108,6 +108,18 @@ export interface RejectionRecord {
    * the bank called machinery as a second reading of a bound field.
    */
   heuristic?: string;
+  /**
+   * U6: how to read this leaf, when it lost to another declaration of the
+   * same page.
+   *
+   * A tier-1 rejection is a whole declaration -- a JSON-LD path, a microdata
+   * property, an OpenGraph `<meta>` -- and the path alone does not say which,
+   * so a chooser that picks it over the bound reading (KTD5) could not be
+   * compiled from the path without borrowing the binding's selector, which is
+   * the defect `FieldAlias` closed for aliases. Absent on tier 2, where the
+   * endpoint in `path` is the whole of it, and on a manuscript written before.
+   */
+  read?: FieldAlias;
 }
 
 /**
@@ -163,7 +175,10 @@ export interface FieldAlias {
  * nobody can disagree with, which is the thing the manuscript exists to stop.
  */
 export interface TierDecision {
-  /** The question id, `field.<name>` (with `.retry` after the scroll-and-retry). */
+  /**
+   * The question id: `field.<name>` for a tier-3 DOM pick (with `.retry` after
+   * the scroll-and-retry), `reading.<name>` for an open ambiguity (U6).
+   */
   question: string;
   premise: string;
   /** How many candidates were offered, `none` not counted. */
@@ -172,6 +187,16 @@ export interface TierDecision {
   chose: string;
   /** The chooser that answered (`jev`, `claude`, `model`, `recorded`, ...). */
   answeredBy: string;
+  /**
+   * U6: the ambiguity this answer settled, e.g. `productName/competing-values`.
+   *
+   * Present on a decision taken over the readings the cheap tiers found rather
+   * than over DOM candidates. `src/reconcile/` reads it to call that
+   * ambiguity decided -- by this backend, on this question -- rather than
+   * open, so a reconciliation of the decided manuscript compiles and a re-run
+   * does not ask again.
+   */
+  settles?: string;
 }
 
 /**
@@ -209,7 +234,11 @@ export interface FieldRecord {
   askModel: boolean;
   rejected: RejectionRecord[];
   verdicts: VerdictLog;
-  /** Tier 3 only: the question that bound this field, and who answered it. */
+  /**
+   * The question that bound this field, and who answered it: a tier-3 DOM
+   * pick, or (U6) a chooser's answer to an open ambiguity -- including `none`,
+   * which leaves the field unbound and says who declined.
+   */
   decision?: TierDecision;
 }
 

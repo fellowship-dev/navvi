@@ -724,6 +724,10 @@ export function reconcile(manuscript: Manuscript, spec: Spec, options: Reconcile
   for (const field of manuscript.requested) {
     const record = manuscript.fields.find((entry) => entry.field === field.name);
     if (record?.path !== undefined) continue;
+    // A chooser was asked which reading this field is and declined them all
+    // (U6). A leaf of the same name is one it was shown or could have been;
+    // reopening the field as a type question would ask again what it answered.
+    if (record?.decision?.settles !== undefined) continue;
     const wanted = key(field.name);
     const candidates = leaves
       .filter((leaf) => segments(leaf.path).some((segment) => key(segment) === wanted))
@@ -763,6 +767,7 @@ export function reconcile(manuscript: Manuscript, spec: Spec, options: Reconcile
           : `not obtainable *as declared*: ${gap.match === "" ? "" : `${gap.match} `}${gap.path} states ${showValues(gap.values)}, and the declared type refused it before it was ever a candidate`,
       stillAsked: stillAsked.has(field.name),
       ...(gap === undefined ? {} : { ambiguity: `${field.name}/type-gap` }),
+      ...(record.decision?.settles === undefined ? {} : { decision: { ...record.decision } }),
     });
   }
 
@@ -832,6 +837,9 @@ export function reconcile(manuscript: Manuscript, spec: Spec, options: Reconcile
           ...(record.source === undefined ? {} : { source: record.source }),
           ...(record.match === undefined ? {} : { match: record.match }),
           path: record.path,
+          ...(record.source === "network" || record.selector === undefined ? {} : { selector: record.selector }),
+          ...(record.attr === undefined ? {} : { attr: record.attr }),
+          ...(record.entity === undefined ? {} : { entity: record.entity }),
           values: bound,
           bound: true,
         },
@@ -855,33 +863,53 @@ export function reconcile(manuscript: Manuscript, spec: Spec, options: Reconcile
         if (seen.has(shown)) continue;
         seen.add(shown);
         const split = splitRejection(rejection);
+        // A tier-1 loser that recorded its own declaration is read through it
+        // (U6); one that did not is shown under the binding's source, as it
+        // always was, and cannot be compiled on a chooser's say-so.
+        const read = split === undefined ? rejection.read : undefined;
+        const source = read?.source ?? record.source;
         readings.push({
           tier: rejection.tier,
-          ...(record.source === undefined ? {} : { source: record.source }),
+          ...(source === undefined ? {} : { source }),
           ...(split === undefined || split.match === "" ? {} : { match: split.match }),
           path: split?.path ?? rejection.path,
+          ...(read?.selector === undefined ? {} : { selector: read.selector }),
+          ...(read?.attr === undefined ? {} : { attr: read.attr }),
+          ...(read?.entity === undefined ? {} : { entity: read.entity }),
           values: rejection.values,
           bound: false,
         });
       }
       if (readings.length >= 2) {
+        const id = `${field.name}/competing-values`;
         const settledBy = rubricsFor(spec, field.name);
+        /**
+         * U6 (KTD5): a chooser asked over these readings has decided, and a
+         * decided ambiguity is not open. The readings are still listed -- the
+         * one it chose leads as the binding, the one it displaced is among the
+         * rest -- because the decision is only checkable next to what it was
+         * chosen from.
+         */
+        const decided = record.decision?.settles === id ? record.decision : undefined;
         ambiguities.push({
-          id: `${field.name}/competing-values`,
+          id,
           field: field.name,
           kind: "competing-values",
           readings,
           settledBy,
           resolved: record.path,
-          ...(settledBy.length > 0
+          ...(settledBy.length > 0 || decided !== undefined
             ? {}
             : {
                 decision: `nothing in the spec settles which of these ${readings.length} readings is ${field.name}; without a rule the binding is a guess, and a client who cares about the difference has to say which one they mean`,
               }),
+          ...(decided === undefined ? {} : { decidedBy: { ...decided } }),
           because:
-            settledBy.length > 0
-              ? `${readings.length} readings disagree on the same page; the spec carries ${settledBy.length === 1 ? "a rule" : `${settledBy.length} rules`} for this field, quoted beside the binding so it can be checked in one line rather than replayed. Without the rule this stops.`
-              : `${readings.length} readings disagree on the same page and the spec carries no rule for this field.`,
+            decided !== undefined
+              ? `${readings.length} readings disagree on the same page; ${decided.answeredBy} was asked \`${decided.question}\` over them${settledBy.length > 0 ? ` with the spec's ${settledBy.length === 1 ? "rule" : "rules"} as premise` : ""} and chose \`${decided.chose}\`.`
+              : settledBy.length > 0
+                ? `${readings.length} readings disagree on the same page; the spec carries ${settledBy.length === 1 ? "a rule" : `${settledBy.length} rules`} for this field, quoted beside the binding so it can be checked in one line rather than replayed. Without the rule this stops.`
+                : `${readings.length} readings disagree on the same page and the spec carries no rule for this field.`,
         });
       }
     }
@@ -949,7 +977,7 @@ export function reconcile(manuscript: Manuscript, spec: Spec, options: Reconcile
   // reason an unsettled ambiguity is: a person has to answer it before this
   // compiles. A split that succeeded settles itself and opens nothing.
   const undecided = (disagreements ?? []).filter((record) => record.decision !== undefined);
-  const open = ambiguities.some((ambiguity) => ambiguity.settledBy.length === 0) || undecided.length > 0;
+  const open = ambiguities.some((ambiguity) => ambiguity.settledBy.length === 0 && ambiguity.decidedBy === undefined) || undecided.length > 0;
   const verdict: Reconciliation["verdict"] = obtainable.length === 0 ? "empty" : blocking || open ? "open" : notObtainable.length > 0 ? "partial" : "complete";
 
   return {
@@ -1024,8 +1052,9 @@ function becauseOf(
   const parts = [`${obtainable} of ${manuscript.requested.length} requested field(s) obtainable`];
   if (notObtainable > 0) parts.push(`${notObtainable} not`);
   if (available > 0) parts.push(`${available} leaf/leaves available that nothing asked for`);
-  const unsettled = ambiguities.filter((ambiguity) => ambiguity.settledBy.length === 0).length;
-  if (ambiguities.length > 0) parts.push(`${ambiguities.length} ambiguity/ambiguities, ${unsettled} with no rule in the spec`);
+  const unsettled = ambiguities.filter((ambiguity) => ambiguity.settledBy.length === 0 && ambiguity.decidedBy === undefined).length;
+  const decided = ambiguities.filter((ambiguity) => ambiguity.decidedBy !== undefined).length;
+  if (ambiguities.length > 0) parts.push(`${ambiguities.length} ambiguity/ambiguities, ${unsettled} with no rule in the spec${decided > 0 ? ` and no decision, ${decided} decided by a chooser` : ""}`);
   const split = (disagreements ?? []).flatMap((record) => record.emitted);
   if (split.length > 0) parts.push(`${split.length} field(s) split out of a disagreement nobody asked about (${split.join(", ")})`);
   const unaccounted = (disagreements ?? []).filter((record) => record.unaccounted).length;

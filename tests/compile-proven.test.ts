@@ -198,7 +198,12 @@ const SPEC: Spec = {
     { name: "stock", provenance: "inferred" },
   ],
   constraints: { freshness: { stated: false }, volume: { stated: false }, cadence: { stated: false }, budget: { stated: false } },
-  rubrics: [{ id: "client/list-price", rule: "the list price is the crossed-out one and never Precio Club", source: "client/rubrics.json" }],
+  rubrics: [
+    { id: "client/list-price", rule: "the list price is the crossed-out one and never Precio Club", source: "client/rubrics.json" },
+    // U6: without a rule for it, promoPrice's two readings are an open
+    // ambiguity, and the compile no longer binds one of them on a guess.
+    { id: "client/promo-price", rule: "the promo price is what a shopper without a club card pays today", source: "client/rubrics.json" },
+  ],
   openQuestions: [],
 };
 
@@ -532,14 +537,25 @@ describe("the rubric reaches the compile", () => {
     expect(markdown).toContain("Without the rule this stops.");
   });
 
-  it("says so, and says what a person would have to decide, when nothing settled it", () => {
-    const { rationale } = compiled({}, { ...SPEC, rubrics: [] });
-    const field = rationale.fields.find((entry) => entry.field === "listPrice")!;
-    expect(field.ambiguities[0]!.settledBy).toEqual([]);
+  /**
+   * U6: nothing binds an ambiguous reading without a recorded decision.
+   *
+   * This test used to assert the sentence "the compile bound one reading
+   * anyway" -- the defect, written into `rationale.md` in bold. The compile now
+   * refuses the field instead: proved obtainable, not compiled, and the
+   * ambiguity named as the reason, while every other field still compiles.
+   */
+  it("does not compile a field whose readings nothing settled and nobody decided, and says what is open", () => {
+    const { rationale, unbound, scraper } = compiled({}, { ...SPEC, rubrics: [] });
+    expect(scraper.fields.listPrice).toBeUndefined();
+    expect(rationale.fields.find((entry) => entry.field === "listPrice")).toBeUndefined();
+    const refused = unbound.find((entry) => entry.field === "listPrice")!;
+    expect(refused.because).toContain("listPrice/competing-values");
+    expect(refused.because).toContain("without a recorded decision");
+    expect(Object.keys(scraper.fields)).toContain("productName");
 
     const markdown = renderRationale(rationale);
-    expect(markdown).toContain("**Nothing in the spec settles this, and the compile bound one reading anyway.**");
-    expect(markdown).toContain("A client decides:");
+    expect(markdown).not.toContain("bound one reading anyway");
   });
 
   it("carries the type gap the compile refused to guess at", () => {

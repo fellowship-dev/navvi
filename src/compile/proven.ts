@@ -443,6 +443,30 @@ export function compileFromReconciliation(
   const unbound: UnboundField[] = [];
 
   for (const field of reconciliation.obtainable) {
+    /**
+     * U6: nothing binds an ambiguous reading without a recorded decision.
+     *
+     * This compile used to take the reading the investigation happened to
+     * bind, and `rationale.md` said so in bold: "the compile bound one reading
+     * anyway". The front ends no longer hand it such a reconciliation -- the
+     * core asks a chooser first, and stops when it cannot -- so a field that
+     * arrives here with competing readings no rule covers and no chooser
+     * decided came from an edited or older `reconcile.json`, and it is refused
+     * as not compiled rather than bound on a guess.
+     */
+    const open = reconciliation.ambiguities.find(
+      (ambiguity) => ambiguity.field === field.field && ambiguity.kind === "competing-values" && ambiguity.settledBy.length === 0 && ambiguity.decidedBy === undefined,
+    );
+    if (open !== undefined) {
+      unbound.push({
+        field: field.field,
+        because:
+          `ambiguity \`${open.id}\` is open: ${open.readings.length} readings disagree, nothing in the spec settles which one is ${field.field}, and no chooser decided -- ` +
+          `nothing binds an ambiguous reading without a recorded decision. Re-run with a chooser, or add a rubric for ${field.field}.`,
+        refused: [],
+      });
+      continue;
+    }
     const record = manuscript.fields.find((entry) => entry.field === field.field);
     const { readings, uncompiled } = readingsOf(field, max);
     readings.sort((a, b) => TIER_RANK[a.source] - TIER_RANK[b.source]);
@@ -616,10 +640,19 @@ export function compileFromReconciliation(
  * `rationale.md` is asking about the scraper.
  */
 function decidedLine(fields: readonly FieldRationale[]): string {
-  const decided = fields.filter((field) => field.decision !== undefined);
-  if (decided.length === 0) return ".";
-  const by = [...new Set(decided.map((field) => field.decision!.answeredBy))].join(", ");
-  return `; ${decided.length} tier-3 column(s) (${decided.map((field) => field.field).join(", ")}) were chosen during the investigation by ${by}, one question per field, and faced the selector gate here like any other.`;
+  const picked = fields.filter((field) => field.decision !== undefined && field.decision.settles === undefined);
+  // U6: a column whose reading a chooser chose out of competing ones.
+  const settled = fields.filter((field) => field.decision?.settles !== undefined);
+  if (picked.length === 0 && settled.length === 0) return ".";
+  const by = (list: readonly FieldRationale[]): string => [...new Set(list.map((field) => field.decision!.answeredBy))].join(", ");
+  const parts: string[] = [];
+  if (picked.length > 0) {
+    parts.push(`${picked.length} tier-3 column(s) (${picked.map((field) => field.field).join(", ")}) were chosen during the investigation by ${by(picked)}, one question per field, and faced the selector gate here like any other`);
+  }
+  if (settled.length > 0) {
+    parts.push(`${settled.length} column(s) (${settled.map((field) => field.field).join(", ")}) had competing readings, and ${by(settled)} chose which one, one question per field`);
+  }
+  return `; ${parts.join("; ")}.`;
 }
 
 function rationaleFor(
@@ -837,14 +870,17 @@ function renderField(field: FieldRationale, cell: (text: string) => string): str
  * that is what `src/reconcile/schema.ts` states in bold, and it is the only
  * reason the binding is checkable in one line instead of by replaying the site.
  *
- * An ambiguity that no rubric settled is printed too, with what a person would
- * have to decide. The compile bound one reading anyway, because an unbound
- * column helps nobody; saying so is what keeps that from being a guess nobody
- * can see.
+ * An ambiguity a chooser decided (U6) prints who decided it and points at the
+ * decision printed above the table. One that nothing settled and nobody
+ * decided never reaches this function any more: `compileFromReconciliation`
+ * refuses such a field rather than binding one of its readings, which is what
+ * this comment used to say it did, "because an unbound column helps nobody".
+ * A wrong column helps nobody either, and nobody could see it was a guess.
  */
 function renderAmbiguity(ambiguity: Ambiguity, cell: (text: string) => string): string[] {
   const out: string[] = [];
   const settled = ambiguity.settledBy.length > 0;
+  const decided = ambiguity.decidedBy;
   out.push("");
   out.push(`**Ambiguity \`${ambiguity.id}\`** (${ambiguity.kind}) — ${ambiguity.because}`);
   out.push("");
@@ -856,24 +892,28 @@ function renderAmbiguity(ambiguity: Ambiguity, cell: (text: string) => string): 
   }
   out.push("");
   if (settled) {
-    out.push("Settled by, quoted verbatim from the spec — navvi does not read the rule, it puts it beside the binding so the binding can be checked in one line:");
+    out.push(
+      decided === undefined
+        ? "Settled by, quoted verbatim from the spec — navvi does not read the rule, it puts it beside the binding so the binding can be checked in one line:"
+        : "The rules the chooser was given as its premise, quoted verbatim from the spec:",
+    );
     out.push("");
     for (const rubric of ambiguity.settledBy) {
       out.push(`- **\`${rubric.id}\`** (${rubric.source}): "${rubric.rule}"`);
       out.push(`  - matched because ${rubric.because}`);
     }
-    if (ambiguity.resolved !== undefined) {
+    if (ambiguity.resolved !== undefined && decided === undefined) {
       out.push("");
       out.push(`Compiled as \`${ambiguity.resolved}\`. **Without the rule this stops.**`);
     }
-  } else {
-    out.push(
-      `**Nothing in the spec settles this, and the compile bound one reading anyway.** The scraper will return that reading on every page, and nothing in the scraper says it was a close call.`,
-    );
-    if (ambiguity.decision !== undefined) {
-      out.push("");
-      out.push(`**A client decides:** ${ambiguity.decision}`);
-    }
+  }
+  if (decided !== undefined) {
+    if (settled) out.push("");
+    out.push(`Decided by **${decided.answeredBy}**, asked \`${decided.question}\` over these ${decided.options} reading(s): it chose \`${cell(decided.chose)}\`, compiled as \`${ambiguity.resolved ?? "nothing"}\`.`);
+  } else if (!settled && ambiguity.decision !== undefined) {
+    // Unreachable from `compileFromReconciliation`, which refuses the field;
+    // kept so a rationale built by hand still says what is owed.
+    out.push(`**A client decides:** ${ambiguity.decision}`);
   }
   return out;
 }

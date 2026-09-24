@@ -1348,7 +1348,16 @@ function takeByKeyNames(samples: readonly DeclaredSample[], field: RequestedFiel
   record.verdicts.push(...binding.verdicts);
   for (const candidate of binding.candidates) {
     if (candidate.path === binding.path) continue;
-    record.rejected.push({ tier: 1, path: candidate.path, values: candidate.values, because: binding.askModel ? binding.because : `${binding.path ?? "another declaration"} was bound instead` });
+    // How to read the loser, so a chooser that later picks it over the binding
+    // (U6) compiles it through its own declaration and not the winner's.
+    const declared = samples[0]!.sources.find((entry) => entry.path === candidate.path);
+    record.rejected.push({
+      tier: 1,
+      path: candidate.path,
+      values: candidate.values,
+      because: binding.askModel ? binding.because : `${binding.path ?? "another declaration"} was bound instead`,
+      ...(declared === undefined ? {} : { read: aliasOfDeclared(declared) }),
+    });
   }
   record.askModel = binding.askModel;
   record.because = binding.because;
