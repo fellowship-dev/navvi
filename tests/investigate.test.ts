@@ -71,6 +71,27 @@ describe("anchors", () => {
     expect(anchors("a1b2c3", "el precio es $ 4.990 hoy")).toBe(false);
     expect(anchors(null, "anything")).toBe(false);
   });
+
+  it("refuses a digit run no page shows a reader rather than building a pattern out of it", () => {
+    // A live catalogue page, 2026-09-23: one leaf was a long string with digits
+    // scattered through it, the separator grouping inserted an optional
+    // separator every three of ~21,000 digits, and the pattern threw
+    // `SyntaxError: Invalid regular expression` — out of `anchors`, out of
+    // `investigate`, and out of the run. The question this function asks is
+    // about one formatted number, so a run that could not be one is refused.
+    // ~21,000 digits, the size the live leaf actually was. `new RegExp` alone
+    // does not throw — V8 compiles lazily — so the overflow arrives on `.test`,
+    // which is why the stack trace pointed at `anchors` and not at a builder.
+    const blob = `sess-${"1234567890".repeat(2_100)}-end`;
+    expect(() => anchors(blob, "el precio es $ 4.990 hoy")).not.toThrow();
+    expect(anchors(blob, "el precio es $ 4.990 hoy")).toBe(false);
+    // A barcode is 13 digits and still gets the separator treatment, so the
+    // bound refuses the blob without refusing a real number.
+    expect(anchors(7801234567890, "codigo 7.801.234.567.890")).toBe(true);
+    // And a value the page does show verbatim is still found, bound or not:
+    // the plain `includes` check runs first.
+    expect(anchors(blob, `el codigo es ${blob}`)).toBe(true);
+  });
 });
 
 describe("typeMatches", () => {

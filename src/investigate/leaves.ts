@@ -87,6 +87,13 @@ export function flatten(json: unknown, options: FlattenOptions = {}): Leaf[] {
  * `3690` anchors against `$ 3.690` — which is the whole reason the check is
  * worth doing on a Chilean pharmacy.
  */
+/**
+ * The longest digit run `anchors` will try a thousands-separator match on. A
+ * Chilean price is 4 to 7 digits and a barcode is 13; nothing a reader is shown
+ * reaches 20.
+ */
+const MAX_GROUPED_DIGITS = 20;
+
 export function anchors(value: TypedValue, pageText: string): boolean {
   if (value === null || value === "") return false;
   const haystack = normalize(pageText);
@@ -96,6 +103,22 @@ export function anchors(value: TypedValue, pageText: string): boolean {
   if (typeof value === "boolean") return false;
   const digits = String(value).replace(/[^\d]/g, "");
   if (digits.length < 3) return false;
+  /**
+   * Above this the separator trick stops meaning anything and starts being
+   * dangerous. It is a question about *one formatted number* — does `3690`
+   * appear as `$ 3.690`? — and nothing a page shows a reader is longer than
+   * this. A leaf that is a long string with digits scattered through it (an
+   * analytics blob, a tracking payload, a packed list of ids) reduces to a
+   * digit run of hundreds of characters, and the grouping below then inserts an
+   * optional separator every three of them until V8 refuses the pattern.
+   *
+   * Found on a live catalogue page, 2026-09-23: `investigate` threw
+   * `SyntaxError: Invalid regular expression: ... Stack overflow` on a leaf of
+   * about 21,000 digits and took the whole run with it — the first defect the ledger's new `threw`
+   * outcome named by stage. The bare `includes` check above has already had its
+   * say by here, so refusing costs a real number nothing it was going to get.
+   */
+  if (digits.length > MAX_GROUPED_DIGITS) return false;
   // The same digits under any thousands separator the page might use.
   const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, "[.,  ]?");
   return new RegExp(grouped).test(haystack.replace(/\s+/g, " "));
