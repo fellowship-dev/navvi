@@ -5,6 +5,7 @@ import { Actor } from "apify";
 import { MemoryStorage } from "crawlee";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { ScraperStore } from "../src/scraper/store.js";
+import { NavviError } from "../src/billing/budget.js";
 import type { CompiledScraper } from "../src/scraper/schema.js";
 import { loginFixture } from "./helpers.js";
 import { storageAdditions } from "./storage-guard.js";
@@ -102,5 +103,20 @@ describe("ScraperStore (R5)", () => {
   it("adds nothing to the project storage directory", () => {
     const added = storageAdditions(inject("projectStorageBefore"));
     expect(added, `the tests wrote into ./storage: ${added.join(", ")}`).toEqual([]);
+  });
+});
+
+describe("opening a store the actor may not read", () => {
+  it("says to pass the store's ID when a name is refused under limited permissions", async () => {
+    // A trial run on Apify, 2026-09-24: `scraperStore: "navvi-ipc-trial"` failed as
+    // no_items_found with "Insufficient permissions for the key-value store"; the same
+    // store passed by ID opened fine. Limited-permission actors cannot open by name.
+    const refused = new Error("Insufficient permissions for the key-value store. Make sure you're passing a correct API token and that it has the required permissions.");
+    const actor = { openKeyValueStore: (name?: string) => (name === "navvi-ipc-trial" ? Promise.reject(refused) : Promise.resolve({})) };
+    const err = await ScraperStore.open({ storeName: "navvi-ipc-trial", actor: actor as never }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(NavviError);
+    expect((err as NavviError).status).toBe("configuration_error");
+    expect((err as Error).message).toContain("navvi-ipc-trial");
+    expect((err as Error).message).toMatch(/pass the store's ID/);
   });
 });

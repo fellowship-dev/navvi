@@ -197,7 +197,10 @@ async function main() {
     // record, with the resolved paths, is the LAUNCH_FAILURE key.
     const causes = isLaunchFailure(error) ? causeChain(error).slice(1) : [];
     const detail = causes.length > 0 ? ` | cause: ${causes.join(" <- ")}` : "";
-    await Actor.setValue("SUMMARY", { status: "no_items_found", error: message, ...(causes.length > 0 ? { causes } : {}) });
+    // A NavviError carries its own status (a store the actor may not open is a
+    // configuration_error); only an unexplained throw is reported as no_items_found.
+    const status = error instanceof NavviError ? error.status : "no_items_found";
+    await Actor.setValue("SUMMARY", { status, error: message, ...(causes.length > 0 ? { causes } : {}) });
     await Actor.fail(`${message}${detail}`.slice(0, 1_000));
   }
 }

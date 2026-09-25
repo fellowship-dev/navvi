@@ -52,7 +52,23 @@ export class ScraperStore {
 
   static async open(options: OpenOptions = {}): Promise<ScraperStore> {
     const actor = options.actor ?? Actor;
-    const cache = await actor.openKeyValueStore(options.storeName ?? CACHE_STORE_NAME);
+    const name = options.storeName ?? CACHE_STORE_NAME;
+    let cache: KeyValueStore;
+    try {
+      cache = await actor.openKeyValueStore(name);
+    } catch (error) {
+      // An Apify actor runs with limited permissions: it can open a store it created,
+      // or one passed to it by ID, but not someone else's store by name. Found on a
+      // trial run, 2026-09-24, which ended as a bare no_items_found.
+      if (error instanceof Error && /insufficient permissions/i.test(error.message)) {
+        throw new NavviError(
+          "configuration_error",
+          `cannot open key-value store "${name}": ${error.message} An actor with limited permissions cannot open another's store by name — pass the store's ID (pick it in the Console's store picker) as scraperStore.`,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
     const defaults = await actor.openKeyValueStore();
     return new ScraperStore(actor, cache, defaults);
   }
