@@ -46,6 +46,8 @@ export interface RunSummary {
   charges: ChargeCounts;
   /** Zero-data-retention state the chooser reported; null when no chooser ran. */
   zeroDataRetention: ZeroDataRetentionState | null;
+  /** A pinned run: start URLs of other shapes, reported and never compiled (the first 50 by name). */
+  offTemplate?: { count: number; urls: string[] };
   /** Why the run stopped short, for every status but succeeded. */
   message?: string;
   /** needs_human: how to resume once the questions are answered. */

@@ -23,7 +23,9 @@ const NUMERIC = /^\d+$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LONG_HEX = /^[0-9a-f]{16,}$/i;
 const OPAQUE_ID = /^(?=.*\d)(?=.*[a-z])[a-z0-9]{12,}$/i;
-const SLUG = /^(?=.*[-_])(?=.*[a-z])(?=.*\d)[a-z0-9_-]+$/i;
+// A dot is a slug character too: stores abbreviate inside slugs ("30-comp.-recubiertos"),
+// and a slug that read as a literal made each such URL a template of its own.
+const SLUG = /^(?=.*[-_])(?=.*[a-z])(?=.*\d)[a-z0-9_.-]+$/i;
 
 type SegmentKind = "n" | "id" | "slug" | "literal";
 
@@ -112,6 +114,31 @@ export function urlPattern(urls: readonly string[]): string {
   if (!lead) throw new Error("urlPattern needs at least one URL");
   const id = bucketId(lead);
   return patternOf(parsed.filter((p) => p.host === lead.host && bucketId(p) === id));
+}
+
+/**
+ * Does `url` belong to the template `key` names? The pattern's literal segments
+ * must match exactly, `{n}` a number, `{id}` and `{slug}` any segment; the
+ * host, segment count, page extension and pagination keys must agree. This is
+ * how a pinned scraper finds its URLs in a start list that mixes shapes.
+ */
+export function matchesTemplate(key: string, url: string): boolean {
+  const parsed = parse(url);
+  if (!parsed) return false;
+  const slash = key.indexOf("/");
+  if (slash < 0 || key.slice(0, slash) !== parsed.host) return false;
+  const [path = "", query = ""] = key.slice(slash).split("?");
+  const pagination = query.length > 0 ? query.split("&").map((pair) => pair.split("=")[0]!).sort() : [];
+  if (pagination.join("&") !== parsed.pagination.join("&")) return false;
+  const pattern = parse(`http://pattern.invalid${path}`);
+  if (!pattern || pattern.extension !== parsed.extension || pattern.segments.length !== parsed.segments.length) return false;
+  return pattern.segments.every((escaped, index) => {
+    const part = decodeURIComponent(escaped); // the URL parser escaped the braces
+    const actual = parsed.segments[index]!;
+    if (part === "{n}") return NUMERIC.test(actual);
+    if (part === "{id}" || part === "{slug}") return actual.length > 0;
+    return escaped === actual;
+  });
 }
 
 /** `${host}${pattern}`; the host is lowercased and the URL itself never appears. */

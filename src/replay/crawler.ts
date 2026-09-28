@@ -22,7 +22,7 @@ import { LIST_JOINER, coerceRow, extractPage, fieldTypesOf, fingerprintMatches, 
 import { cacheKey, canaryOrigin, promoteFieldAlternative, validateScraper, type CompiledScraper, type Status, type TraceStep } from "../scraper/schema.js";
 import { ScraperStore, ScraperStoreError } from "../scraper/store.js";
 import { findPlaceholders, MASK, maskUrlCredentials, MissingSecretError, redactRunInput, resolveSecrets, type CommandRunner, type Secret } from "../secrets/resolve.js";
-import { groupByTemplate, pickSampleUrls } from "../template/index.js";
+import { groupByTemplate, matchesTemplate, pickSampleUrls } from "../template/index.js";
 import { recordCanary, type CanaryFingerprint, type FieldFill, type PageResponse } from "../investigate/blocked.js";
 import { compileDetail, DETAIL_LINK_FIELD, detailLinkOf, extractDetail, hasDetailTemplate, mergeDetail, withDetailLink } from "./detail.js";
 import type { Determinism } from "./determinism.js";
@@ -463,6 +463,8 @@ interface RunState {
   replayed: Set<string>;
   /** The guard install per context, memoized in flight so a concurrent request waits for it instead of navigating past it (R26). */
   guardedContexts: Map<BrowserContext, Promise<void>>;
+  /** Start URLs a pinned run did not replay because they are not of the pinned scraper's template. */
+  offTemplate: string[];
 }
 
 interface CompileUserData {
@@ -488,6 +490,9 @@ function withFieldsNotFound(scraper: CompiledScraper, names: readonly string[]):
   const missing = [...new Set([...(scraper.fieldsNotFound ?? []), ...names])].filter((name) => !bound(name)).sort();
   return { fieldsNotFound: missing.length > 0 ? missing : undefined };
 }
+
+/** How many off-template URLs the summary lists by name; the count is always whole. */
+const OFF_TEMPLATE_LISTED = 50;
 
 function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePlan[], chooser: Chooser | null, charger: Charger): RunSummary {
   const usage = chooser?.usage();
@@ -525,6 +530,7 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
     charges: { ...charger.counts },
     zeroDataRetention: usage?.zeroDataRetention ?? null,
   };
+  if (state.offTemplate.length > 0) summary.offTemplate = { count: state.offTemplate.length, urls: state.offTemplate.slice(0, OFF_TEMPLATE_LISTED) };
   // The remedy is --force-recompile on the compiling run and its replays
   // alike: the scraper is stored either way, and every later run replays it
   // without asking the chooser again.
@@ -695,6 +701,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     seen: new Set(),
     replayed: new Set(),
     guardedContexts: new Map(),
+    offTemplate: [],
   };
   const plans: TemplatePlan[] = [];
   const charger = Charger.for(actor);
@@ -714,16 +721,33 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
 
   // Cache lookup per template (R5, R38) before any browser work.
   const store = deps.store ?? (await ScraperStore.open({ actor, ...(env.NAVVI_SCRAPER_STORE ? { storeName: env.NAVVI_SCRAPER_STORE } : {}) }));
-  const grouped = groupByTemplate(urls);
+  let grouped = groupByTemplate(urls);
+  const offTemplate = state.offTemplate;
   try {
+    // A pinned run replays the pinned scraper on every URL of its template and
+    // compiles nothing: a start list that mixes shapes (a category page, a URL
+    // of another store) used to drop the pin and recompile every template.
+    // The other shapes are reported, never compiled on a pinned run.
+    const pinned = input.scriptId ? await store.load({ cacheKey: "", profile: input.profile, scriptId: input.scriptId }) : null;
+    if (pinned?.scraper) {
+      const pinnedKey = pinned.scraper.templateKey;
+      const own = urls.filter((url) => matchesTemplate(pinnedKey, url));
+      // A single-template list keeps the pin whatever its computed pattern, as before.
+      const mine = own.length > 0 ? own : grouped.size === 1 ? urls : [];
+      for (const url of new Set(urls)) if (!mine.includes(url)) offTemplate.push(url);
+      if (mine.length === 0) return fail("no_items_found", `no start URL matches the pinned scraper's template ${pinnedKey}; ${offTemplate.length} URL(s) of other shapes`);
+      grouped = new Map([[pinnedKey, [...new Set(mine)]]]);
+      if (offTemplate.length > 0) ctxLog(`${offTemplate.length} start URL(s) do not match the pinned template ${pinnedKey}; reported, not compiled`);
+    }
     for (const [templateKey, templateUrls] of grouped) {
-      const key = cacheKey(templateKey, { goal: input.goal, description: input.description, fields, profile: input.profile });
-      const loaded = await store.load({
-        cacheKey: key,
-        profile: input.profile,
-        scriptId: grouped.size === 1 ? input.scriptId : undefined,
-        forceRecompile: input.forceRecompile,
-      });
+      const key = pinned?.scraper ? pinned.scraper.cacheKey : cacheKey(templateKey, { goal: input.goal, description: input.description, fields, profile: input.profile });
+      const loaded = pinned?.scraper
+        ? pinned
+        : await store.load({
+            cacheKey: key,
+            profile: input.profile,
+            forceRecompile: input.forceRecompile,
+          });
       plans.push({
         templateKey,
         cacheKey: key,

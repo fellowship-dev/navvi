@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { cacheKey, type CompiledScraper } from "../src/scraper/schema.js";
 import {
   groupByTemplate,
+  matchesTemplate,
   pickSampleRows,
   pickSampleUrls,
   templateGrowth,
@@ -200,5 +201,32 @@ describe("single-URL literal words (KTD15)", () => {
   it("keeps a dashed word without digits literal; only letters+digits with a dash is slug-like alone", () => {
     expect(urlPattern(["https://site.cl/account/my-account"])).toBe("/account/my-account");
     expect(urlPattern(["https://site.cl/jobs/456/backend-dev"])).toBe("/jobs/{n}/backend-dev");
+  });
+});
+
+describe("a dotted slug (stores abbreviate inside slugs)", () => {
+  it("groups with its siblings instead of becoming a template of its own", () => {
+    const urls = ["https://site.cl/amoxicilina-500-mg-x-14-caps-1234.html", "https://site.cl/atorvastatina-20-mg-caja-30-comp.-recubiertos-86371.html", "https://site.cl/paracetamol-500mg.-caja-16-comp.-2757.html"];
+    expect([...groupByTemplate(urls).entries()]).toEqual([["site.cl/{slug}.html", urls]]);
+  });
+});
+
+describe("matchesTemplate", () => {
+  it("matches literal segments exactly, {n} a number, {slug}/{id} any segment, on the same host, depth, extension and pagination", () => {
+    expect(matchesTemplate("site.cl/{slug}.html", "https://site.cl/a-dotted-slug-30-comp.-86371.html")).toBe(true);
+    expect(matchesTemplate("site.cl/{slug}/{n}.html", "https://site.cl/ibuprofeno-400/123.html?x=1")).toBe(true);
+    expect(matchesTemplate("site.cl/{slug}/{n}.html", "https://site.cl/ibuprofeno-400/abc.html")).toBe(false);
+    expect(matchesTemplate("site.cl/products/{slug}", "https://site.cl/products/any-thing?default=1")).toBe(true);
+    expect(matchesTemplate("site.cl/products/{slug}", "https://site.cl/t/a/b")).toBe(false);
+    expect(matchesTemplate("site.cl/products/{slug}", "https://other.cl/products/x-1")).toBe(false);
+    expect(matchesTemplate("site.cl/{slug}.html", "https://site.cl/x-1")).toBe(false);
+    expect(matchesTemplate("site.cl/jobs?page={page}", "https://site.cl/jobs?page=2")).toBe(true);
+    expect(matchesTemplate("site.cl/jobs?page={page}", "https://site.cl/jobs")).toBe(false);
+    expect(matchesTemplate("site.cl/jobs", "not a url")).toBe(false);
+  });
+
+  it("matches every URL of the template groupByTemplate made", () => {
+    const urls = ["https://site.cl/p/123/ibuprofeno-400", "https://site.cl/p/456/paracetamol", "https://site.cl/p/9/x.y-1"];
+    for (const [key, members] of groupByTemplate(urls)) for (const url of members) expect(matchesTemplate(key, url)).toBe(true);
   });
 });
