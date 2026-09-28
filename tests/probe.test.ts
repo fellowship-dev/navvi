@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Bank } from "../src/heuristics/index.js";
 import { chooseSample, classify, probeFrom, type PageResponse, type UrlProbe } from "../src/investigate/index.js";
+import { isRenamedProduct } from "../src/investigate/probe.js";
 
 /**
  * U2d's producer. **Defect 1's home.**
@@ -51,9 +52,18 @@ const URLS = {
 describe("a redirect to the same product under a renamed slug", () => {
   const asked = "https://example.cl/ejemplo-jarabe-x-14.html";
   it("is the product: live, not dead", () => {
-    const probe = probeFrom(asked, fetched(asked, 200, PRODUCT, "https://example.cl/ejemplo-jarabe-x-120-ml-16344.html"));
+    const probe = probeFrom(asked, fetched(asked, 200, PRODUCT, "https://example.cl/ejemplo-jarabe-x-14-unidades-16344.html"));
     expect(probe.sameProduct).toBe(true);
     expect(classify(probe).strata).not.toContain("dead");
+  });
+  it("reads an abbreviated old slug as its renamed page: the name word, every number, abbreviations as their words", () => {
+    expect(isRenamedProduct("https://example.cl/ejemplo-6-25mg-caja-30-comp.html", "https://example.cl/ejemplo-6.25-mg-x-30-comprimidos-29899.html")).toBe(true);
+    expect(isRenamedProduct("https://example.cl/ejemplo-bi-150-mg-caja-10-comp-lp.html", "https://example.cl/ejemplo-bi-150-mg-x-10-comprimidos-liberacion-prolongada-88627.html")).toBe(true);
+  });
+  it("refuses another strength, another product, or another template", () => {
+    expect(isRenamedProduct("https://example.cl/ejemplo-500-mg-x-20-comp.html", "https://example.cl/ejemplo-1-g-x-20-comprimidos-4411.html")).toBe(false);
+    expect(isRenamedProduct("https://example.cl/ejemplo-500-mg-x-20-comp.html", "https://example.cl/otro-500-mg-x-20-comprimidos-4411.html")).toBe(false);
+    expect(isRenamedProduct("https://example.cl/ejemplo-500-mg-x-20-comp.html", "https://example.cl/t/ejemplo-500-mg-x-20")).toBe(false);
   });
   it("to a category page stays dead", () => {
     const probe = probeFrom(asked, fetched(asked, 200, REDIRECT, "https://example.cl/t/categoria/ejemplo"));
@@ -67,7 +77,7 @@ describe("a redirect to the same product under a renamed slug", () => {
   });
   it("to a page that declares no product stays dead, even in the same template with the same words", () => {
     const listing = "<!doctype html><html><head><title>Ejemplo</title></head><body><h1>Resultados</h1><p>Muchos productos, ninguno declarado.</p></body></html>";
-    const probe = probeFrom(asked, fetched(asked, 200, listing, "https://example.cl/ejemplo-jarabe-x-120-ml-16344.html"));
+    const probe = probeFrom(asked, fetched(asked, 200, listing, "https://example.cl/ejemplo-jarabe-x-14-unidades-16344.html"));
     expect(probe.sameProduct).toBe(false);
     expect(classify(probe).signature).toBe("dead:redirect");
   });

@@ -44,32 +44,41 @@ function priceCount(body: string): number {
   return new Set(body.match(/\$\s?[\d.]{3,}/g) ?? []).size;
 }
 
-/** Letter-bearing words of a URL's last path segment, extension dropped, 4+ characters. */
-function slugWords(url: string): Set<string> {
+/** A URL's last path segment, extension dropped, as words and numbers: "x-30-comp.-25mg" -> words [comp, mg], numbers [30, 25]. */
+function slugParts(url: string): { words: string[]; numbers: string[] } {
   let last = "";
   try {
-    last = new URL(url).pathname.split("/").filter(Boolean).pop() ?? "";
+    last = decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).pop() ?? "");
   } catch {
-    return new Set();
+    return { words: [], numbers: [] };
   }
-  const words = decodeURIComponent(last).toLowerCase().replace(/\.[a-z]{2,5}$/, "").split(/[^a-z0-9]+/);
-  return new Set(words.filter((w) => w.length >= 4 && /[a-z]/.test(w)));
+  const runs = last.toLowerCase().replace(/\.[a-z]{2,5}$/, "").match(/[a-z]+|\d+/g) ?? [];
+  return { words: runs.filter((r) => /^[a-z]{3,}$/.test(r)), numbers: runs.filter((r) => /^\d+$/.test(r)) };
 }
 
+/** An abbreviation reads as its word: "comp" is "comprimidos". */
+const sameWord = (a: string, b: string): boolean => a.startsWith(b) || b.startsWith(a);
+
 /**
- * A redirect to the same product under a renamed slug: the landed URL is in the
- * requested URL's template and carries at least half of its slug words. A
- * category, search or home page fails the template test; another product in
- * the same template fails the words test. The caller also requires the landed
- * page to declare a Product.
+ * A redirect to the same product under a renamed slug. A store that renames
+ * products rewrites the descriptive words ("caja-30-comp" becomes
+ * "x-30-comprimidos") and appends an id, but keeps the product: so the landed
+ * URL must be in the requested URL's template, start with the same name word,
+ * carry every number of the requested slug (the dose and the pack size: a
+ * redirect to another strength is another product), and share at least half
+ * of its words, an abbreviation counting as its word. A category, search or
+ * home page fails the template test; another product fails the name or the
+ * numbers. The caller also requires the landed page to declare a Product.
  */
 export function isRenamedProduct(requested: string, landed: string): boolean {
   if (!sameTemplate(requested, landed)) return false;
-  const asked = slugWords(requested);
-  if (asked.size === 0) return false;
-  const found = slugWords(landed);
-  const shared = [...asked].filter((w) => found.has(w)).length;
-  return shared * 2 >= asked.size;
+  const asked = slugParts(requested);
+  const found = slugParts(landed);
+  const [name] = asked.words;
+  if (name === undefined || found.words[0] === undefined || !sameWord(name, found.words[0])) return false;
+  if (!asked.numbers.every((n) => found.numbers.includes(n))) return false;
+  const shared = asked.words.filter((w) => found.words.some((f) => sameWord(w, f))).length;
+  return shared * 2 >= asked.words.length;
 }
 
 /**

@@ -450,6 +450,17 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
     }
   }
 
+  /**
+   * A fetch answers with the URL it landed on, and every map below is keyed by
+   * the URL that was asked for. Looked up by the landed URL, a page reached
+   * through any redirect -- a renamed slug, a trailing slash -- was "left out
+   * of the comparison", and a store whose list was mostly renamed slugs bound
+   * nothing at tier 1 (2026-09-28).
+   */
+  const askedFor = new Map<string, string>();
+  for (const [index, page] of fetched.entries()) askedFor.set(page.url, bindingUrls[index] ?? page.url);
+  const asked = (url: string): string => askedFor.get(url) ?? url;
+
   const fetchSources: SourceRecord[] = fetched.map((page) => ({
     url: safeUrl(page.url),
     kind: "plain-fetch" as const,
@@ -480,7 +491,7 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
     tier1Verdicts.push({ id: "shell-skips-tier-1", verdict });
     if (!verdict.fires) continue;
     shells += 1;
-    shellUrls.add(page.url);
+    shellUrls.add(asked(page.url));
     obstacles.push({ kind: "shell", url: safeUrl(page.url), because: verdict.because, evidence: "shell-skips-tier-1", blocking: false });
     const source = fetchSources[index];
     if (source) source.because = verdict.because;
@@ -497,14 +508,14 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
    * instance of one cause; one map, computed once, is the fix.
    */
   const comparability = new Map(options.sample.picks.map((pick) => [pick.url, bindable(pick, shellUrls)] as const));
-  const comparable = (url: string): boolean => comparability.get(url)?.bind === true;
+  const comparable = (url: string): boolean => comparability.get(asked(url))?.bind === true;
   /**
    * Tier 1's own comparison set, which KTD3 made narrower than `comparable`:
    * an `undeclared` page was served and is read by tiers 2 and 3, and it
    * declares nothing, so in `bindRole`'s "every sample declares this role" it
    * would delete every declared candidate on the pages that declare one.
    */
-  const declaring = (url: string): boolean => comparability.get(url)?.tier1 === true;
+  const declaring = (url: string): boolean => comparability.get(asked(url))?.tier1 === true;
 
   /**
    * The render, taken once and shared.
@@ -704,7 +715,7 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
       : `${declaredSamples.reduce((total, sample) => total + sample.sources.length, 0)} declared finding(s) over ${declaredSamples.length} plain fetch(es)` +
         (uncomparable.length === 0
           ? ""
-          : `; ${uncomparable.length} of ${fetched.length} fetch(es) left out of the comparison — ${comparability.get(uncomparable[0]!.url)?.because ?? "nothing there to compare"}`),
+          : `; ${uncomparable.length} of ${fetched.length} fetch(es) left out of the comparison — ${comparability.get(asked(uncomparable[0]!.url))?.because ?? "nothing there to compare"}`),
     asked: fields.map((field) => field.name),
     covered: covered1,
     sources: fetchSources,

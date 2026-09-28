@@ -98,6 +98,7 @@ graph TD
   investigate --> heuristics
   investigate --> input
   investigate --> scraper
+  investigate --> template
   investigate --> util
   main --> billing
   main --> browser

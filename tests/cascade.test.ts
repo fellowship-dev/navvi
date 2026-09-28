@@ -135,6 +135,17 @@ describe("Store A — the run stops at tier 1", () => {
     expect(sources.captured).toEqual([]);
   });
 
+  it("binds the same way when every fetch lands on another URL than the one asked for (a renamed slug, a trailing slash)", async () => {
+    // 2026-09-28: tier 1 looked its comparison set up by the landed URL, keyed
+    // by the requested one, and a store whose list was mostly renamed slugs
+    // bound nothing ("left out of the comparison").
+    const sources = sourcesOf(pages, {});
+    const moved: typeof sources = { ...sources, fetch: (url: string) => sources.fetch(url).then((page) => ({ ...page, url: `${url}-renombrado-1234/` })) };
+    const manuscript = await investigate({ site: "store-a.example", fields: FIELDS, sample, sources: moved, now: NOW });
+    expect(tier(manuscript, 1).covered.sort()).toEqual(["listPrice", "productName", "promoPrice", "sku", "stock"]);
+    expect(tier(manuscript, 1).because).not.toContain("left out of the comparison");
+  });
+
   it("stops because declared-covers-spec said to, and says so in the manuscript", async () => {
     const { manuscript } = await run();
     const verdict = tier(manuscript, 1).verdicts.find((entry) => entry.id === "declared-covers-spec")!;
