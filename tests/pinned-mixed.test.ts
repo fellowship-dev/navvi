@@ -116,6 +116,20 @@ describe("a pinned scraper on a mixed start list", () => {
     expect(empty.usage().questions).toBe(0);
   }, 60_000);
 
+  it("a page answering 500 is retried, then reported transient: no row, no challenge, no healing", async () => {
+    const actor = makeActor(dir);
+    const raw = { mode: "record", fields: F("name", "laboratory", "price", "stock"), description: "pharmacy product" };
+    const compiled = await runCrawl(fixtureInput({ ...raw, startUrls: productUrls() }), makeDeps(dir, actor, new RecordedChooser({ fixture: "compile/pharmacy-v1" })));
+    const failing = `${server.baseUrl}/demo/pharmacy-v1/producto/error-20-mg.html`;
+    const empty = new RecordedChooser({ fixture: "crawler/empty" });
+    const replayed = await runCrawl(fixtureInput({ ...raw, startUrls: [...productUrls(), failing], scriptId: compiled.scriptId }), makeDeps(dir, actor, empty));
+    expect(replayed.status).toBe("succeeded");
+    expect(replayed.items).toBe(3);
+    expect(replayed.transientPages).toEqual({ count: 1, urls: [failing] });
+    expect(replayed.blockedPages).toBeUndefined();
+    expect(empty.usage().questions).toBe(0);
+  }, 60_000);
+
   it("a pin whose template matches no start URL ends the run without compiling", async () => {
     const actor = makeActor(dir);
     const raw = { mode: "record", fields: F("name", "laboratory", "price", "stock"), description: "pharmacy product" };

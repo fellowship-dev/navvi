@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
  *   `switchLogin("renamed")` serves the renamed form (button "Sign in") at `/login/` (heal proof for a trace step)
  * - `/demo/pharmacy[-v1|-v2]/producto/challenge-<anything>.html`  a product URL answered by the bot challenge (503):
  *   a store that challenges some requests of a template it serves
+ * - `/demo/pharmacy[-v1|-v2]/producto/error-<anything>.html`  the store's error template with status 500
  * - `/demo/pharmacy[-v1|-v2]/producto/retirado-<anything>.html`  redirects (302) to the store's index: a retired product
  * - `/demo/pharmacy[-v1|-v2]/producto/sin-precio-<slug>.html`  that product page with its price removed:
  *   a healthy page on which one field is empty by design (an undiscounted product has no list price)
@@ -138,6 +139,11 @@ export async function startFixtureServer(): Promise<FixtureServer> {
           return;
         }
         const version = (pharmacy[1] as DemoVersion | undefined) ?? demo;
+        if (/^\/producto\/error-[^/]+\.html$/.test(pharmacy[2] ?? "")) {
+          res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
+          res.end("<!doctype html><title>Error</title><h1>¡Lo sentimos!</h1><p>No se encontró la página que solicitó.</p>");
+          return;
+        }
         if (/^\/producto\/retirado-[^/]+\.html$/.test(pharmacy[2] ?? "")) {
           redirect(res, pathname.replace(/\/producto\/[^/]+$/, "/index.html"));
           return;

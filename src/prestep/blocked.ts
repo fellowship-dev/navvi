@@ -157,6 +157,12 @@ async function hasListContent(page: Page): Promise<boolean> {
 export interface ClassifyBlockedOptions {
   /** A case's heuristic overrides; the default bank when omitted. */
   view?: Bank | undefined;
+  /**
+   * Only a decisive reading (a challenge marker, a challenge title) counts. For
+   * a page that answered 5xx: a store's own error template can embed a widget
+   * and render little text, which the corroborated half would call a challenge.
+   */
+  decisiveOnly?: boolean | undefined;
 }
 
 /**
@@ -203,6 +209,7 @@ export async function classifyBlocked(
   // A decisive reading settles it: those markers appear when, and only when, a
   // request was mitigated.
   if (reading !== null && reading.corroborated !== true) return "blocked_bot_detection";
+  if (options.decisiveOnly) return null;
 
   /**
    * The login wall is asked **before** the corroborated half, and the reason is

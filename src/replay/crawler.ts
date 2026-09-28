@@ -469,6 +469,8 @@ interface RunState {
   blockedPages: number;
   /** Replay pages the site answered 404/410: dead URLs in the start list; no row, no healing. */
   deadPages: string[];
+  /** Replay pages that still answered 5xx after the retry: no row, no healing. */
+  transientPages: string[];
   /** The first blocked page is kept as evidence (BLOCKED_PAGE*), once per run. */
   blockedEvidenceSaved: boolean;
 }
@@ -496,6 +498,9 @@ function withFieldsNotFound(scraper: CompiledScraper, names: readonly string[]):
   const missing = [...new Set([...(scraper.fieldsNotFound ?? []), ...names])].filter((name) => !bound(name)).sort();
   return { fieldsNotFound: missing.length > 0 ? missing : undefined };
 }
+
+/** A replay page that answered 5xx: retried by the crawler, then reported transient. */
+class TransientPageError extends Error {}
 
 /** Rows after which an optional field that never filled is reported not found. */
 const OPTIONAL_EMPTY_AFTER = 10;
@@ -556,6 +561,7 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
     zeroDataRetention: usage?.zeroDataRetention ?? null,
   };
   if (state.blockedPages > 0) summary.blockedPages = state.blockedPages;
+  if (state.transientPages.length > 0) summary.transientPages = { count: state.transientPages.length, urls: state.transientPages.slice(0, OFF_TEMPLATE_LISTED) };
   if (state.deadPages.length > 0) summary.deadPages = { count: state.deadPages.length, urls: state.deadPages.slice(0, OFF_TEMPLATE_LISTED) };
   if (state.offTemplate.length > 0) summary.offTemplate = { count: state.offTemplate.length, urls: state.offTemplate.slice(0, OFF_TEMPLATE_LISTED) };
   // The remedy is --force-recompile on the compiling run and its replays
@@ -734,6 +740,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     offTemplate: [],
     blockedPages: 0,
     deadPages: [],
+    transientPages: [],
     blockedEvidenceSaved: false,
   };
   const plans: TemplatePlan[] = [];
@@ -996,6 +1003,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
         }
       },
       failedRequestHandler: async ({ request }, error) => {
+        if (error instanceof TransientPageError) state.transientPages.push(request.url);
         ctxLog(`request ${request.url} failed: ${error.message}`);
       },
     },
@@ -1843,11 +1851,21 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       state.deadPages.push(ctx.request.url);
       return;
     }
+    // A 5xx is the site having a bad minute: one store serves its error
+    // template with 500 to a burst, and it read as a challenge (2026-09-28).
+    // Thrown, so the crawler retries it; a page still failing is reported
+    // transient (`transientPages`), never read, healed or called blocked.
+    if (status !== undefined && status >= 500 && (await classifyBlocked(ctx.page, { status }, { decisiveOnly: true })) === null) {
+      throw new TransientPageError(`${ctx.request.url} answered ${status}`);
+    }
     // So is a product that redirects off the template, to a category or the
     // home page: one store retires products that way, and the category page's
-    // newsletter reCAPTCHA read as a challenge (2026-09-28).
+    // newsletter reCAPTCHA read as a challenge (2026-09-28). Only for a scraper
+    // that never logs in: under a login, a redirect off the page is a session
+    // lost, which is drift.
     const landed = ctx.page.url();
-    if (landed !== ctx.request.url && !matchesTemplate(plan.templateKey, landed)) {
+    const neverLogsIn = input.profile === "store" && entryModeFor(plan.scraper) !== "trace";
+    if (neverLogsIn && landed !== ctx.request.url && !matchesTemplate(plan.templateKey, landed)) {
       state.deadPages.push(ctx.request.url);
       return;
     }

@@ -48,6 +48,8 @@ export interface RunSummary {
   zeroDataRetention: ZeroDataRetentionState | null;
   /** Replay pages that were a bot challenge: no row, no healing; the first is kept as BLOCKED_PAGE. */
   blockedPages?: number;
+  /** Record replay pages that still answered 5xx after the retry (the first 50 by name); no row, no healing. */
+  transientPages?: { count: number; urls: string[] };
   /** Record replay pages the site answered 404/410: dead URLs in the start list (the first 50 by name); no row, no healing. */
   deadPages?: { count: number; urls: string[] };
   /** A pinned run: start URLs of other shapes, reported and never compiled (the first 50 by name). */
