@@ -146,6 +146,14 @@ describe("Store A — the run stops at tier 1", () => {
     expect(tier(manuscript, 1).because).not.toContain("left out of the comparison");
   });
 
+  it("binds a declared availability that reads the same on every sample: every product in stock is not a site name", async () => {
+    const inStock = page("store-a-product-2").replace('content="out of stock"', 'content="in stock"').replace("https://schema.org/OutOfStock", "https://schema.org/InStock");
+    const sources = sourcesOf({ ...pages, "https://example.test/p/vitamina-c": inStock }, {});
+    const manuscript = await investigate({ site: "store-a.example", fields: FIELDS, sample, sources, now: NOW });
+    expect(tier(manuscript, 1).covered).toContain("stock");
+    expect(field(manuscript, "stock").source).toBeDefined();
+  });
+
   it("stops because declared-covers-spec said to, and says so in the manuscript", async () => {
     const { manuscript } = await run();
     const verdict = tier(manuscript, 1).verdicts.find((entry) => entry.id === "declared-covers-spec")!;

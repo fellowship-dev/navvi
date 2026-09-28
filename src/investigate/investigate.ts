@@ -1294,6 +1294,16 @@ export async function investigate(options: InvestigateOptions): Promise<Manuscri
  * A declared `Product` node has already been vouched for by
  * `json-ld-needs-product-node`; it does not also have to be visible.
  */
+/**
+ * Roles whose values come from a small closed set (schema.org's ItemAvailability,
+ * OfferItemCondition, an ISO currency). The same value on every sample is the
+ * catalogue agreeing -- every sampled product in stock -- not the site
+ * describing itself, which is what `no-variation-no-field` exists to refuse.
+ * One store's declared availability read InStock on every sample and stock
+ * went unbound (2026-09-28).
+ */
+const ENUMERATED_ROLES: ReadonlySet<DeclaredRole> = new Set<DeclaredRole>(["availability", "condition", "currency"]);
+
 function bindDeclared(samples: readonly DeclaredSample[], fields: readonly RequestedField[], records: Map<string, FieldRecord>, covered: string[], view: Bank): void {
   const claimed = new Set<DeclaredRole>();
 
@@ -1315,7 +1325,7 @@ function bindDeclared(samples: readonly DeclaredSample[], fields: readonly Reque
        * same invariant the client admission loop applies *after* a compile, moved
        * to where it prevents the defect instead of detecting it.
        */
-      if (binding.values.length >= 2) {
+      if (binding.values.length >= 2 && !ENUMERATED_ROLES.has(role)) {
         const verdict = view.run("no-variation-no-field", { field: field.name, values: binding.values.map((value) => (typeof value === "boolean" ? String(value) : value)) });
         record.verdicts.push({ id: "no-variation-no-field", verdict });
         if (verdict.fires) {
