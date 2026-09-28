@@ -13,6 +13,8 @@ import { fileURLToPath } from "node:url";
  *   `switchLogin("renamed")` serves the renamed form (button "Sign in") at `/login/` (heal proof for a trace step)
  * - `/demo/pharmacy[-v1|-v2]/producto/challenge-<anything>.html`  a product URL answered by the bot challenge (503):
  *   a store that challenges some requests of a template it serves
+ * - `/demo/pharmacy[-v1|-v2]/producto/sin-precio-<slug>.html`  that product page with its price removed:
+ *   a healthy page on which one field is empty by design (an undiscounted product has no list price)
  * - `/fixtures/<name>.html`   from tests/fixtures; `challenge.html` is served with status 503
  */
 
@@ -135,6 +137,15 @@ export async function startFixtureServer(): Promise<FixtureServer> {
           return;
         }
         const version = (pharmacy[1] as DemoVersion | undefined) ?? demo;
+        const priceless = /^\/producto\/sin-precio-([^/]+\.html)$/.exec(pharmacy[2] ?? "");
+        if (priceless) {
+          const source = resolveWithin(path.join(DEMO_DIR, `pharmacy-${version}`), `/producto/${priceless[1]}`);
+          if (!source) return void notFound(res);
+          const page = (await fs.readFile(source, "utf8")).replace(/<div class="producto-precio">[\s\S]*?<\/div>/, "");
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(page);
+          return;
+        }
         const file = resolveWithin(path.join(DEMO_DIR, `pharmacy-${version}`), pharmacy[2] || "/index.html");
         if (!file) return void notFound(res);
         await sendFile(res, file);

@@ -70,6 +70,39 @@ describe("a pinned scraper on a mixed start list", () => {
     expect(onlyBlocked.items).toBe(0);
   }, 60_000);
 
+  it("a page the site answers 404 is a dead URL: no row, no healing, counted and listed", async () => {
+    const actor = makeActor(dir);
+    const raw = { mode: "record", fields: F("name", "laboratory", "price", "stock"), description: "pharmacy product" };
+    const compiled = await runCrawl(fixtureInput({ ...raw, startUrls: productUrls() }), makeDeps(dir, actor, new RecordedChooser({ fixture: "compile/pharmacy-v1" })));
+    const gone = `${server.baseUrl}/demo/pharmacy-v1/producto/descontinuado-10-mg.html`;
+    const empty = new RecordedChooser({ fixture: "crawler/empty" });
+    const replayed = await runCrawl(fixtureInput({ ...raw, startUrls: [...productUrls(), gone], scriptId: compiled.scriptId }), makeDeps(dir, actor, empty));
+    expect(replayed.status).toBe("succeeded");
+    expect(replayed.items).toBe(3);
+    expect(replayed.deadPages).toEqual({ count: 1, urls: [gone] });
+    expect(replayed.blockedPages).toBeUndefined();
+    expect(replayed.healingEvents).toEqual([]);
+    expect(empty.usage().questions).toBe(0);
+  }, 60_000);
+
+  it("an optional field empty on a healthy page is not drift: no healing, the row goes out with it null", async () => {
+    const actor = makeActor(dir);
+    const raw = { mode: "record", fields: F("name", "laboratory", "price", "stock"), description: "pharmacy product" };
+    const compiled = await runCrawl(fixtureInput({ ...raw, startUrls: productUrls() }), makeDeps(dir, actor, new RecordedChooser({ fixture: "compile/pharmacy-v1" })));
+    const priceless = `${server.baseUrl}/demo/pharmacy-v1/producto/sin-precio-${PRODUCTS[0]}.html`;
+    const optional = { ...raw, fields: [...F("name", "laboratory", "stock"), { name: "price", optional: true }] };
+    const empty = new RecordedChooser({ fixture: "crawler/empty" });
+    const replayed = await runCrawl(fixtureInput({ ...optional, startUrls: [...productUrls(), priceless], scriptId: compiled.scriptId }), makeDeps(dir, actor, empty));
+    expect(replayed.status).toBe("succeeded");
+    expect(replayed.items).toBe(4);
+    expect(replayed.healingEvents).toEqual([]);
+    expect(replayed.unhealed).toBe(0);
+    expect(empty.usage().questions).toBe(0);
+    const row = (await datasetItems(actor)).find((i) => i._source === priceless);
+    expect(row?.price).toBeNull();
+    expect(row?.name).toBeTruthy();
+  }, 60_000);
+
   it("a pin whose template matches no start URL ends the run without compiling", async () => {
     const actor = makeActor(dir);
     const raw = { mode: "record", fields: F("name", "laboratory", "price", "stock"), description: "pharmacy product" };

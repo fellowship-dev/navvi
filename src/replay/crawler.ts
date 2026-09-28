@@ -467,6 +467,8 @@ interface RunState {
   offTemplate: string[];
   /** Replay pages that were a bot challenge: no row, no healing, counted. */
   blockedPages: number;
+  /** Replay pages the site answered 404/410: dead URLs in the start list; no row, no healing. */
+  deadPages: string[];
   /** The first blocked page is kept as evidence (BLOCKED_PAGE*), once per run. */
   blockedEvidenceSaved: boolean;
 }
@@ -495,6 +497,12 @@ function withFieldsNotFound(scraper: CompiledScraper, names: readonly string[]):
   return { fieldsNotFound: missing.length > 0 ? missing : undefined };
 }
 
+/** Rows after which an optional field that never filled is reported not found. */
+const OPTIONAL_EMPTY_AFTER = 10;
+
+/** A record replay page answering one of these is a dead URL, not drift. */
+const GONE_STATUSES = new Set([404, 410]);
+
 /** Resource types a replay page never loads (see the route handler). */
 const HEAVY_RESOURCES = new Set(["image", "font", "media"]);
 
@@ -509,7 +517,7 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
   const clean: Status =
     state.items > 0 && !(state.unhealed > 0 && state.failedItems >= state.items)
       ? "succeeded"
-      : state.items === 0 && state.blockedPages > 0
+      : state.items === 0 && state.blockedPages > 0 && state.blockedPages >= state.deadPages.length
         ? "blocked_bot_detection"
         : state.unhealed > 0
           ? "drift"
@@ -548,6 +556,7 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
     zeroDataRetention: usage?.zeroDataRetention ?? null,
   };
   if (state.blockedPages > 0) summary.blockedPages = state.blockedPages;
+  if (state.deadPages.length > 0) summary.deadPages = { count: state.deadPages.length, urls: state.deadPages.slice(0, OFF_TEMPLATE_LISTED) };
   if (state.offTemplate.length > 0) summary.offTemplate = { count: state.offTemplate.length, urls: state.offTemplate.slice(0, OFF_TEMPLATE_LISTED) };
   // The remedy is --force-recompile on the compiling run and its replays
   // alike: the scraper is stored either way, and every later run replays it
@@ -701,6 +710,9 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   const inputTypes: Record<string, FieldType | undefined> = {};
   for (const f of [...(input.fields ?? []), ...detailFields]) if (f.type) inputTypes[f.name] = f.type;
   const detailFieldNames = detailFields.map((f) => f.name);
+  const optionalFields = new Set((input.fields ?? []).filter((f) => f.optional).map((f) => f.name));
+  /** An optional field's fill over the rows pushed, for the run-level check in the summary. */
+  const optionalFill = new Map<string, { filled: number; total: number }>();
   const mode = input.mode ?? "list";
   const state: RunState = {
     stop: null,
@@ -721,6 +733,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     guardedContexts: new Map(),
     offTemplate: [],
     blockedPages: 0,
+    deadPages: [],
     blockedEvidenceSaved: false,
   };
   const plans: TemplatePlan[] = [];
@@ -1366,7 +1379,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
    * compile-time one, it is evidence this run actually has.
    */
   async function backfillCanary(ctx: PlaywrightCrawlingContext, plan: TemplatePlan, extracted: Extracted): Promise<void> {
-    if (state.stop || extracted.failed.size > 0 || extracted.items.length === 0) return;
+    if (state.stop || [...extracted.failed].some((n) => !optionalFields.has(n)) || extracted.items.length === 0) return;
     if (plan.scraper === null || canaryOrigin(plan.scraper) !== "unrecorded") return;
     // Under the heal lock: this writes `plan.scraper`, and so does a repair.
     await withHealLock(async () => {
@@ -1481,7 +1494,10 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     }
     state.healingEvents.push(outcome.event);
     if (outcome.event.kind === "field") for (const name of outcome.event.fields) plan.healedFields.add(name);
-    await store.put(outcome.scraper);
+    // The repair holds for this run whether or not it can be kept: a store the
+    // run may not write (2026-09-28: "Insufficient permissions") used to fail
+    // the page, and its row with it.
+    await store.put(outcome.scraper).catch((error: unknown) => ctxLog(`the repair on ${ctx.page.url()} is used this run but could not be stored: ${error instanceof Error ? error.message : String(error)}`));
     plan.scraper = outcome.scraper;
     return outcome.scraper;
   }
@@ -1652,7 +1668,9 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
 
   /** R33: a page whose every item leaves a compiled field empty asks for healing; an empty listing is an end, not drift. */
   const needsHealing = (e: Extracted): boolean =>
-    e.items.length > 0 && Object.keys(e.scraper.fields).length > 0 && e.items.every((item) => Object.keys(e.scraper.fields).some((n) => item.values[n] === null));
+    e.items.length > 0 &&
+    Object.keys(e.scraper.fields).length > 0 &&
+    e.items.every((item) => Object.keys(e.scraper.fields).some((n) => item.values[n] === null && !optionalFields.has(n)));
 
   /** R16: source URL in record mode, the detail link in list mode, else a hash of every field. Rows with no value at all are never collapsed. */
   function dedupeKey(scraper: CompiledScraper, item: ItemExtraction, sourceUrl: string): string | null {
@@ -1741,7 +1759,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
         // answer a different question — see `countFields`.
         countFields(plan, current);
         healAttempted = true;
-        const healed = await heal(ctx, plan, { kind: "fields", fields: [...current.failed] });
+        const healed = await heal(ctx, plan, { kind: "fields", fields: [...current.failed].filter((n) => !optionalFields.has(n)) });
         if (healed) current = await extractChecked(page, healed, sourceUrl);
         else if (!state.stop) state.unhealed += 1;
       });
@@ -1789,7 +1807,13 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     let rows = fresh.slice(0, claim.granted);
     if (live.mode === "list" && live.detail && detailFieldNames.length > 0 && rows.length > 0) rows = await mergeDetails(ctx, plan, live, rows);
     for (const item of rows) {
-      if (Object.keys(live.fields).some((n) => item.values[n] === null)) state.failedItems += 1;
+      if (Object.keys(live.fields).some((n) => item.values[n] === null && !optionalFields.has(n))) state.failedItems += 1;
+      for (const name of optionalFields) {
+        const fill = optionalFill.get(name) ?? { filled: 0, total: 0 };
+        fill.total += 1;
+        if (item.values[name] !== null && item.values[name] !== undefined) fill.filled += 1;
+        optionalFill.set(name, fill);
+      }
     }
     if (rows.length > 0) {
       // R5: declared types are applied after the fingerprint check, on the row that goes out
@@ -1811,6 +1835,14 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     const plan = planFor(data.templateKey);
     if (!plan.scraper || state.items >= input.maxItems) return;
     await ctx.page.waitForLoadState("load", { timeout: REPLAY_LOAD_CAP_MS }).catch(() => undefined);
+    // A page the site says is gone is a dead URL in the caller's list, not
+    // drift: healing it spent chooser questions binding fields on an error
+    // page, every run. Counted and listed; no row.
+    const status = ctx.response?.status();
+    if (status !== undefined && GONE_STATUSES.has(status)) {
+      state.deadPages.push(ctx.request.url);
+      return;
+    }
     // A challenge page is not drift: healing it would ask the chooser to bind
     // fields on an interstitial. It is counted, kept as evidence, and yields no row.
     if ((await classifyBlocked(ctx.page, { status: ctx.response?.status() })) === "blocked_bot_detection") {
@@ -1913,6 +1945,9 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   }
   if (state.fatal) throw state.fatal;
   await promoteAlternatives();
+  // An optional field empty on every row of a run that had rows enough to see
+  // it filled is not "absent on some pages" any more: it is not found.
+  for (const [name, fill] of optionalFill) if (fill.total >= OPTIONAL_EMPTY_AFTER && fill.filled === 0) state.fieldsNotFound.add(name);
   return summaryOf(input, state, plans, chooser, charger);
 
   /**

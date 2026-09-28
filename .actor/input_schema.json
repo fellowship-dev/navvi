@@ -89,6 +89,12 @@
               "boolean",
               "url"
             ]
+          },
+          "optional": {
+            "type": "boolean",
+            "title": "Optional",
+            "description": "The field may be empty on a healthy page (a struck-through list price exists only while a product is discounted). Replay never heals a null in an optional field; a run whose rows never fill it reports it as not found.",
+            "editor": "checkbox"
           }
         },
         "required": [
@@ -341,6 +347,10 @@
       "type": "string",
       "description": "The key-value store this run reads and writes its scrapers in; defaults to the named store scraper-cache in your account. Set it to keep a trial run's scrapers out of the shared cache. A bare scriptId is read from it. Pick the store (its ID): the actor runs with limited permissions, so a store it did not create cannot be opened by name.",
       "resourceType": "keyValueStore",
+      "resourcePermissions": [
+        "READ",
+        "WRITE"
+      ],
       "editor": "resourcePicker"
     },
     "forceRecompile": {

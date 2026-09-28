@@ -141,6 +141,13 @@ export const FieldSchema = z.object({
   name: z.string().min(1).regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/, "field names are identifiers"),
   description: z.string().optional(),
   type: z.enum(FIELD_TYPES).optional(),
+  /**
+   * The field may be empty on a healthy page: a struck-through list price
+   * exists only while a product is discounted. Replay never heals a null in an
+   * optional field (it asked the chooser on every undiscounted page, every
+   * run); a run whose rows never fill it reports it as not found instead.
+   */
+  optional: z.boolean().optional(),
 });
 
 /** `--fields name:type`: a bare name, or a name with one of FIELD_TYPES after a colon. */

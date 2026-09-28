@@ -176,6 +176,10 @@ export async function classifyBlocked(
   response?: { status?: number | undefined },
   options: ClassifyBlockedOptions = {},
 ): Promise<BlockedStatus | null> {
+  // A page the site says is gone is not a challenge, whatever widget its error
+  // template embeds: one store's 404 page loads reCAPTCHA for its newsletter
+  // form and read as `blocked_bot_detection` (2026-09-28).
+  if (response?.status === 404 || response?.status === 410) return null;
   const facts = await page
     .evaluate(collectFacts, {
       decisiveSelectors: [...DECISIVE_CHALLENGE_SELECTORS],
