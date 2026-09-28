@@ -1843,6 +1843,14 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       state.deadPages.push(ctx.request.url);
       return;
     }
+    // So is a product that redirects off the template, to a category or the
+    // home page: one store retires products that way, and the category page's
+    // newsletter reCAPTCHA read as a challenge (2026-09-28).
+    const landed = ctx.page.url();
+    if (landed !== ctx.request.url && !matchesTemplate(plan.templateKey, landed)) {
+      state.deadPages.push(ctx.request.url);
+      return;
+    }
     // A challenge page is not drift: healing it would ask the chooser to bind
     // fields on an interstitial. It is counted, kept as evidence, and yields no row.
     if ((await classifyBlocked(ctx.page, { status: ctx.response?.status() })) === "blocked_bot_detection") {

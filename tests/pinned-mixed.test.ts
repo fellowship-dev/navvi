@@ -103,6 +103,19 @@ describe("a pinned scraper on a mixed start list", () => {
     expect(row?.name).toBeTruthy();
   }, 60_000);
 
+  it("a product that redirects off the template is a dead URL, not a challenge", async () => {
+    const actor = makeActor(dir);
+    const raw = { mode: "record", fields: F("name", "laboratory", "price", "stock"), description: "pharmacy product" };
+    const compiled = await runCrawl(fixtureInput({ ...raw, startUrls: productUrls() }), makeDeps(dir, actor, new RecordedChooser({ fixture: "compile/pharmacy-v1" })));
+    const retired = `${server.baseUrl}/demo/pharmacy-v1/producto/retirado-20-mg.html`;
+    const empty = new RecordedChooser({ fixture: "crawler/empty" });
+    const replayed = await runCrawl(fixtureInput({ ...raw, startUrls: [...productUrls(), retired], scriptId: compiled.scriptId }), makeDeps(dir, actor, empty));
+    expect(replayed.items).toBe(3);
+    expect(replayed.deadPages).toEqual({ count: 1, urls: [retired] });
+    expect(replayed.blockedPages).toBeUndefined();
+    expect(empty.usage().questions).toBe(0);
+  }, 60_000);
+
   it("a pin whose template matches no start URL ends the run without compiling", async () => {
     const actor = makeActor(dir);
     const raw = { mode: "record", fields: F("name", "laboratory", "price", "stock"), description: "pharmacy product" };
