@@ -46,6 +46,8 @@ export interface RunSummary {
   charges: ChargeCounts;
   /** Zero-data-retention state the chooser reported; null when no chooser ran. */
   zeroDataRetention: ZeroDataRetentionState | null;
+  /** Replay pages that were a bot challenge: no row, no healing; the first is kept as BLOCKED_PAGE. */
+  blockedPages?: number;
   /** A pinned run: start URLs of other shapes, reported and never compiled (the first 50 by name). */
   offTemplate?: { count: number; urls: string[] };
   /** Why the run stopped short, for every status but succeeded. */

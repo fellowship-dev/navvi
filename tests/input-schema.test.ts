@@ -20,6 +20,16 @@ const datasetSchema = JSON.parse(readFileSync(join(ROOT, ".actor", "dataset_sche
 const pick = (key: "prefill" | "default"): Record<string, unknown> =>
   Object.fromEntries(Object.entries(schema.properties).filter(([, p]) => p[key] !== undefined).map(([name, p]) => [name, p[key]]));
 
+describe("replay concurrency (input)", () => {
+  it("accepts maxConcurrency and minConcurrency within 1..20 and refuses others", () => {
+    const base = { startUrls: ["https://example.org/a"], mode: "record", fields: [{ name: "x" }] };
+    expect(parseInput({ ...base, maxConcurrency: 6, minConcurrency: 3 })).toMatchObject({ maxConcurrency: 6, minConcurrency: 3 });
+    expect(parseInput(base).maxConcurrency).toBeUndefined();
+    expect(() => parseInput({ ...base, maxConcurrency: 0 })).toThrow();
+    expect(() => parseInput({ ...base, minConcurrency: 21 })).toThrow();
+  });
+});
+
 describe(".actor/input_schema.json", () => {
   it("every property is a run input key or an actor-only key, and every section has a caption", () => {
     const known = new Set([...Object.keys(BaseInputSchema.shape), ...ACTOR_ONLY_KEYS]);

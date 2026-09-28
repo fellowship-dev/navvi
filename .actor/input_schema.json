@@ -199,6 +199,20 @@
       "default": 1000,
       "unit": "items"
     },
+    "maxConcurrency": {
+      "title": "Max concurrency",
+      "type": "integer",
+      "description": "Pages a replay opens at once (default 4). A compile always runs one page at a time.",
+      "minimum": 1,
+      "maximum": 20
+    },
+    "minConcurrency": {
+      "title": "Min concurrency",
+      "type": "integer",
+      "description": "Pages a replay keeps open even when the platform reads its CPU as busy. Unset lets the autoscaler decide.",
+      "minimum": 1,
+      "maximum": 20
+    },
     "browser": {
       "title": "Browser",
       "type": "string",

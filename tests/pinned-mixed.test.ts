@@ -50,6 +50,26 @@ describe("a pinned scraper on a mixed start list", () => {
     expect(new Set(sources)).toEqual(new Set(productUrls()));
   }, 60_000);
 
+  it("a challenge page on a pinned replay yields no row, asks nothing, and is kept as evidence", async () => {
+    const actor = makeActor(dir);
+    const raw = { mode: "record", fields: F("name", "laboratory", "price", "stock"), description: "pharmacy product" };
+    const compiled = await runCrawl(fixtureInput({ ...raw, startUrls: productUrls() }), makeDeps(dir, actor, new RecordedChooser({ fixture: "compile/pharmacy-v1" })));
+    const challenged = `${server.baseUrl}/demo/pharmacy-v1/producto/challenge-ejemplo-10-mg.html`;
+    const empty = new RecordedChooser({ fixture: "crawler/empty" });
+    const replayed = await runCrawl(fixtureInput({ ...raw, startUrls: [...productUrls(), challenged], scriptId: compiled.scriptId }), makeDeps(dir, actor, empty));
+    expect(replayed.status).toBe("succeeded");
+    expect(replayed.items).toBe(3);
+    expect(replayed.blockedPages).toBe(1);
+    expect(empty.usage().questions).toBe(0);
+    const store = await actor.openKeyValueStore();
+    expect(String(await store.getValue("BLOCKED_PAGE"))).toMatch(/Verify you are human/);
+    expect(await store.getValue("BLOCKED_PAGE_META")).toMatchObject({ url: challenged, status: 503, during: "replay" });
+
+    const onlyBlocked = await runCrawl(fixtureInput({ ...raw, startUrls: [challenged], scriptId: compiled.scriptId }), makeDeps(dir, actor, new RecordedChooser({ fixture: "crawler/empty" })));
+    expect(onlyBlocked.status).toBe("blocked_bot_detection");
+    expect(onlyBlocked.items).toBe(0);
+  }, 60_000);
+
   it("a pin whose template matches no start URL ends the run without compiling", async () => {
     const actor = makeActor(dir);
     const raw = { mode: "record", fields: F("name", "laboratory", "price", "stock"), description: "pharmacy product" };

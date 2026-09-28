@@ -2,7 +2,7 @@ import { installSnapshot } from "../browser/snapshot.js";
 import { createHash, randomUUID } from "node:crypto";
 import { Actor } from "apify";
 import { PlaywrightCrawler, ProxyConfiguration, type Configuration, type Dataset, type KeyValueStore, type PlaywrightCrawlingContext } from "crawlee";
-import type { BrowserContext, Page } from "playwright";
+import type { BrowserContext, Page, Request } from "playwright";
 import { Charger, type ChargingActor } from "../billing/charge.js";
 import { buildCrawleeLaunchContext, restoreProfileCookies, saveProfileCookies } from "../browser/launch.js";
 import { createLaunchCounter, formatLaunchFailure, isLaunchFailure, launchFailureReport, resolveRelaunchKnobs, type RelaunchKnobs } from "../browser/relaunch.js";
@@ -17,7 +17,7 @@ import { specFromInput } from "../spec/input.js";
 import type { Rubric, Spec } from "../spec/schema.js";
 import { continueWithoutRevalidation, waitForSettle } from "../browser/guards.js";
 import type { RunSummary } from "../main.js";
-import { dismissConsent, runPreSteps, type Notifier } from "../prestep/index.js";
+import { classifyBlocked, dismissConsent, runPreSteps, type Notifier } from "../prestep/index.js";
 import { LIST_JOINER, coerceRow, extractPage, fieldTypesOf, fingerprintMatches, type ItemExtraction } from "../scraper/extract.js";
 import { cacheKey, canaryOrigin, promoteFieldAlternative, validateScraper, type CompiledScraper, type Status, type TraceStep } from "../scraper/schema.js";
 import { ScraperStore, ScraperStoreError } from "../scraper/store.js";
@@ -465,6 +465,10 @@ interface RunState {
   guardedContexts: Map<BrowserContext, Promise<void>>;
   /** Start URLs a pinned run did not replay because they are not of the pinned scraper's template. */
   offTemplate: string[];
+  /** Replay pages that were a bot challenge: no row, no healing, counted. */
+  blockedPages: number;
+  /** The first blocked page is kept as evidence (BLOCKED_PAGE*), once per run. */
+  blockedEvidenceSaved: boolean;
 }
 
 interface CompileUserData {
@@ -491,12 +495,25 @@ function withFieldsNotFound(scraper: CompiledScraper, names: readonly string[]):
   return { fieldsNotFound: missing.length > 0 ? missing : undefined };
 }
 
+/** Resource types a replay page never loads (see the route handler). */
+const HEAVY_RESOURCES = new Set(["image", "font", "media"]);
+
+/** A record replay navigates to `domcontentloaded`, then waits for `load` at most this long. */
+const REPLAY_LOAD_CAP_MS = 10_000;
+
 /** How many off-template URLs the summary lists by name; the count is always whole. */
 const OFF_TEMPLATE_LISTED = 50;
 
 function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePlan[], chooser: Chooser | null, charger: Charger): RunSummary {
   const usage = chooser?.usage();
-  const clean: Status = state.items > 0 && !(state.unhealed > 0 && state.failedItems >= state.items) ? "succeeded" : state.unhealed > 0 ? "drift" : "no_items_found";
+  const clean: Status =
+    state.items > 0 && !(state.unhealed > 0 && state.failedItems >= state.items)
+      ? "succeeded"
+      : state.items === 0 && state.blockedPages > 0
+        ? "blocked_bot_detection"
+        : state.unhealed > 0
+          ? "drift"
+          : "no_items_found";
   // Rows went out without a field the run asked for: every one of them carries
   // it as null, and the cached scraper will keep doing so. That is not a clean
   // success, and it has to say so where a person reads first.
@@ -530,6 +547,7 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
     charges: { ...charger.counts },
     zeroDataRetention: usage?.zeroDataRetention ?? null,
   };
+  if (state.blockedPages > 0) summary.blockedPages = state.blockedPages;
   if (state.offTemplate.length > 0) summary.offTemplate = { count: state.offTemplate.length, urls: state.offTemplate.slice(0, OFF_TEMPLATE_LISTED) };
   // The remedy is --force-recompile on the compiling run and its replays
   // alike: the scraper is stored either way, and every later run replays it
@@ -702,6 +720,8 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     replayed: new Set(),
     guardedContexts: new Map(),
     offTemplate: [],
+    blockedPages: 0,
+    blockedEvidenceSaved: false,
   };
   const plans: TemplatePlan[] = [];
   const charger = Charger.for(actor);
@@ -849,6 +869,8 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   );
 
   const profileDir = launch.userDataDir;
+  /** Pages navigating to a replay (record or list) request; only these skip heavy resources. */
+  const replayPages = new WeakSet<Page>();
   const installGuard = async (context: BrowserContext): Promise<void> => {
     await installSnapshot(context);
     // One handler, two jobs, because Playwright gives a request to one handler
@@ -859,11 +881,27 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     // second visit to a URL in one context read every `network` field null on
     // the default browser. See that function's header.
     await context.route("**/*", (route) => {
-      if (guard(route.request().url())) return continueWithoutRevalidation(route);
-      state.blockedRequests += 1;
-      return route.abort("blockedbyclient");
+      const request = route.request();
+      // After the policy (R26), which counts what it refuses: a replay reads the
+      // DOM, JSON-LD and payloads, never pixels, so images, fonts and media --
+      // the bulk of a product page's bytes, and on a one-CPU platform run what
+      // kept the autoscaler at one page at a time -- are skipped on replay
+      // pages. Compile and sample pages load everything, as before.
+      if (!guard(request.url())) {
+        state.blockedRequests += 1;
+        return route.abort("blockedbyclient");
+      }
+      if (HEAVY_RESOURCES.has(request.resourceType()) && isReplayRequest(request)) return route.abort("blockedbyclient");
+      return continueWithoutRevalidation(route);
     });
     if (profileDir) await restoreProfileCookies(profileDir, context);
+  };
+  const isReplayRequest = (request: Request): boolean => {
+    try {
+      return replayPages.has(request.frame().page());
+    } catch {
+      return false; // a service worker's request has no frame
+    }
   };
   const guardContext = (context: BrowserContext): Promise<void> => {
     let pending = state.guardedContexts.get(context);
@@ -899,15 +937,26 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       browserPoolOptions: launch.browserPoolOptions,
       headless: !input.headed,
       proxyConfiguration,
-      maxConcurrency: deps.maxConcurrency ?? (singleSession ? 1 : 4),
-      ...(deps.minConcurrency !== undefined ? { minConcurrency: deps.minConcurrency } : {}),
+      maxConcurrency: deps.maxConcurrency ?? (singleSession ? 1 : (input.maxConcurrency ?? 4)),
+      ...(deps.minConcurrency !== undefined
+        ? { minConcurrency: deps.minConcurrency }
+        : !singleSession && input.minConcurrency !== undefined
+          ? { minConcurrency: Math.min(input.minConcurrency, input.maxConcurrency ?? 4) }
+          : {}),
       maxRequestRetries: 1,
       requestHandlerTimeoutSecs: REQUEST_HANDLER_TIMEOUT_SECS,
       navigationTimeoutSecs: 60,
       useSessionPool: true,
       persistCookiesPerSession: false,
       sessionPoolOptions: buildSessionPoolOptions(singleSession, relaunchKnobs),
-      preNavigationHooks: [async ({ page, request }) => {
+      preNavigationHooks: [async ({ page, request }, gotoOptions) => {
+        const label = (request.userData as UserData | undefined)?.label;
+        if (label === "record" || label === "list") replayPages.add(page);
+        else replayPages.delete(page);
+        // A record replay waits for the document, then for `load` up to a cap
+        // (handleRecord): the full `load` of a store page waits on every
+        // third-party script, and was most of an ~18 s page on the platform.
+        if (label === "record" && gotoOptions) gotoOptions.waitUntil = "domcontentloaded";
         await guardContext(page.context());
         // U5: a record-mode compile runs the payload tier, which reads what
         // the page fetched for itself; the capture has to be listening before
@@ -940,6 +989,28 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     actor.config,
   );
 
+  /**
+   * The page navvi saw when it called a page a bot challenge, kept once per run
+   * in the run's key-value store: BLOCKED_PAGE (HTML), BLOCKED_PAGE_SCREENSHOT
+   * (PNG) and BLOCKED_PAGE_META. A block is a claim about someone else's site;
+   * this is what lets a person check it instead of trusting the status.
+   */
+  async function saveBlockedEvidence(page: Page, url: string, status: number | undefined, during: "compile" | "replay"): Promise<void> {
+    if (state.blockedEvidenceSaved) return;
+    state.blockedEvidenceSaved = true;
+    try {
+      const store = await actor.openKeyValueStore();
+      const html = await page.content().catch(() => "");
+      const shot = await page.screenshot({ fullPage: false, timeout: 10_000 }).catch(() => null);
+      await store.setValue("BLOCKED_PAGE", html, { contentType: "text/html; charset=utf-8" });
+      if (shot) await store.setValue("BLOCKED_PAGE_SCREENSHOT", shot, { contentType: "image/png" });
+      await store.setValue("BLOCKED_PAGE_META", { url, landedOn: page.url(), status: status ?? null, during, title: await page.title().catch(() => ""), at: new Date().toISOString() });
+      ctxLog(`${url} is a bot challenge (${during}); the page is kept as BLOCKED_PAGE in the run's key-value store`);
+    } catch (error) {
+      ctxLog(`could not keep the blocked page: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   /** R14: one trace replay per session and start URL. */
   const replayKey = (ctx: PlaywrightCrawlingContext): string => `${ctx.session?.id ?? "default"}:${ctx.request.url}`;
   const planFor = (templateKey: string): TemplatePlan => {
@@ -963,6 +1034,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       env,
     });
     if (pre.status !== null) {
+      if (pre.status === "blocked_bot_detection") await saveBlockedEvidence(page, request.url, response?.status(), "compile");
       stopWith(state, crawler, { status: pre.status, message: pre.reason });
       return;
     }
@@ -1440,7 +1512,9 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
 
   const startCapture = (page: Page, compiling = false): void => {
     if ((!compiling && !wantsNetwork()) || captures.has(page)) return;
-    captures.set(page, captureJson(page, { match: /./, limit: 40 }));
+    // 200, as the compile's own capture (make/pages.ts): a store page fetches
+    // 45-93 JSON responses, and a payload arriving after the 40th read null.
+    captures.set(page, captureJson(page, { match: /./, limit: 200 }));
   };
   const capturedFor = (page: Page): CapturedResponse[] => captures.get(page)?.responses ?? [];
   /**
@@ -1736,6 +1810,14 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   async function handleRecord(ctx: PlaywrightCrawlingContext, data: ReplayUserData): Promise<void> {
     const plan = planFor(data.templateKey);
     if (!plan.scraper || state.items >= input.maxItems) return;
+    await ctx.page.waitForLoadState("load", { timeout: REPLAY_LOAD_CAP_MS }).catch(() => undefined);
+    // A challenge page is not drift: healing it would ask the chooser to bind
+    // fields on an interstitial. It is counted, kept as evidence, and yields no row.
+    if ((await classifyBlocked(ctx.page, { status: ctx.response?.status() })) === "blocked_bot_detection") {
+      state.blockedPages += 1;
+      await saveBlockedEvidence(ctx.page, ctx.request.url, ctx.response?.status(), "replay");
+      return;
+    }
     await dismissConsent(ctx.page).catch(() => undefined);
     await pushItems(ctx, plan, plan.scraper, ctx.request.url, state.seen);
   }

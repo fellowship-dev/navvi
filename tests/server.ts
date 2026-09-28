@@ -11,6 +11,8 @@ import { fileURLToPath } from "node:url";
  * - `/demo/pharmacy-v1/...`   and `/demo/pharmacy-v2/...` directly
  * - `/login/`, `/login/index-renamed.html`, `/login/account.html` (cookie-gated), `POST /login`;
  *   `switchLogin("renamed")` serves the renamed form (button "Sign in") at `/login/` (heal proof for a trace step)
+ * - `/demo/pharmacy[-v1|-v2]/producto/challenge-<anything>.html`  a product URL answered by the bot challenge (503):
+ *   a store that challenges some requests of a template it serves
  * - `/fixtures/<name>.html`   from tests/fixtures; `challenge.html` is served with status 503
  */
 
@@ -128,6 +130,10 @@ export async function startFixtureServer(): Promise<FixtureServer> {
       // Pharmacy demo, version-switched or explicit.
       const pharmacy = /^\/demo\/pharmacy(?:-(v1|v2))?(\/.*)?$/.exec(pathname);
       if (pharmacy) {
+        if (/^\/producto\/challenge-[^/]+\.html$/.test(pharmacy[2] ?? "")) {
+          await sendFile(res, path.join(FIXTURES_DIR, "challenge.html"), 503);
+          return;
+        }
         const version = (pharmacy[1] as DemoVersion | undefined) ?? demo;
         const file = resolveWithin(path.join(DEMO_DIR, `pharmacy-${version}`), pharmacy[2] || "/index.html");
         if (!file) return void notFound(res);
