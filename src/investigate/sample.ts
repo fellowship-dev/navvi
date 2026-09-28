@@ -46,6 +46,13 @@ export interface UrlProbe {
   status: number;
   /** Where the response landed, when it moved. Relative values resolve against `url`. */
   redirectedTo?: string | undefined;
+  /**
+   * The URL moved, and landed on the same product under a new address: a
+   * renamed slug (a store that renames products and redirects the old slug).
+   * Only `probeFrom` sets it, and only when the landed page declares a Product,
+   * sits in the requested URL's template and shares its slug words.
+   */
+  sameProduct?: boolean | undefined;
   /** Does the landed page declare a Product node (JSON-LD, microdata)? */
   hasDeclaredProduct?: boolean | undefined;
   /**
@@ -237,7 +244,8 @@ export function classify(probe: UrlProbe): Classification {
   if (status >= 400) {
     return { url, strata: ["dead"], signature: `dead:status-${status}`, note: `answers ${status}` };
   }
-  const moved = probe.redirectedTo !== undefined && locus(probe.redirectedTo, url) !== locus(url);
+  // A renamed product page is the product, not a dead URL: the store moved it, and it still sells it.
+  const moved = probe.redirectedTo !== undefined && locus(probe.redirectedTo, url) !== locus(url) && probe.sameProduct !== true;
   if (moved || (status >= 300 && status < 400)) {
     const where = probe.redirectedTo === undefined ? "somewhere it did not report" : probe.redirectedTo;
     return { url, strata: ["dead"], signature: "dead:redirect", note: `redirects to ${where}, which is not its product page` };

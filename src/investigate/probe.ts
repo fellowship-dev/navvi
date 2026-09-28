@@ -2,6 +2,7 @@ import { bank, type Bank } from "../heuristics/index.js";
 import { declaresProduct, visibleText } from "../heuristics/index.js";
 import type { PageResponse } from "./blocked.js";
 import type { UrlProbe } from "./sample.js";
+import { sameTemplate } from "../template/key.js";
 
 /**
  * U2d's missing half: what turns a real response into a `UrlProbe`.
@@ -43,6 +44,34 @@ function priceCount(body: string): number {
   return new Set(body.match(/\$\s?[\d.]{3,}/g) ?? []).size;
 }
 
+/** Letter-bearing words of a URL's last path segment, extension dropped, 4+ characters. */
+function slugWords(url: string): Set<string> {
+  let last = "";
+  try {
+    last = new URL(url).pathname.split("/").filter(Boolean).pop() ?? "";
+  } catch {
+    return new Set();
+  }
+  const words = decodeURIComponent(last).toLowerCase().replace(/\.[a-z]{2,5}$/, "").split(/[^a-z0-9]+/);
+  return new Set(words.filter((w) => w.length >= 4 && /[a-z]/.test(w)));
+}
+
+/**
+ * A redirect to the same product under a renamed slug: the landed URL is in the
+ * requested URL's template and carries at least half of its slug words. A
+ * category, search or home page fails the template test; another product in
+ * the same template fails the words test. The caller also requires the landed
+ * page to declare a Product.
+ */
+export function isRenamedProduct(requested: string, landed: string): boolean {
+  if (!sameTemplate(requested, landed)) return false;
+  const asked = slugWords(requested);
+  if (asked.size === 0) return false;
+  const found = slugWords(landed);
+  const shared = [...asked].filter((w) => found.has(w)).length;
+  return shared * 2 >= asked.size;
+}
+
 /**
  * One cheap look at a URL, read into the shape `chooseSample` consumes.
  *
@@ -62,7 +91,7 @@ export function probeFrom(requested: string, response: PageResponse, options: Pr
     // transient rather than dead: one silent fetch is not evidence the
     // catalogue lost the URL.
     status: response.status ?? 0,
-    ...(response.url !== requested ? { redirectedTo: response.url } : {}),
+    ...(response.url !== requested ? { redirectedTo: response.url, sameProduct: declared && isRenamedProduct(requested, response.url) } : {}),
     hasDeclaredProduct: declared,
     isShell: view.run("shell-skips-tier-1", { html: body }).fires,
     priceCount: priceCount(body),

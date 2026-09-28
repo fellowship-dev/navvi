@@ -141,6 +141,13 @@ export function matchesTemplate(key: string, url: string): boolean {
   });
 }
 
+/** Do two URLs fall in one template bucket (host, depth, extension, pagination keys, route prefix)? */
+export function sameTemplate(a: string, b: string): boolean {
+  const pa = parse(a);
+  const pb = parse(b);
+  return pa !== null && pb !== null && bucketId(pa) === bucketId(pb);
+}
+
 /** `${host}${pattern}`; the host is lowercased and the URL itself never appears. */
 export function templateKey(host: string, pattern: string): string {
   return `${host.trim().toLowerCase()}${pattern}`;

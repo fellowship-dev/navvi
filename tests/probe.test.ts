@@ -48,6 +48,31 @@ const URLS = {
   refused: "https://example.cl/aspirina-infantil/880330.html",
 };
 
+describe("a redirect to the same product under a renamed slug", () => {
+  const asked = "https://example.cl/ejemplo-jarabe-x-14.html";
+  it("is the product: live, not dead", () => {
+    const probe = probeFrom(asked, fetched(asked, 200, PRODUCT, "https://example.cl/ejemplo-jarabe-x-120-ml-16344.html"));
+    expect(probe.sameProduct).toBe(true);
+    expect(classify(probe).strata).not.toContain("dead");
+  });
+  it("to a category page stays dead", () => {
+    const probe = probeFrom(asked, fetched(asked, 200, REDIRECT, "https://example.cl/t/categoria/ejemplo"));
+    expect(probe.sameProduct).toBe(false);
+    expect(classify(probe).signature).toBe("dead:redirect");
+  });
+  it("to another product of the same template stays dead", () => {
+    const probe = probeFrom(asked, fetched(asked, 200, PRODUCT, "https://example.cl/otro-producto-distinto-5555.html"));
+    expect(probe.sameProduct).toBe(false);
+    expect(classify(probe).signature).toBe("dead:redirect");
+  });
+  it("to a page that declares no product stays dead, even in the same template with the same words", () => {
+    const listing = "<!doctype html><html><head><title>Ejemplo</title></head><body><h1>Resultados</h1><p>Muchos productos, ninguno declarado.</p></body></html>";
+    const probe = probeFrom(asked, fetched(asked, 200, listing, "https://example.cl/ejemplo-jarabe-x-120-ml-16344.html"));
+    expect(probe.sameProduct).toBe(false);
+    expect(classify(probe).signature).toBe("dead:redirect");
+  });
+});
+
 describe("probeFrom — one response, read into a probe", () => {
   it("reads a server-rendered product page as a live page that declares itself", () => {
     const probe = probeFrom(URLS.product, fetched(URLS.product, 200, PRODUCT));

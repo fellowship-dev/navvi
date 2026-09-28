@@ -2,6 +2,7 @@ export {
   PAGINATION_KEYS,
   groupByTemplate,
   matchesTemplate,
+  sameTemplate,
   templateGrowth,
   templateKey,
   urlPattern,
