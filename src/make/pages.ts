@@ -326,13 +326,25 @@ function whyUnsettled(trend: SettleTrend): string {
 const NOWHERE = "about:blank";
 
 /**
+ * How long a navigation may wait for `networkidle`, and how long the visit
+ * waits for it again after consent. A store whose page never goes quiet (an
+ * analytics beacon, a long poll) paid the full 60 s and then 30 s more on every
+ * visit, with the page finished on screen: one record compile took 1,664 s,
+ * ~90 s a visit over ~18 visits, against ~10 s a visit on a store that does go
+ * quiet (2026-09-24). `networkidle` is a condition, not a measurement; the
+ * render settle below is the measurement, so the condition gets a short leash.
+ */
+const ARRIVAL_TIMEOUT_MS = 20_000;
+const IDLE_GRACE_MS = 5_000;
+
+/**
  * The navigation, kept rather than swallowed: the first line of what Playwright
  * said, which is the part that names the failure (`net::ERR_NAME_NOT_RESOLVED`,
  * `Timeout 60000ms exceeded`) before the call log that follows it.
  */
 async function arriveAt(page: Page, url: string): Promise<string | undefined> {
   try {
-    await page.goto(url, { waitUntil: "networkidle", timeout: 60_000 });
+    await page.goto(url, { waitUntil: "networkidle", timeout: ARRIVAL_TIMEOUT_MS });
     return undefined;
   } catch (error: unknown) {
     const said = (error instanceof Error ? error.message : String(error)).split("\n")[0]?.trim();
@@ -439,12 +451,14 @@ export async function openPages(options: PagesOptions): Promise<Pages> {
     try {
       await refuseRevalidation(page);
       const captured = captureJson(page, { match: /./, limit: CAPTURE_LIMIT });
-      // One budget for the whole visit rather than one per settle, so a second
-      // pass cannot double what a page is allowed to cost.
-      const deadline = Date.now() + settleCap;
       const delivered = () => captured.responses.length;
       const startedAt = Date.now();
       const arrival = await arriveAt(page, url);
+      // One budget for the whole settle rather than one per pass, so a second
+      // pass cannot double what a page is allowed to cost. It starts once the
+      // page has arrived: started before, a slow navigation spent it and the
+      // settle "capped" after one poll on a page that had long been still.
+      const deadline = Date.now() + settleCap;
       let settle: Settle;
       if (arrival !== undefined && page.url() === NOWHERE) {
         // Nothing arrived, so there is nothing to watch arriving. Polling a
@@ -454,7 +468,7 @@ export async function openPages(options: PagesOptions): Promise<Pages> {
         settle = { outcome: "unreachable", because: arrival, textFrom: 0, text: 0, payloadsFrom: 0, payloads: 0, polls: 0, changed: 0, ms: Date.now() - startedAt, arrival };
       } else {
         await dismiss(page, url, obstacles);
-        await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => undefined);
+        await page.waitForLoadState("networkidle", { timeout: IDLE_GRACE_MS }).catch(() => undefined);
         settle = await settleRender(page, deadline, delivered, arrival);
         // The banner the first pass was too early for. Under Camoufox this is
         // the one that clicks; under Chromium it finds the page already clear
