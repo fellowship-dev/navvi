@@ -48,10 +48,12 @@ export interface RunSummary {
   zeroDataRetention: ZeroDataRetentionState | null;
   /** Replay pages that were a bot challenge: no row, no healing; the first is kept as BLOCKED_PAGE. */
   blockedPages?: number;
-  /** Record replay pages that still answered 5xx after the retry (the first 50 by name); no row, no healing. */
+  /** Replay pages (records or listings) that still answered 5xx after the retry (the first 50 by name); no row, no healing. */
   transientPages?: { count: number; urls: string[] };
-  /** Record replay pages the site answered 404/410: dead URLs in the start list (the first 50 by name); no row, no healing. */
+  /** Replay pages (records or listings) the site answered 404/410, or that redirected off the template: dead URLs in the start list (the first 50 by name); no row, no healing. */
   deadPages?: { count: number; urls: string[] };
+  /** List start URLs whose first page had no item under the compiled anchor, a search that found nothing (the first 50 by name); no row, no healing. */
+  emptyListings?: { count: number; urls: string[] };
   /** A pinned run: start URLs of other shapes, reported and never compiled (the first 50 by name). */
   offTemplate?: { count: number; urls: string[] };
   /** Why the run stopped short, for every status but succeeded. */

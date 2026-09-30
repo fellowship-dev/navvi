@@ -471,6 +471,8 @@ interface RunState {
   deadPages: string[];
   /** Replay pages that still answered 5xx after the retry: no row, no healing. */
   transientPages: string[];
+  /** List start URLs whose first page had no item under the compiled anchor ("no results"): no row, no healing. */
+  emptyListings: string[];
   /** The first blocked page is kept as evidence (BLOCKED_PAGE*), once per run. */
   blockedEvidenceSaved: boolean;
 }
@@ -563,6 +565,7 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
   if (state.blockedPages > 0) summary.blockedPages = state.blockedPages;
   if (state.transientPages.length > 0) summary.transientPages = { count: state.transientPages.length, urls: state.transientPages.slice(0, OFF_TEMPLATE_LISTED) };
   if (state.deadPages.length > 0) summary.deadPages = { count: state.deadPages.length, urls: state.deadPages.slice(0, OFF_TEMPLATE_LISTED) };
+  if (state.emptyListings.length > 0) summary.emptyListings = { count: state.emptyListings.length, urls: state.emptyListings.slice(0, OFF_TEMPLATE_LISTED) };
   if (state.offTemplate.length > 0) summary.offTemplate = { count: state.offTemplate.length, urls: state.offTemplate.slice(0, OFF_TEMPLATE_LISTED) };
   // The remedy is --force-recompile on the compiling run and its replays
   // alike: the scraper is stored either way, and every later run replays it
@@ -741,6 +744,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     blockedPages: 0,
     deadPages: [],
     transientPages: [],
+    emptyListings: [],
     blockedEvidenceSaved: false,
   };
   const plans: TemplatePlan[] = [];
@@ -942,11 +946,14 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
    * The pages a compiled scraper replays on. A list scraper that entered
    * `direct` after a goal was compiled on the listing the navigator reached,
    * so that URL (`entry.url`) is the request, not the start URL it set out from.
+   * Every other list start URL is a listing of its own: `maxPages` bounds the
+   * pages beyond each one's first, never how many of them are read (a list of
+   * a thousand search URLs used to read the first ten).
    */
   const replayRequests = (plan: TemplatePlan, scraper: CompiledScraper) => {
     const userData: ReplayUserData = { label: scraper.mode === "record" ? "record" : "list", templateKey: plan.templateKey };
     const navigatedListing = scraper.mode === "list" && input.goal && scraper.entry.mode === "direct" ? scraper.entry.url : null;
-    const targets = scraper.mode === "record" ? plan.urls.slice(0, input.maxItems) : plan.urls.slice(0, input.maxPages);
+    const targets = scraper.mode === "record" ? plan.urls.slice(0, input.maxItems) : plan.urls;
     const urls = navigatedListing && targets.length > 0 ? [navigatedListing] : targets;
     return urls.map((url) => requestFor(userData.label, url, userData));
   };
@@ -1750,8 +1757,13 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     return out;
   }
 
-  /** Extracts, heals, dedupes against `seen`, and pushes one page; resolves to the rows it added. */
-  async function pushItems(ctx: PlaywrightCrawlingContext, plan: TemplatePlan, scraper: CompiledScraper, sourceUrl: string, seen: Set<string>): Promise<number> {
+  /**
+   * Extracts, heals, dedupes against `seen`, and pushes one page; resolves to
+   * the rows it added and the items the page held under the scraper (0 when
+   * the page was never read to the end). Every row carries `_source`, the page
+   * it was read on, and `_startUrl`, the start URL that produced it (KTD3).
+   */
+  async function pushItems(ctx: PlaywrightCrawlingContext, plan: TemplatePlan, scraper: CompiledScraper, sourceUrl: string, startUrl: string, seen: Set<string>): Promise<{ pushed: number; found: number }> {
     const { page } = ctx;
     let current = await extractChecked(page, scraper, sourceUrl);
     let healAttempted = false;
@@ -1777,10 +1789,11 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     // not before — because the alternative that answered is the one that put
     // the value in the row.
     for (const item of current.items) observeResolutions(plan.tally, item.resolvedBy);
-    if (state.stop) return 0;
+    const none = { pushed: 0, found: current.items.length };
+    if (state.stop) return none;
     if (!healAttempted && driftSeen()) noteUnmapped(await findUnmappedCandidates(page, current.scraper).catch(() => []));
-    if (!(await chargeCompiled(plan, current, sourceUrl))) return 0;
-    if (!(await countPages(1, sourceUrl))) return 0;
+    if (!(await chargeCompiled(plan, current, sourceUrl))) return none;
+    if (!(await countPages(1, sourceUrl))) return none;
     const live = current.scraper;
     const fresh: ItemExtraction[] = [];
     for (const item of current.items) {
@@ -1829,27 +1842,30 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       await dataset.pushData(
         rows.map((item) => {
           const { [DETAIL_LINK_FIELD]: _hidden, ...values } = item.values;
-          return { ...coerceRow(values, types, sourceUrl), _source: sourceUrl };
+          return { ...coerceRow(values, types, sourceUrl), _source: sourceUrl, _startUrl: startUrl };
         }),
       );
     }
     if (claim.limitReached) {
       stopWith(state, crawler, { status: "charge_limit", message: `charge limit reached after ${state.items} items on ${sourceUrl}` });
     }
-    return rows.length;
+    return { pushed: rows.length, found: current.items.length };
   }
 
-  async function handleRecord(ctx: PlaywrightCrawlingContext, data: ReplayUserData): Promise<void> {
-    const plan = planFor(data.templateKey);
-    if (!plan.scraper || state.items >= input.maxItems) return;
-    await ctx.page.waitForLoadState("load", { timeout: REPLAY_LOAD_CAP_MS }).catch(() => undefined);
+  /**
+   * A replay page that is not the page the scraper reads: dead (404/410, or a
+   * redirect off the template for a scraper that never logs in), transient
+   * (5xx, thrown so the crawler retries it) or a bot challenge. Counted and
+   * listed; no row, no healing. Record and list replays alike (R12).
+   */
+  async function unreadable(ctx: PlaywrightCrawlingContext, plan: TemplatePlan, scraper: CompiledScraper): Promise<boolean> {
     // A page the site says is gone is a dead URL in the caller's list, not
     // drift: healing it spent chooser questions binding fields on an error
     // page, every run. Counted and listed; no row.
     const status = ctx.response?.status();
     if (status !== undefined && GONE_STATUSES.has(status)) {
       state.deadPages.push(ctx.request.url);
-      return;
+      return true;
     }
     // A 5xx is the site having a bad minute: one store serves its error
     // template with 500 to a burst, and it read as a challenge (2026-09-28).
@@ -1858,26 +1874,34 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     if (status !== undefined && status >= 500 && (await classifyBlocked(ctx.page, { status }, { decisiveOnly: true })) === null) {
       throw new TransientPageError(`${ctx.request.url} answered ${status}`);
     }
-    // So is a product that redirects off the template, to a category or the
+    // So is a page that redirects off the template, to a category or the
     // home page: one store retires products that way, and the category page's
     // newsletter reCAPTCHA read as a challenge (2026-09-28). Only for a scraper
     // that never logs in: under a login, a redirect off the page is a session
     // lost, which is drift.
     const landed = ctx.page.url();
-    const neverLogsIn = input.profile === "store" && entryModeFor(plan.scraper) !== "trace";
+    const neverLogsIn = input.profile === "store" && entryModeFor(scraper) !== "trace";
     if (neverLogsIn && landed !== ctx.request.url && !matchesTemplate(plan.templateKey, landed)) {
       state.deadPages.push(ctx.request.url);
-      return;
+      return true;
     }
     // A challenge page is not drift: healing it would ask the chooser to bind
     // fields on an interstitial. It is counted, kept as evidence, and yields no row.
-    if ((await classifyBlocked(ctx.page, { status: ctx.response?.status() })) === "blocked_bot_detection") {
+    if ((await classifyBlocked(ctx.page, { status })) === "blocked_bot_detection") {
       state.blockedPages += 1;
-      await saveBlockedEvidence(ctx.page, ctx.request.url, ctx.response?.status(), "replay");
-      return;
+      await saveBlockedEvidence(ctx.page, ctx.request.url, status, "replay");
+      return true;
     }
+    return false;
+  }
+
+  async function handleRecord(ctx: PlaywrightCrawlingContext, data: ReplayUserData): Promise<void> {
+    const plan = planFor(data.templateKey);
+    if (!plan.scraper || state.items >= input.maxItems) return;
+    await ctx.page.waitForLoadState("load", { timeout: REPLAY_LOAD_CAP_MS }).catch(() => undefined);
+    if (await unreadable(ctx, plan, plan.scraper)) return;
     await dismissConsent(ctx.page).catch(() => undefined);
-    await pushItems(ctx, plan, plan.scraper, ctx.request.url, state.seen);
+    await pushItems(ctx, plan, plan.scraper, ctx.request.url, ctx.request.url, state.seen);
   }
 
   async function handleList(ctx: PlaywrightCrawlingContext, data: ReplayUserData): Promise<void> {
@@ -1885,6 +1909,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     const scraper = plan.scraper;
     if (!scraper || state.items >= input.maxItems) return;
     const { page } = ctx;
+    if (await unreadable(ctx, plan, scraper)) return;
     await dismissConsent(page).catch(() => undefined);
 
     if (entryModeFor(scraper) === "trace") {
@@ -1920,8 +1945,14 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     await listPages(ctx, plan);
   }
 
-  /** Extracts the listing the page stands on, then follows the paginate hook (R15); two consecutive empty pages end the listing (R16). */
+  /**
+   * Extracts the listing the page stands on, then follows the paginate hook
+   * (R15); two consecutive empty pages end the listing (R16), and so does
+   * `maxPagesPerStart`. The listing belongs to the request's URL, its start
+   * URL, whatever page pagination or a redirect lands on.
+   */
   async function listPages(ctx: PlaywrightCrawlingContext, plan: TemplatePlan): Promise<void> {
+    const startUrl = ctx.request.url;
     let pageIndex = 0;
     let emptyStreak = 0;
     // R16: rows repeated across the pages of one listing are pushed once
@@ -1936,11 +1967,20 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
           if (!(error instanceof Error) || error.name !== "TimeoutError") throw error;
         });
       }
-      const pushed = await pushItems(ctx, plan, scraper, ctx.page.url(), seen);
+      const { pushed, found } = await pushItems(ctx, plan, scraper, ctx.page.url(), startUrl, seen);
       if (state.stop) return;
+      // A first page with nothing under the compiled anchor is a search that
+      // found nothing (whatever the site recommends instead sits outside the
+      // results): no row, and counted, so a thousand-query run says how many
+      // of its queries came back empty. Nothing is paginated past it.
+      if (pageIndex === 0 && found === 0) {
+        state.emptyListings.push(startUrl);
+        return;
+      }
       pageIndex += 1;
       emptyStreak = pushed === 0 ? emptyStreak + 1 : 0;
       if (emptyStreak >= 2 || state.items >= input.maxItems || state.pages >= input.maxPages) return;
+      if (input.maxPagesPerStart !== undefined && pageIndex >= input.maxPagesPerStart) return;
       const moved = await paginateHook(ctx.page, plan.scraper ?? scraper, pageIndex);
       if (!moved) return;
     }

@@ -187,14 +187,22 @@
     "maxPages": {
       "title": "Max pages",
       "type": "integer",
-      "description": "Pages to scrape per template, pagination and detail pages included.",
+      "description": "The run's page budget, pagination and detail pages included. Every start URL's first page is read regardless (1000 search URLs are 1000 listings); pagination and detail pages stop once the run has scraped this many pages.",
       "minimum": 1,
-      "maximum": 1000,
+      "maximum": 20000,
       "default": 10,
       "prefill": 1,
       "unit": "pages",
       "sectionCaption": "Crawl limits",
       "sectionDescription": "Caps on pages and items. Every run also has a fixed chooser budget: 1.5M chooser input tokens, 40 text-helper calls, 5 healing events, 30 navigation steps."
+    },
+    "maxPagesPerStart": {
+      "title": "Max pages per start URL",
+      "type": "integer",
+      "description": "List mode: pages one start URL's listing may span, its first page included (1 reads only the first page of each search). Unset, only Max pages bounds pagination.",
+      "minimum": 1,
+      "maximum": 1000,
+      "unit": "pages"
     },
     "maxItems": {
       "title": "Max items",

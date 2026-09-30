@@ -95,7 +95,10 @@ export const FIELD_TYPES = ["text", "money", "integer", "number", "boolean", "ur
 export type FieldType = (typeof FIELD_TYPES)[number];
 
 export const LIMITS = {
-  maxPages: 1000,
+  /** Run-wide: pages beyond each start URL's first (pagination, detail pages); a list of search URLs times their depth. */
+  maxPages: 20_000,
+  /** One start URL's listing: its first page plus the pages pagination adds. */
+  maxPagesPerStart: 1000,
   maxItems: 50_000,
   chooserInputTokens: 1_500_000,
   textHelperCalls: 40,
@@ -196,7 +199,14 @@ export const BaseInputSchema = z
     description: z.string().optional(),
     fields: z.array(FieldSchema).optional(),
     goal: z.string().optional(),
+    /**
+     * The run's page budget. Every start URL's first page is read whatever it
+     * says (a list of 1000 search URLs is 1000 listings, not 10); pagination
+     * and detail pages stop once the run has scraped this many pages.
+     */
     maxPages: z.number().int().min(1).max(LIMITS.maxPages).default(10),
+    /** List mode: pages one start URL's listing may span, its first included; unset, only `maxPages` bounds it. */
+    maxPagesPerStart: z.number().int().min(1).max(LIMITS.maxPagesPerStart).optional(),
     maxItems: z.number().int().min(1).max(LIMITS.maxItems).default(1000),
     /** Pages a replay opens at once (default 4); a compile always runs one at a time. */
     maxConcurrency: z.number().int().min(1).max(20).optional(),

@@ -222,7 +222,7 @@ describe("detail pages (R18)", () => {
     expect(items[1]).toMatchObject({ title: "Backend Developer (Django)", description: "Build the Django services behind Ubuntu Pro subscriptions." });
     expect(items[2]).toMatchObject({ title: "Data Engineer", description: "Design the telemetry warehouse that powers Firefox release decisions." });
     for (const item of items.slice(3)) expect(item.description).toBeNull();
-    for (const item of items) expect(Object.keys(item).sort()).toEqual(["_source", "description", "title"]);
+    for (const item of items) expect(Object.keys(item).sort()).toEqual(["_source", "_startUrl", "description", "title"]);
 
     const store = await ScraperStore.open({ actor });
     const key = keyFor(urls, { description: raw.description, fields: ["title"], profile: "store" });

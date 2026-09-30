@@ -88,7 +88,7 @@ questions itself — see [Give it to your agent](#give-it-to-your-agent).
 
 ## What you get
 
-- **Records** on stdout or `--out data.json|data.csv`, one object per item with a `_source` URL.
+- **Records** on stdout or `--out data.json|data.csv`, one object per item with a `_source` URL (the page it was read on) and a `_startUrl` (the start URL that produced it).
 - **A scraper you can commit**: `storage/key_value_stores/scraper-cache/<key>.json`.
   The rest of `storage/` holds browser profiles with live sessions; keep it private.
 - **A summary on stderr** saying who answered what:

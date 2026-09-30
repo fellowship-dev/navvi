@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { InputSchema, defaultBrowser } from "../src/input/schema.js";
+import { InputSchema, LIMITS, defaultBrowser } from "../src/input/schema.js";
 import { run } from "../src/main.js";
 
 describe("input schema", () => {
@@ -16,9 +16,9 @@ describe("input schema", () => {
     expect(InputSchema.safeParse({ prompt: "get prices" }).success).toBe(true);
   });
 
-  it("rejects maxPages 5000 and a file: start URL", () => {
+  it("rejects maxPages past its limit and a file: start URL", () => {
     const base = { mode: "record", fields: [{ name: "price" }] };
-    expect(InputSchema.safeParse({ ...base, startUrls: ["https://example.com/a"], maxPages: 5000 }).success).toBe(false);
+    expect(InputSchema.safeParse({ ...base, startUrls: ["https://example.com/a"], maxPages: LIMITS.maxPages + 1 }).success).toBe(false);
     expect(InputSchema.safeParse({ ...base, startUrls: ["file:///etc/passwd"] }).success).toBe(false);
   });
 

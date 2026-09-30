@@ -1,24 +1,26 @@
 {
   "actorSpecification": 1,
   "title": "Navvi records",
-  "description": "One item per record: the requested fields (typed when a type was declared), plus _source, the page it came from.",
+  "description": "One item per record: the requested fields (typed when a type was declared), plus _source, the page it came from, and _startUrl, the start URL that produced it.",
   "fields": {
     "type": "object",
     "properties": {
-      "_source": { "type": "string", "description": "The URL of the page the record was extracted from." }
+      "_source": { "type": "string", "description": "The URL of the page the record was extracted from (a listing's later page, or where a redirect landed)." },
+      "_startUrl": { "type": "string", "description": "The start URL that produced the record: the listing requested before pagination or redirect. Equals _source on a record-mode row." }
     },
-    "required": ["_source"],
+    "required": ["_source", "_startUrl"],
     "additionalProperties": true
   },
   "views": {
     "overview": {
       "title": "Records",
-      "description": "The extracted records with their source page.",
-      "transformation": { "fields": ["_source"] },
+      "description": "The extracted records with their source page and start URL.",
+      "transformation": { "fields": ["_source", "_startUrl"] },
       "display": {
         "component": "table",
         "properties": {
-          "_source": { "label": "Source", "format": "link" }
+          "_source": { "label": "Source", "format": "link" },
+          "_startUrl": { "label": "Start URL", "format": "link" }
         }
       }
     }

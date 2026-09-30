@@ -357,8 +357,9 @@ function highlight(line: string): string {
 /** HN cut: one compact line per record, so several of the ten fit the pane. */
 function compactLines(rows: Array<Record<string, unknown>>, max: number): string[] {
   const lines = rows.slice(0, max).map((r) => {
-    const { _source, ...rest } = r;
+    const { _source, _startUrl, ...rest } = r;
     void _source;
+    void _startUrl;
     // Short fields first, so points and comments are visible before the line is cut.
     const first = ["points", "comments", "title", "link"].filter((k) => k in rest);
     const reordered = Object.fromEntries([...first, ...Object.keys(rest).filter((k) => !first.includes(k))].map((k) => [k, rest[k]]));
@@ -370,8 +371,9 @@ function compactLines(rows: Array<Record<string, unknown>>, max: number): string
 
 function jsonLines(rows: Array<Record<string, unknown>>, max: number): string[] {
   const shown = rows.slice(0, max).map((r) => {
-    const { _source, ...rest } = r;
+    const { _source, _startUrl, ...rest } = r;
     void _source;
+    void _startUrl;
     return rest;
   });
   const lines = JSON.stringify(shown, null, 1).split("\n").map((l) => l.replace(/^ +/, (s) => "  ".repeat(s.length)));

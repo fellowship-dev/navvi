@@ -18,6 +18,10 @@ import { fileURLToPath } from "node:url";
  * - `/demo/pharmacy[-v1|-v2]/producto/sin-precio-<slug>.html`  that product page with its price removed:
  *   a healthy page on which one field is empty by design (an undiscounted product has no list price)
  * - `/fixtures/<name>.html`   from tests/fixtures; `challenge.html` is served with status 503
+ * - `/demo/buscador/buscar?q=<q>[&page=<n>]`  a store's search results (see `searchPage`): three pages of items
+ *   that depend on `q`, one product found by every query; `q` starting `error-` answers 500, `gone-` 404,
+ *   `challenge-` the bot challenge (503), `retirado-` redirects (302) off the template to `/demo/buscador/`,
+ *   `sin-resultados-` a "no results" page whose recommendations sit outside the results list
  */
 
 export type DemoVersion = "v1" | "v2";
@@ -131,6 +135,17 @@ export async function startFixtureServer(): Promise<FixtureServer> {
         return;
       }
 
+      // A store's search: one template (`/demo/buscador/buscar`), items that depend on `q`.
+      if (pathname === "/demo/buscador/buscar" || pathname === "/demo/buscador/" || pathname === "/demo/buscador") {
+        const q = url.searchParams.get("q") ?? "";
+        if (pathname !== "/demo/buscador/buscar") return void sendHtml(res, 200, "<!doctype html><title>Tienda</title><h1>Tienda de ejemplo</h1><p>Categorías</p>");
+        if (q.startsWith("error-")) return void sendHtml(res, 500, "<!doctype html><title>Error</title><h1>¡Lo sentimos!</h1><p>Intente más tarde.</p>");
+        if (q.startsWith("gone-")) return void sendHtml(res, 404, "<!doctype html><title>No encontrado</title><h1>Página no encontrada</h1>");
+        if (q.startsWith("challenge-")) return void (await sendFile(res, path.join(FIXTURES_DIR, "challenge.html"), 503));
+        if (q.startsWith("retirado-")) return void redirect(res, "/demo/buscador/");
+        return void sendHtml(res, 200, searchPage(q, Number(url.searchParams.get("page") ?? "1")));
+      }
+
       // Pharmacy demo, version-switched or explicit.
       const pharmacy = /^\/demo\/pharmacy(?:-(v1|v2))?(\/.*)?$/.exec(pathname);
       if (pharmacy) {
@@ -203,6 +218,32 @@ export async function startFixtureServer(): Promise<FixtureServer> {
         server.close((error) => (error ? reject(error) : resolve()));
       }),
   };
+}
+
+function sendHtml(res: http.ServerResponse, status: number, body: string): void {
+  res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+  res.end(body);
+}
+
+/** Pages a search result list has before its next link disappears. */
+export const SEARCH_PAGES = 3;
+
+/**
+ * One page of search results for `q`: two items named after the query and the
+ * page, and on page 1 a product every query finds (`Suero fisiológico`). A
+ * `sin-resultados-` query is the "no results" page stores serve, recommending
+ * products in a block of its own.
+ */
+export function searchPage(q: string, page: number): string {
+  const card = (name: string, slug: string) => `<li class="producto"><h2><a href="/demo/buscador/producto/${slug}.html">${name}</a></h2><span class="precio">$1.990</span></li>`;
+  if (q.startsWith("sin-resultados-")) {
+    return `<!doctype html><title>Buscar</title><h1>No encontramos resultados para "${q}"</h1><ul class="resultados"></ul>
+<section class="recomendados"><h2>Te puede interesar</h2><ul><li class="recomendado"><h2><a href="/demo/buscador/producto/vitamina-c.html">Vitamina C</a></h2></li></ul></section>`;
+  }
+  const items = [card(`${q} ${page}0 mg`, `${q}-${page}0-mg`), card(`${q} ${page}5 mg`, `${q}-${page}5-mg`)];
+  if (page === 1) items.push(card("Suero fisiológico", "suero-fisiologico"));
+  const next = page < SEARCH_PAGES ? `<a class="siguiente" href="/demo/buscador/buscar?q=${encodeURIComponent(q)}&page=${page + 1}">Siguiente</a>` : "";
+  return `<!doctype html><title>Buscar ${q}</title><h1>Resultados para "${q}"</h1><ul class="resultados">${items.join("")}</ul>${next}`;
 }
 
 function notFound(res: http.ServerResponse): void {

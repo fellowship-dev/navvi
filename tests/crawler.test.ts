@@ -762,7 +762,7 @@ describe("the plain record compile runs the compile core (U5)", () => {
     expect(stored?.chooser).toBe("agent");
     expect(stored?.entry).toEqual({ mode: "direct", url: urls[0] });
     const rows = await datasetItems(actor);
-    expect(rows.find((row) => row._source === urls[0])).toEqual({ name: "Amoxicilina 500 mg x 21 cápsulas", laboratory: "Bagó", price: "$ 6.990", stock: "Disponible", _source: urls[0] });
+    expect(rows.find((row) => row._source === urls[0])).toEqual({ name: "Amoxicilina 500 mg x 21 cápsulas", laboratory: "Bagó", price: "$ 6.990", stock: "Disponible", _source: urls[0], _startUrl: urls[0] });
 
     const empty = new RecordedChooser({ fixture: "crawler/empty" });
     const again = await runCrawl(fixtureInput(raw), makeDeps(dir, actor, empty));
@@ -787,7 +787,7 @@ describe("the plain record compile runs the compile core (U5)", () => {
       availability: ["p.instock.availability"],
     });
     expect(stored!.fields.price!.alternatives[0]!.fingerprint).toEqual({ samples: ["£51.77", "£23.88", "£37.59"], shape: "money" });
-    expect(port(await datasetItems(actor))).toContainEqual({ title: "A Quiet Lighthouse", price: "£51.77", availability: "In stock (22 available)", _source: "{{base}}/fixtures/template/books-1.html" });
+    expect(port(await datasetItems(actor))).toContainEqual({ title: "A Quiet Lighthouse", price: "£51.77", availability: "In stock (22 available)", _source: "{{base}}/fixtures/template/books-1.html", _startUrl: "{{base}}/fixtures/template/books-1.html" });
 
     const replay = new PatternChooser({});
     const again = await runCrawl(fixtureInput(raw), makeDeps(dir, actor, replay));
