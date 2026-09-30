@@ -182,6 +182,9 @@ export async function startFixtureServer(): Promise<FixtureServer> {
         if (q.startsWith("gone-")) return void sendHtml(res, 404, "<!doctype html><title>No encontrado</title><h1>Página no encontrada</h1>");
         if (q.startsWith("challenge-")) return void (await sendFile(res, path.join(FIXTURES_DIR, "challenge.html"), 503));
         if (q.startsWith("retirado-")) return void redirect(res, "/demo/buscador/");
+        // A search that found nothing on a store whose page carries a reCAPTCHA
+        // widget and little text: it reads like a weak challenge (2026-09-30).
+        if (q.startsWith("vacio-widget-")) return void sendHtml(res, 200, `<!doctype html><title>Buscar</title><h1>Resultados</h1><ul class="resultados"></ul><div class="g-recaptcha" data-sitekey="ejemplo"></div>`);
         // A results page whose items a script mounts ~1.5 s after the document (an instant-search front end).
         if (q.startsWith("tarde-")) {
           const list = /<ul class="resultados">([\s\S]*?)<\/ul>/.exec(searchPage(q, 1))?.[1] ?? "";

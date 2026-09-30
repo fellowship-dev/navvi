@@ -72,6 +72,27 @@ const run = async (actor: ReturnType<typeof makeActor>, scriptId: string, startU
 };
 
 describe("list mode at scale", () => {
+  it("a search that found nothing, on a page that reads like a weak challenge, is an empty listing when the store is serving results to the same run", async () => {
+    const actor = makeActor(dir);
+    const scriptId = await seedSearch(actor);
+    const empties = [search("vacio-widget-uno"), search("vacio-widget-dos")];
+    const { summary, rows, chooser } = await run(actor, scriptId, [search("amoxicilina"), ...empties], { maxPagesPerStart: 1, settleMs: 1_000 });
+    expect(rows.length).toBeGreaterThan(0);
+    expect(summary.unsettledPages).toBeUndefined();
+    expect(new Set(summary.emptyListings?.urls)).toEqual(new Set(empties));
+    expect(chooser.usage().questions).toBe(0);
+  }, 60_000);
+
+  it("the same pages stay unsettled when the run read nothing at all", async () => {
+    const actor = makeActor(dir);
+    const scriptId = await seedSearch(actor);
+    const empties = [search("vacio-widget-uno"), search("vacio-widget-dos")];
+    const { summary, rows } = await run(actor, scriptId, empties, { maxPagesPerStart: 1, settleMs: 1_000 });
+    expect(rows).toHaveLength(0);
+    expect(summary.unsettledPages?.count).toBe(2);
+    expect(summary.emptyListings).toBeUndefined();
+  }, 60_000);
+
   it("results mounted after the document are read when settleMs gives them time, and counted empty when it does not", async () => {
     const startUrls = [search("tarde-amoxicilina"), search("tarde-losartan")];
     const quick = makeActor(dir);

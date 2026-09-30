@@ -497,6 +497,14 @@ interface RunState {
   emptyListings: string[];
   /** Replay pages that still read as a weak (corroborated-only) challenge after the settle wait: no row, no healing, not blocked (R9). */
   unsettledPages: string[];
+  /**
+   * List pages that still read as a weak challenge after settling and showed
+   * no items. A store serving results to the same run is not challenging it:
+   * these are searches that found nothing on a page whose little text sits
+   * beside a reCAPTCHA widget (two stores, 2026-09-30). The summary counts them
+   * as empty listings when the run read items, and as unsettled when it read none.
+   */
+  unsettledListPages: string[];
   /** Record pages whose every failed field reads a payload that never arrived: no row, no healing, not unhealed (R10). */
   noPayloadPages: string[];
   /** Per optional field, the pages with items on which it filled and on which it was empty (R11). */
@@ -597,14 +605,17 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
   if (state.blockedPages > 0) summary.blockedPages = state.blockedPages;
   if (state.transientPages.length > 0) summary.transientPages = { count: state.transientPages.length, urls: state.transientPages.slice(0, OFF_TEMPLATE_LISTED) };
   if (state.deadPages.length > 0) summary.deadPages = { count: state.deadPages.length, urls: state.deadPages.slice(0, OFF_TEMPLATE_LISTED) };
-  if (state.unsettledPages.length > 0) summary.unsettledPages = { count: state.unsettledPages.length, urls: state.unsettledPages.slice(0, OFF_TEMPLATE_LISTED) };
+  const servedResults = state.items > 0;
+  const unsettled = servedResults ? state.unsettledPages : [...state.unsettledPages, ...state.unsettledListPages];
+  const emptyListings = servedResults ? [...state.emptyListings, ...state.unsettledListPages] : state.emptyListings;
+  if (unsettled.length > 0) summary.unsettledPages = { count: unsettled.length, urls: unsettled.slice(0, OFF_TEMPLATE_LISTED) };
   if (state.noPayloadPages.length > 0) summary.noPayloadPages = { count: state.noPayloadPages.length, urls: state.noPayloadPages.slice(0, OFF_TEMPLATE_LISTED) };
   const optionalDrift = [...state.optionalPages]
     .filter(([, pages]) => pages.filled > 0 && pages.empty > 0)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([field, pages]) => ({ field, pages: pages.empty, filled: pages.filled }));
   if (optionalDrift.length > 0) summary.optionalDrift = optionalDrift;
-  if (state.emptyListings.length > 0) summary.emptyListings = { count: state.emptyListings.length, urls: state.emptyListings.slice(0, OFF_TEMPLATE_LISTED) };
+  if (emptyListings.length > 0) summary.emptyListings = { count: emptyListings.length, urls: emptyListings.slice(0, OFF_TEMPLATE_LISTED) };
   if (state.offTemplate.length > 0) summary.offTemplate = { count: state.offTemplate.length, urls: state.offTemplate.slice(0, OFF_TEMPLATE_LISTED) };
   // The remedy is --force-recompile on the compiling run and its replays
   // alike: the scraper is stored either way, and every later run replays it
@@ -785,6 +796,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     transientPages: [],
     emptyListings: [],
     unsettledPages: [],
+    unsettledListPages: [],
     noPayloadPages: [],
     optionalPages: new Map(),
     blockedEvidenceSaved: false,
@@ -1988,7 +2000,8 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     // fields on an interstitial. It is counted, kept as evidence, and yields no row.
     const reading = await settledReading(ctx.page, status, plan.scraper ?? scraper);
     if (reading.status === "blocked_bot_detection" && reading.weak) {
-      state.unsettledPages.push(ctx.request.url);
+      if ((ctx.request.userData as UserData | undefined)?.label === "list") state.unsettledListPages.push(ctx.request.url);
+      else state.unsettledPages.push(ctx.request.url);
       return true;
     }
     if (reading.status === "blocked_bot_detection") {
