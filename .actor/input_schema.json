@@ -227,6 +227,14 @@
       "minimum": 1,
       "maximum": 20
     },
+    "settleMs": {
+      "title": "Settle time",
+      "type": "integer",
+      "description": "How long a replay page may take to show its results, in ms (default 5000): the wait for a list's items, and for a page that looks like a challenge to settle. Search pages that render results after loading may need 10000-15000 on the platform.",
+      "minimum": 1000,
+      "maximum": 30000,
+      "unit": "ms"
+    },
     "browser": {
       "title": "Browser",
       "type": "string",

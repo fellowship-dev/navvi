@@ -2011,7 +2011,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
    */
   async function settledReading(page: Page, status: number | undefined, scraper: CompiledScraper): Promise<{ status: string | null; weak: boolean }> {
     let reading = await readBlocked(page, { status });
-    const deadline = Date.now() + SETTLE_MS;
+    const deadline = Date.now() + (input.settleMs ?? SETTLE_MS);
     while (reading.status === "blocked_bot_detection" && reading.weak) {
       if (await anchored(page, scraper)) return { status: null, weak: false };
       if (Date.now() >= deadline) break;
@@ -2112,7 +2112,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       // Dynamic lists may still contain only skeletons after navigation. Wait
       // for the compiled anchor, bounded so genuinely empty lists still finish.
       if (scraper.item) {
-        await ctx.page.locator(scraper.item.anchorSelector).first().waitFor({ state: "attached", timeout: 5_000 }).catch((error: unknown) => {
+        await ctx.page.locator(scraper.item.anchorSelector).first().waitFor({ state: "attached", timeout: input.settleMs ?? SETTLE_MS }).catch((error: unknown) => {
           if (!(error instanceof Error) || error.name !== "TimeoutError") throw error;
         });
       }

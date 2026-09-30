@@ -115,7 +115,7 @@ export function summaryFor(status: Status, input: RunInput | null, message: stri
  */
 export const PLATFORM_INPUT_KEYS = [
   "prompt", "startUrls", "mode", "description", "fields", "goal", "followDetailPages", "detailFields",
-  "maxPages", "maxPagesPerStart", "maxItems", "maxConcurrency", "minConcurrency", "browser", "proxy",
+  "maxPages", "maxPagesPerStart", "maxItems", "maxConcurrency", "minConcurrency", "settleMs", "browser", "proxy",
   "allowedDomains", "chooser", "decider", "writer", "deciderTransport", "scriptId", "forceRecompile",
   "profile", "freshProfile",
 ] as const;

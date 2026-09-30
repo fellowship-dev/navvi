@@ -24,6 +24,16 @@ const datasetSchema = JSON.parse(readFileSync(join(ROOT, ".actor", "dataset_sche
 const pick = (key: "prefill" | "default"): Record<string, unknown> =>
   Object.fromEntries(Object.entries(schema.properties).filter(([, p]) => p[key] !== undefined).map(([name, p]) => [name, p[key]]));
 
+describe("settleMs (input)", () => {
+  it("accepts 1000..30000 ms and refuses others", () => {
+    const base = { startUrls: ["https://example.org/a"], mode: "list", fields: [{ name: "x" }] };
+    expect(parseInput({ ...base, settleMs: 12_000 }).settleMs).toBe(12_000);
+    expect(parseInput(base).settleMs).toBeUndefined();
+    expect(() => parseInput({ ...base, settleMs: 500 })).toThrow();
+    expect(() => parseInput({ ...base, settleMs: 60_000 })).toThrow();
+  });
+});
+
 describe("replay concurrency (input)", () => {
   it("accepts maxConcurrency and minConcurrency within 1..20 and refuses others", () => {
     const base = { startUrls: ["https://example.org/a"], mode: "record", fields: [{ name: "x" }] };

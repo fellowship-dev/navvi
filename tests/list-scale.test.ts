@@ -72,6 +72,18 @@ const run = async (actor: ReturnType<typeof makeActor>, scriptId: string, startU
 };
 
 describe("list mode at scale", () => {
+  it("results mounted after the document are read when settleMs gives them time, and counted empty when it does not", async () => {
+    const startUrls = [search("tarde-amoxicilina"), search("tarde-losartan")];
+    const quick = makeActor(dir);
+    const quickRun = await run(quick, await seedSearch(quick), startUrls, { maxPagesPerStart: 1, settleMs: 1_000 });
+    expect(quickRun.rows).toHaveLength(0);
+    expect(quickRun.summary.emptyListings?.count).toBe(2);
+    const patient = makeActor(dir);
+    const patientRun = await run(patient, await seedSearch(patient), startUrls, { maxPagesPerStart: 1, settleMs: 4_000 });
+    expect(new Set(patientRun.rows.map((r) => r._startUrl))).toEqual(new Set(startUrls));
+    expect(patientRun.summary.emptyListings).toBeUndefined();
+  }, 60_000);
+
   it("a results page whose load never fires is read once its items are there (list pages navigate to the document, not to load)", async () => {
     const actor = makeActor(dir);
     const scriptId = await seedSearch(actor);

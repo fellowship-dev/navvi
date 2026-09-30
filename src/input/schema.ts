@@ -327,6 +327,13 @@ export const BaseInputSchema = z
     maxItems: z.number().int().min(1).max(LIMITS.maxItems).default(1000),
     /** Pages a replay opens at once (default 4); a compile always runs one at a time. */
     maxConcurrency: z.number().int().min(1).max(20).optional(),
+    /**
+     * How long a replay page may take to show its results before it is read as
+     * it is: the wait for a list's item anchor, and for a page that reads like
+     * a weak challenge to settle. Search front ends that mount results after
+     * the document (instant-search, VTEX) need more on a busy platform CPU.
+     */
+    settleMs: z.number().int().min(1_000).max(30_000).optional(),
     /** Pages a replay keeps open even when the platform reads its CPU as busy. */
     minConcurrency: z.number().int().min(1).max(20).optional(),
     followDetailPages: z.boolean().default(false),

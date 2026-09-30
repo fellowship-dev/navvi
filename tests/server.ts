@@ -182,6 +182,11 @@ export async function startFixtureServer(): Promise<FixtureServer> {
         if (q.startsWith("gone-")) return void sendHtml(res, 404, "<!doctype html><title>No encontrado</title><h1>Página no encontrada</h1>");
         if (q.startsWith("challenge-")) return void (await sendFile(res, path.join(FIXTURES_DIR, "challenge.html"), 503));
         if (q.startsWith("retirado-")) return void redirect(res, "/demo/buscador/");
+        // A results page whose items a script mounts ~1.5 s after the document (an instant-search front end).
+        if (q.startsWith("tarde-")) {
+          const list = /<ul class="resultados">([\s\S]*?)<\/ul>/.exec(searchPage(q, 1))?.[1] ?? "";
+          return void sendHtml(res, 200, `<!doctype html><title>Buscar ${q}</title><h1>Resultados</h1><ul class="resultados"></ul><script>setTimeout(()=>{document.querySelector("ul.resultados").innerHTML=${JSON.stringify(list)}},1500)</script>`);
+        }
         // A results page whose `load` never fires: an embedded frame that never answers.
         if (q.startsWith("lento-")) return void sendHtml(res, 200, `${searchPage(q, 1)}<iframe src="/demo/buscador/colgado"></iframe>`);
         return void sendHtml(res, 200, searchPage(q, Number(url.searchParams.get("page") ?? "1")));
