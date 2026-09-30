@@ -17,6 +17,13 @@ import { fileURLToPath } from "node:url";
  * - `/demo/pharmacy[-v1|-v2]/producto/retirado-<anything>.html`  redirects (302) to the store's index: a retired product
  * - `/demo/pharmacy[-v1|-v2]/producto/sin-precio-<slug>.html`  that product page with its price removed:
  *   a healthy page on which one field is empty by design (an undiscounted product has no list price)
+ * - `/demo/pharmacy[-v1|-v2]/producto/tardio-<slug>.html`  a single-page app still rendering: a spinner, a location
+ *   modal carrying a reCAPTCHA widget and almost no text, then that product's page ~1.5 s later (the widget stays)
+ * - `/demo/pharmacy[-v1|-v2]/producto/cargando-<slug>.html`  the same app, whose spinner never finishes
+ * - `/demo/pharmacy[-v1|-v2]/producto/rediseno-<slug>.html`  that product page in a second layout whose price markup
+ *   was renamed: the price selector breaks on it while every other field still reads
+ * - `/demo/ficha-red/producto.html?sku=<sku>`  a product page whose name and price arrive only in the JSON it fetches
+ *   (`/demo/ficha-red/payload-<sku>.json`); a `sku` starting `sin-carga-` gets a 404 for its payload
  * - `/fixtures/<name>.html`   from tests/fixtures; `challenge.html` is served with status 503
  * - `/demo/buscador/buscar?q=<q>[&page=<n>]`  a store's search results (see `searchPage`): three pages of items
  *   that depend on `q`, one product found by every query; `q` starting `error-` answers 500, `gone-` 404,
@@ -163,6 +170,20 @@ export async function startFixtureServer(): Promise<FixtureServer> {
           redirect(res, pathname.replace(/\/producto\/[^/]+$/, "/index.html"));
           return;
         }
+        const rendering = /^\/producto\/(tardio|cargando)-([^/]+\.html)$/.exec(pharmacy[2] ?? "");
+        if (rendering) {
+          const source = resolveWithin(path.join(DEMO_DIR, `pharmacy-${version}`), `/producto/${rendering[2]}`);
+          if (!source) return void notFound(res);
+          const body = /<body>([\s\S]*)<\/body>/.exec(await fs.readFile(source, "utf8"))?.[1] ?? "";
+          return void sendHtml(res, 200, renderingApp(rendering[1] === "tardio" ? body : null));
+        }
+        const redesigned = /^\/producto\/rediseno-([^/]+\.html)$/.exec(pharmacy[2] ?? "");
+        if (redesigned) {
+          const source = resolveWithin(path.join(DEMO_DIR, `pharmacy-${version}`), `/producto/${redesigned[1]}`);
+          if (!source) return void notFound(res);
+          const page = (await fs.readFile(source, "utf8")).replace(/producto-precio/g, "ficha-importe").replace(/class="precio"/g, 'class="importe"');
+          return void sendHtml(res, 200, page);
+        }
         const priceless = /^\/producto\/sin-precio-([^/]+\.html)$/.exec(pharmacy[2] ?? "");
         if (priceless) {
           const source = resolveWithin(path.join(DEMO_DIR, `pharmacy-${version}`), `/producto/${priceless[1]}`);
@@ -175,6 +196,17 @@ export async function startFixtureServer(): Promise<FixtureServer> {
         const file = resolveWithin(path.join(DEMO_DIR, `pharmacy-${version}`), pharmacy[2] || "/index.html");
         if (!file) return void notFound(res);
         await sendFile(res, file);
+        return;
+      }
+
+      // A product page that reads its name and price from the payload it fetches for itself.
+      if (pathname === "/demo/ficha-red/producto.html") return void sendHtml(res, 200, payloadPage(url.searchParams.get("sku") ?? ""));
+      const payload = /^\/demo\/ficha-red\/payload-([^/]+)\.json$/.exec(pathname);
+      if (payload) {
+        const sku = payload[1]!;
+        if (sku.startsWith("sin-carga-")) return void notFound(res);
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ productData: { name: `Producto ${sku}`, prices: { list: 4690 } } }));
         return;
       }
 
@@ -244,6 +276,34 @@ export function searchPage(q: string, page: number): string {
   if (page === 1) items.push(card("Suero fisiológico", "suero-fisiologico"));
   const next = page < SEARCH_PAGES ? `<a class="siguiente" href="/demo/buscador/buscar?q=${encodeURIComponent(q)}&page=${page + 1}">Siguiente</a>` : "";
   return `<!doctype html><title>Buscar ${q}</title><h1>Resultados para "${q}"</h1><ul class="resultados">${items.join("")}</ul>${next}`;
+}
+
+/**
+ * A single-page app mid-render, the shape a store's front end has before its
+ * bundle answers: a spinner, a location modal that loads a reCAPTCHA widget,
+ * almost no text and no declared product. With `rendered`, that markup is
+ * mounted ~1.5 s later and the modal stays; with null the spinner never ends.
+ * The script is inline, so the shell rule (which counts script bundles) does
+ * not claim it.
+ */
+export function renderingApp(rendered: string | null): string {
+  const mount = rendered === null ? "" : `<script>setTimeout(() => { document.getElementById("app").innerHTML = ${JSON.stringify(rendered).replace(/</g, "\\u003c")}; }, 1500);</script>`;
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Farmacia</title></head><body>
+<div id="app"><div class="spinner" aria-busy="true">Cargando…</div></div>
+<div class="modal-ubicacion"><p>Selecciona tu comuna</p><div class="g-recaptcha" data-sitekey="ejemplo"></div></div>
+${mount}</body></html>`;
+}
+
+/** A product page whose name and price are stated only in `/demo/ficha-red/payload-<sku>.json`. */
+export function payloadPage(sku: string): string {
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Producto</title></head><body>
+<h1 id="nombre">Cargando…</h1><p>Los datos de esta ficha llegan en la respuesta que la página pide para sí misma.</p>
+<script>
+fetch("/demo/ficha-red/payload-${encodeURIComponent(sku)}.json")
+  .then((response) => response.json())
+  .then((payload) => { document.getElementById("nombre").textContent = payload.productData.name; })
+  .catch(() => { document.getElementById("nombre").textContent = "Ficha sin respuesta"; });
+</script></body></html>`;
 }
 
 function notFound(res: http.ServerResponse): void {

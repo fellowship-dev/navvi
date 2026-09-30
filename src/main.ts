@@ -52,6 +52,12 @@ export interface RunSummary {
   transientPages?: { count: number; urls: string[] };
   /** Replay pages (records or listings) the site answered 404/410, or that redirected off the template: dead URLs in the start list (the first 50 by name); no row, no healing. */
   deadPages?: { count: number; urls: string[] };
+  /** Replay pages that still read as a weak challenge (a captcha widget on a page that renders almost nothing) after waiting up to 5 s for the scraper's anchor: a page still rendering, not a block (the first 50 by name); no row, no healing. */
+  unsettledPages?: { count: number; urls: string[] };
+  /** Record pages whose every failed field reads a payload that never arrived (the first 50 by name): the site did not feed the page; no row, no healing, not `unhealed`. */
+  noPayloadPages?: { count: number; urls: string[] };
+  /** Optional fields that filled on some pages with items and were empty on others: `pages` empty, `filled` filled. A layout the selector no longer reads, or a value absent by design; never healed. */
+  optionalDrift?: Array<{ field: string; pages: number; filled: number }>;
   /** List start URLs whose first page had no item under the compiled anchor, a search that found nothing (the first 50 by name); no row, no healing. */
   emptyListings?: { count: number; urls: string[] };
   /** A pinned run: start URLs of other shapes, reported and never compiled (the first 50 by name). */

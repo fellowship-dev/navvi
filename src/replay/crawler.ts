@@ -6,7 +6,7 @@ import type { BrowserContext, Page, Request } from "playwright";
 import { Charger, type ChargingActor } from "../billing/charge.js";
 import { buildCrawleeLaunchContext, restoreProfileCookies, saveProfileCookies } from "../browser/launch.js";
 import { createLaunchCounter, formatLaunchFailure, isLaunchFailure, launchFailureReport, resolveRelaunchKnobs, type RelaunchKnobs } from "../browser/relaunch.js";
-import { captureJson, describeSkips, type Capture, type CapturedResponse } from "../browser/network-capture.js";
+import { captureJson, describeSkips, newestUsableResponse, type Capture, type CapturedResponse } from "../browser/network-capture.js";
 import { hostOf, isAllowedRequestUrl, registrableDomain } from "../browser/policy.js";
 import { ConfigurationError, createChooser, NavviError, NeedsHumanError, StateTooLargeError, summarizeUsage, type Chooser } from "../chooser/index.js";
 import { compile, compileTemplate, type CompileRationale, type RenderPages, type TemplateCompile } from "../compile/index.js";
@@ -17,7 +17,7 @@ import { specFromInput } from "../spec/input.js";
 import type { Rubric, Spec } from "../spec/schema.js";
 import { continueWithoutRevalidation, waitForSettle } from "../browser/guards.js";
 import type { RunSummary } from "../main.js";
-import { classifyBlocked, dismissConsent, runPreSteps, type Notifier } from "../prestep/index.js";
+import { classifyBlocked, dismissConsent, readBlocked, runPreSteps, type Notifier } from "../prestep/index.js";
 import { LIST_JOINER, coerceRow, extractPage, fieldTypesOf, fingerprintMatches, type ItemExtraction } from "../scraper/extract.js";
 import { cacheKey, canaryOrigin, promoteFieldAlternative, validateScraper, type CompiledScraper, type Status, type TraceStep } from "../scraper/schema.js";
 import { ScraperStore, ScraperStoreError } from "../scraper/store.js";
@@ -473,6 +473,12 @@ interface RunState {
   transientPages: string[];
   /** List start URLs whose first page had no item under the compiled anchor ("no results"): no row, no healing. */
   emptyListings: string[];
+  /** Replay pages that still read as a weak (corroborated-only) challenge after the settle wait: no row, no healing, not blocked (R9). */
+  unsettledPages: string[];
+  /** Record pages whose every failed field reads a payload that never arrived: no row, no healing, not unhealed (R10). */
+  noPayloadPages: string[];
+  /** Per optional field, the pages with items on which it filled and on which it was empty (R11). */
+  optionalPages: Map<string, { filled: number; empty: number }>;
   /** The first blocked page is kept as evidence (BLOCKED_PAGE*), once per run. */
   blockedEvidenceSaved: boolean;
 }
@@ -500,6 +506,10 @@ function withFieldsNotFound(scraper: CompiledScraper, names: readonly string[]):
   const missing = [...new Set([...(scraper.fieldsNotFound ?? []), ...names])].filter((name) => !bound(name)).sort();
   return { fieldsNotFound: missing.length > 0 ? missing : undefined };
 }
+
+/** How long a replay page reading as a weak challenge gets to settle before it is counted unsettled (R9). */
+const SETTLE_MS = 5_000;
+const SETTLE_POLL_MS = 250;
 
 /** A replay page that answered 5xx: retried by the crawler, then reported transient. */
 class TransientPageError extends Error {}
@@ -565,6 +575,13 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
   if (state.blockedPages > 0) summary.blockedPages = state.blockedPages;
   if (state.transientPages.length > 0) summary.transientPages = { count: state.transientPages.length, urls: state.transientPages.slice(0, OFF_TEMPLATE_LISTED) };
   if (state.deadPages.length > 0) summary.deadPages = { count: state.deadPages.length, urls: state.deadPages.slice(0, OFF_TEMPLATE_LISTED) };
+  if (state.unsettledPages.length > 0) summary.unsettledPages = { count: state.unsettledPages.length, urls: state.unsettledPages.slice(0, OFF_TEMPLATE_LISTED) };
+  if (state.noPayloadPages.length > 0) summary.noPayloadPages = { count: state.noPayloadPages.length, urls: state.noPayloadPages.slice(0, OFF_TEMPLATE_LISTED) };
+  const optionalDrift = [...state.optionalPages]
+    .filter(([, pages]) => pages.filled > 0 && pages.empty > 0)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([field, pages]) => ({ field, pages: pages.empty, filled: pages.filled }));
+  if (optionalDrift.length > 0) summary.optionalDrift = optionalDrift;
   if (state.emptyListings.length > 0) summary.emptyListings = { count: state.emptyListings.length, urls: state.emptyListings.slice(0, OFF_TEMPLATE_LISTED) };
   if (state.offTemplate.length > 0) summary.offTemplate = { count: state.offTemplate.length, urls: state.offTemplate.slice(0, OFF_TEMPLATE_LISTED) };
   // The remedy is --force-recompile on the compiling run and its replays
@@ -745,6 +762,9 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     deadPages: [],
     transientPages: [],
     emptyListings: [],
+    unsettledPages: [],
+    noPayloadPages: [],
+    optionalPages: new Map(),
     blockedEvidenceSaved: false,
   };
   const plans: TemplatePlan[] = [];
@@ -1687,6 +1707,25 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     Object.keys(e.scraper.fields).length > 0 &&
     e.items.every((item) => Object.keys(e.scraper.fields).some((n) => item.values[n] === null && !optionalFields.has(n)));
 
+  /**
+   * R10: every required field that failed reads only from the network, and no
+   * payload its alternatives match was answered successfully. Record pages
+   * only: a listing's payload is one of many and its absence is the listing's.
+   */
+  const noPayload = (page: Page, e: Extracted): boolean => {
+    if (e.scraper.mode !== "record") return false;
+    const failed = [...e.failed].filter((n) => !optionalFields.has(n));
+    if (failed.length === 0) return false;
+    const matches = new Set<string>();
+    for (const name of failed) {
+      const alternatives = e.scraper.fields[name]?.alternatives ?? [];
+      if (alternatives.length === 0 || alternatives.some((a) => a.source !== "network")) return false;
+      for (const a of alternatives) matches.add(a.match ?? "");
+    }
+    const captured = capturedFor(page);
+    return ![...matches].some((match) => newestUsableResponse(captured, { match }) !== null);
+  };
+
   /** R16: source URL in record mode, the detail link in list mode, else a hash of every field. Rows with no value at all are never collapsed. */
   function dedupeKey(scraper: CompiledScraper, item: ItemExtraction, sourceUrl: string): string | null {
     if (scraper.mode === "record") return `url:${sourceUrl}`;
@@ -1767,6 +1806,14 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     const { page } = ctx;
     let current = await extractChecked(page, scraper, sourceUrl);
     let healAttempted = false;
+    // R10: a record page whose every failed field reads a payload that never
+    // arrived is a page the site did not feed, not drift. Healing it spent
+    // chooser questions binding a field on a page with nothing to bind, and
+    // `unhealed` made the run read as broken. Counted and listed; no row.
+    if (needsHealing(current) && noPayload(page, current)) {
+      state.noPayloadPages.push(sourceUrl);
+      return { pushed: 0, found: 0 };
+    }
     if (needsHealing(current)) {
       await withHealLock(async () => {
         // another page may have healed the template meanwhile: re-check on the live scraper first
@@ -1795,6 +1842,16 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     if (!(await chargeCompiled(plan, current, sourceUrl))) return none;
     if (!(await countPages(1, sourceUrl))) return none;
     const live = current.scraper;
+    // R11: an optional field's fill per page with items, so a field that
+    // broke on one layout while filling on another is reported, not silent.
+    if (current.items.length > 0) {
+      for (const name of optionalFields) {
+        const pages = state.optionalPages.get(name) ?? { filled: 0, empty: 0 };
+        if (current.items.some((item) => item.values[name] !== null && item.values[name] !== undefined && item.values[name] !== "")) pages.filled += 1;
+        else pages.empty += 1;
+        state.optionalPages.set(name, pages);
+      }
+    }
     const fresh: ItemExtraction[] = [];
     for (const item of current.items) {
       const key = dedupeKey(live, item, sourceUrl);
@@ -1887,12 +1944,62 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     }
     // A challenge page is not drift: healing it would ask the chooser to bind
     // fields on an interstitial. It is counted, kept as evidence, and yields no row.
-    if ((await classifyBlocked(ctx.page, { status })) === "blocked_bot_detection") {
+    const reading = await settledReading(ctx.page, status, plan.scraper ?? scraper);
+    if (reading.status === "blocked_bot_detection" && reading.weak) {
+      state.unsettledPages.push(ctx.request.url);
+      return true;
+    }
+    if (reading.status === "blocked_bot_detection") {
       state.blockedPages += 1;
       await saveBlockedEvidence(ctx.page, ctx.request.url, status, "replay");
       return true;
     }
     return false;
+  }
+
+  /**
+   * R9: a weak challenge reading — a captcha widget or challenge wording on a
+   * page that declares no product and renders almost nothing — is also what a
+   * single-page app looks like before its bundle answers: a spinner and a
+   * location modal with reCAPTCHA in it. So it is re-read, for at most
+   * `SETTLE_MS`, until the scraper's anchor is there (the item anchor of a
+   * list, every required DOM field of a record) or the reading changes. A
+   * decisive reading is never waited on. Still weak at the bound: the caller
+   * counts it `unsettledPages`, which is neither a block nor drift.
+   */
+  async function settledReading(page: Page, status: number | undefined, scraper: CompiledScraper): Promise<{ status: string | null; weak: boolean }> {
+    let reading = await readBlocked(page, { status });
+    const deadline = Date.now() + SETTLE_MS;
+    while (reading.status === "blocked_bot_detection" && reading.weak) {
+      if (await anchored(page, scraper)) return { status: null, weak: false };
+      if (Date.now() >= deadline) break;
+      await page.waitForTimeout(SETTLE_POLL_MS).catch(() => undefined);
+      reading = await readBlocked(page, { status });
+    }
+    return reading;
+  }
+
+  /** Is the scraper's anchor on the page: a list's item anchor, or a match for every required DOM-read field of a record? */
+  async function anchored(page: Page, scraper: CompiledScraper): Promise<boolean> {
+    const groups: string[][] = [];
+    if (scraper.item) groups.push([scraper.item.anchorSelector]);
+    else {
+      for (const [name, field] of Object.entries(scraper.fields)) {
+        if (optionalFields.has(name)) continue;
+        const selectors = field.alternatives.filter((a) => (a.source ?? "dom") === "dom").map((a) => a.selector);
+        if (selectors.length > 0) groups.push(selectors);
+      }
+    }
+    if (groups.length === 0) return false;
+    return page
+      .evaluate((all: string[][]) => all.every((selectors) => selectors.some((selector) => {
+        try {
+          return document.querySelector(selector) !== null;
+        } catch {
+          return false;
+        }
+      })), groups)
+      .catch(() => false);
   }
 
   async function handleRecord(ctx: PlaywrightCrawlingContext, data: ReplayUserData): Promise<void> {

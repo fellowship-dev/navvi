@@ -27,7 +27,7 @@ import { clickTurnstile } from "./turnstile.js";
  *   and makes the run unattended.
  */
 
-export { BOT_CHALLENGE_SELECTORS, BOT_CHALLENGE_TEXT, LOGIN_HINTS, classifyBlocked } from "./blocked.js";
+export { BOT_CHALLENGE_SELECTORS, BOT_CHALLENGE_TEXT, LOGIN_HINTS, classifyBlocked, readBlocked } from "./blocked.js";
 export { CONSENT_NAME_PATTERN, CONSENT_RULES, dismissConsent } from "./consent.js";
 export { consoleNotifier, handoffToHuman, humanStep, type Notifier } from "./human.js";
 export { TURNSTILE_SELECTORS, clickTurnstile } from "./turnstile.js";

@@ -182,10 +182,28 @@ export async function classifyBlocked(
   response?: { status?: number | undefined },
   options: ClassifyBlockedOptions = {},
 ): Promise<BlockedStatus | null> {
+  return (await readBlocked(page, response, options)).status;
+}
+
+/**
+ * `classifyBlocked`'s verdict and how much it rests on. `weak` is true only for
+ * a `blocked_bot_detection` that fired on the corroborated half alone — a
+ * widget or challenge wording on a page that declares no product and renders
+ * almost nothing, and is not a shell by the shell rule. A single-page app still
+ * rendering reads exactly that way (a spinner, a location modal with reCAPTCHA
+ * in it), so a caller that can wait re-reads a weak verdict after the page
+ * settles instead of taking it (R9).
+ */
+export async function readBlocked(
+  page: Page,
+  response?: { status?: number | undefined },
+  options: ClassifyBlockedOptions = {},
+): Promise<{ status: BlockedStatus | null; weak: boolean }> {
+  const none = { status: null, weak: false };
   // A page the site says is gone is not a challenge, whatever widget its error
   // template embeds: one store's 404 page loads reCAPTCHA for its newsletter
   // form and read as `blocked_bot_detection` (2026-09-28).
-  if (response?.status === 404 || response?.status === 410) return null;
+  if (response?.status === 404 || response?.status === 410) return none;
   const facts = await page
     .evaluate(collectFacts, {
       decisiveSelectors: [...DECISIVE_CHALLENGE_SELECTORS],
@@ -195,7 +213,7 @@ export async function classifyBlocked(
       textCap: 5_000,
     })
     .catch(() => null);
-  if (!facts) return null;
+  if (!facts) return none;
 
   const reading = readChallenge({
     title: facts.title,
@@ -208,8 +226,8 @@ export async function classifyBlocked(
 
   // A decisive reading settles it: those markers appear when, and only when, a
   // request was mitigated.
-  if (reading !== null && reading.corroborated !== true) return "blocked_bot_detection";
-  if (options.decisiveOnly) return null;
+  if (reading !== null && reading.corroborated !== true) return { status: "blocked_bot_detection", weak: false };
+  if (options.decisiveOnly) return none;
 
   /**
    * The login wall is asked **before** the corroborated half, and the reason is
@@ -220,7 +238,7 @@ export async function classifyBlocked(
    */
   if (facts.hasPasswordField) {
     const wording = `${facts.url} ${facts.title} ${facts.text}`;
-    if (matchesAny(wording, LOGIN_HINTS) && !(await hasListContent(page))) return "blocked_login_required";
+    if (matchesAny(wording, LOGIN_HINTS) && !(await hasListContent(page))) return { status: "blocked_login_required", weak: false };
   }
 
   if (reading !== null) {
@@ -241,9 +259,9 @@ export async function classifyBlocked(
      */
     const html = await page.content().catch(() => "");
     const view = options.view ?? bank();
-    if (html !== "" && view.run("shell-skips-tier-1", { html }).fires) return null;
-    return "blocked_bot_detection";
+    if (html !== "" && view.run("shell-skips-tier-1", { html }).fires) return none;
+    return { status: "blocked_bot_detection", weak: true };
   }
 
-  return null;
+  return none;
 }
