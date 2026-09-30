@@ -106,7 +106,18 @@ describe(".actor/actor.json and dataset schema", () => {
     expect((actorJson.environmentVariables as Record<string, string>).NAVVI_BROWSER).toBe("chromium");
     expect(actorJson.minMemoryMbytes as number).toBeGreaterThanOrEqual(1024);
     expect(datasetSchema.fields.properties._source).toBeTruthy();
-    expect(Object.keys(datasetSchema.views)).toEqual(["overview"]);
+    expect(Object.keys(datasetSchema.views)).toEqual(["overview", "example"]);
+  });
+
+  it("points the Store at its own README and names the prefill's fields in the example view (U14 / R18)", () => {
+    expect(actorJson.readme).toBe("./README.md");
+    const readme = readFileSync(join(ROOT, ".actor", "README.md"), "utf8");
+    // The Store renders the README outside the repository: a relative link would break.
+    expect(readme).not.toMatch(/\]\((?!https:\/\/)[^)]*\)/);
+    expect(readme).toContain("## Data disclosure");
+    const example = (datasetSchema.views as Record<string, { transformation: { fields: string[] } }>).example!;
+    const prefillFields = (schema.properties.fields?.prefill as { name: string }[]).map((f) => f.name);
+    expect(example.transformation.fields).toEqual([...prefillFields, "_source", "_startUrl"]);
   });
 });
 

@@ -6,7 +6,7 @@
   "version": "3.1",
   "buildTag": "beta",
   "dockerfile": "./Dockerfile",
-  "readme": "../README.md",
+  "readme": "./README.md",
   "input": "./input_schema.json",
   "storages": {
     "dataset": "./dataset_schema.json"

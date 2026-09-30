@@ -119,7 +119,7 @@ trusted; a run where every page was a challenge ends `blocked_bot_detection`.
 
 | Event | Charged |
 | --- | --- |
-| `actor-start` | Once, first thing; covers navigation model spend when the operator key is used |
+| `actor-start` | Once, first thing |
 | `scraper-compiled` | Once per template, the first time a page passes the fingerprint check with a scraper compiled this run; a cache hit charges nothing |
 | `page-scraped` | Per scraped page (listing, paginated page, detail page); the limit is checked before every page |
 | `result-item` | Per dataset item |
@@ -138,4 +138,11 @@ the events; the actor's platform usage (compute, residential proxy, storage)
 is the operator's cost, which is why the event prices carry a compute margin.
 The prices themselves are whatever the Console shows for the actor; this page
 states none.
+
+## Publishing to the Store
+
+The Store page is `.actor/README.md` (the `readme` in `.actor/actor.json`),
+written for Store users with absolute links only. What remains is Console work,
+credentials and two open decisions, listed in order in the
+[Store publication checklist](store-checklist.md).
 

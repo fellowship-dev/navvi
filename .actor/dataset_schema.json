@@ -1,7 +1,7 @@
 {
   "actorSpecification": 1,
   "title": "Navvi records",
-  "description": "One item per record: the requested fields (typed when a type was declared), plus _source, the page it came from, and _startUrl, the start URL that produced it.",
+  "description": "One item per record: the requested fields (typed when a type was declared: money, number and integer as numbers, boolean as true/false, url as an absolute link; null when a value does not coerce), plus _source, the page it came from, and _startUrl, the start URL that produced it. Run-level accounting (dead, transient, blocked, unsettled and no-payload pages, empty listings, off-template URLs, optional drift, injection flags) is in the SUMMARY record of the run's key-value store, not in the dataset.",
   "fields": {
     "type": "object",
     "properties": {
@@ -14,11 +14,27 @@
   "views": {
     "overview": {
       "title": "Records",
-      "description": "The extracted records with their source page and start URL.",
+      "description": "The extracted records with their source page and start URL. Your requested fields are in the All fields tab.",
       "transformation": { "fields": ["_source", "_startUrl"] },
       "display": {
         "component": "table",
         "properties": {
+          "_source": { "label": "Source", "format": "link" },
+          "_startUrl": { "label": "Start URL", "format": "link" }
+        }
+      }
+    },
+    "example": {
+      "title": "Example run (Hacker News)",
+      "description": "The fields of the prefilled example run: the Hacker News front page, list mode, typed fields. Empty columns on a run that asked for other fields.",
+      "transformation": { "fields": ["title", "link", "points", "comments", "_source", "_startUrl"] },
+      "display": {
+        "component": "table",
+        "properties": {
+          "title": { "label": "Title", "format": "text" },
+          "link": { "label": "Link", "format": "link" },
+          "points": { "label": "Points", "format": "number" },
+          "comments": { "label": "Comments", "format": "number" },
           "_source": { "label": "Source", "format": "link" },
           "_startUrl": { "label": "Start URL", "format": "link" }
         }
