@@ -11,6 +11,9 @@ import { fileURLToPath } from "node:url";
  * - `/demo/pharmacy-v1/...`   and `/demo/pharmacy-v2/...` directly
  * - `/login/`, `/login/index-renamed.html`, `/login/account.html` (cookie-gated), `POST /login`;
  *   `switchLogin("renamed")` serves the renamed form (button "Sign in") at `/login/` (heal proof for a trace step)
+ * - `/login-otp/` a two-step login (U16): email and password (`POST /login-otp`), then `/login-otp/verify` asks for a
+ *   one-time code (`POST /login-otp/verify`) and `/login-otp/account` opens only when the code equals `expectOtp(code)`;
+ *   `lastOtp()` is the code the site last received
  * - `/demo/pharmacy[-v1|-v2]/producto/challenge-<anything>.html`  a product URL answered by the bot challenge (503):
  *   a store that challenges some requests of a template it serves
  * - `/demo/pharmacy[-v1|-v2]/producto/error-<anything>.html`  the store's error template with status 500
@@ -39,6 +42,10 @@ export interface FixtureServer {
   switchDemo(version: DemoVersion): void;
   currentDemo(): DemoVersion;
   switchLogin(version: LoginVersion): void;
+  /** The one-time code `/login-otp/verify` accepts; null accepts none. */
+  expectOtp(code: string | null): void;
+  /** The code last posted to `/login-otp/verify`. */
+  lastOtp(): string | null;
   close(): Promise<void>;
 }
 
@@ -101,6 +108,8 @@ async function sendFile(res: http.ServerResponse, file: string, status = 200): P
 export async function startFixtureServer(): Promise<FixtureServer> {
   let demo: DemoVersion = "v1";
   let login: LoginVersion = "normal";
+  let expectedOtp: string | null = null;
+  let receivedOtp: string | null = null;
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -117,6 +126,27 @@ export async function startFixtureServer(): Promise<FixtureServer> {
           redirect(res, "/login/?error=1");
         }
         return;
+      }
+      if (pathname.startsWith("/login-otp")) {
+        const cookies = req.headers.cookie ?? "";
+        if (pathname === "/login-otp" && method === "POST") {
+          const params = new URLSearchParams(await readBody(req));
+          if ((params.get("password") ?? "").length > 0) redirect(res, "/login-otp/verify", { "Set-Cookie": "otp_pending=1; Path=/; HttpOnly" });
+          else redirect(res, "/login-otp/");
+          return;
+        }
+        if (pathname === "/login-otp/verify" && method === "POST") {
+          receivedOtp = new URLSearchParams(await readBody(req)).get("otp");
+          if (expectedOtp !== null && receivedOtp === expectedOtp) redirect(res, "/login-otp/account", { "Set-Cookie": "otp_session=ok; Path=/; HttpOnly" });
+          else redirect(res, "/login-otp/verify?error=1");
+          return;
+        }
+        if (pathname === "/login-otp/verify") return void sendHtml(res, 200, otpVerifyPage(url.searchParams.has("error")));
+        if (pathname === "/login-otp/account") {
+          if (!cookies.includes("otp_session=ok")) return void redirect(res, "/login-otp/");
+          return void sendHtml(res, 200, `<!doctype html><title>Account</title><h1>Your account</h1><p>Signed in with two steps.</p>`);
+        }
+        return void sendHtml(res, 200, OTP_LOGIN_PAGE);
       }
       if (pathname === "/login/logout") {
         redirect(res, "/login/", { "Set-Cookie": "session=; Path=/; Max-Age=0" });
@@ -248,12 +278,35 @@ export async function startFixtureServer(): Promise<FixtureServer> {
     switchLogin(version) {
       login = version;
     },
+    expectOtp(code) {
+      expectedOtp = code;
+    },
+    lastOtp: () => receivedOtp,
     close: () =>
       new Promise<void>((resolve, reject) => {
         server.closeAllConnections();
         server.close((error) => (error ? reject(error) : resolve()));
       }),
   };
+}
+
+const OTP_LOGIN_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Member login</title></head><body>
+<h1>Member login</h1>
+<form method="post" action="/login-otp">
+  <label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username">
+  <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password">
+  <button type="submit">Log in</button>
+</form></body></html>`;
+
+function otpVerifyPage(error: boolean): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Two-step verification</title></head><body>
+<h1>Two-step verification</h1>${error ? '<p role="alert">That code did not work.</p>' : ""}
+<p>Enter the code from your authenticator app.</p>
+<form method="post" action="/login-otp/verify">
+  <label for="otp">Verification code</label><input id="otp" name="otp" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code">
+  <label for="note">Note</label><textarea id="note" name="note"></textarea>
+  <button type="submit">Verify</button>
+</form></body></html>`;
 }
 
 function sendHtml(res: http.ServerResponse, status: number, body: string): void {

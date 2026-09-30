@@ -7,7 +7,8 @@ import type { Answer, Chooser, JsonValue, Question, QuestionContext } from "../c
 import { premises } from "../chooser/questions.js";
 import { LIMITS, type Profile } from "../input/schema.js";
 import type { StepExpect, TraceStep } from "../scraper/schema.js";
-import { maskSecrets } from "../secrets/resolve.js";
+import { maskSecrets, placeholderFor } from "../secrets/resolve.js";
+import { generateTotp, isTotpName, seedMaskValues, systemClock, type TotpClock } from "../secrets/totp.js";
 import { clip } from "../util/text.js";
 import { generateText, policyControl, type RecentAction } from "./textHelper.js";
 import { captureExpectation, cssHint, isHttpHref, readLandmarks, secretNameFor, TraceRecorder, type Landmark } from "./trace.js";
@@ -76,6 +77,8 @@ export interface NavigateOptions {
   settle?: SettleOptions | undefined;
   /** Resolved secret values by placeholder name; used only to fill, never logged (R39). */
   secrets?: Readonly<Record<string, string>> | undefined;
+  /** U16: the clock a `totp:` secret's code is generated on when it is typed; the system clock by default. */
+  clock?: TotpClock | undefined;
 }
 
 export type NavigateStatus = "DONE" | "BLOCKED";
@@ -286,7 +289,12 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
   const maxRequests = options.maxRequests ?? LIMITS.navigationRequests;
   const settle: SettleOptions = options.settle ?? { idleMs: 150, maxMs: 2_000 };
   const secrets = options.secrets ?? {};
-  const secretEntries = Object.entries(secrets);
+  // U16: a TOTP seed is masked with its base32 secret too, and every code
+  // generated during the run joins the set once typed (the field's value is
+  // in the next observation).
+  const secretEntries: Array<[string, string]> = Object.entries(secrets).flatMap(([name, value]) =>
+    isTotpName(name) ? seedMaskValues(value).map((v): [string, string] => [name, v]) : [[name, value] as [string, string]],
+  );
   /** R39: every string that reaches the chooser or the result carries `[secret:name]` in place of a value. */
   const redact = (text: string): string => maskSecrets(text, secretEntries);
   const policy = { allowMutations };
@@ -303,7 +311,7 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
 
   const secretFor = (c: SnapshotControl): string | null => {
     if (profile !== "local") return null;
-    const name = secretNameFor(c);
+    const name = secretNameFor(c, Object.keys(secrets));
     return typeof secrets[name] === "string" ? name : null;
   };
 
@@ -475,6 +483,11 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
         let value: string;
         if (secret !== null) {
           value = secrets[secret] ?? "";
+          if (isTotpName(secret)) {
+            // U16: the code for this moment, never the seed.
+            value = (await generateTotp(value, options.clock ?? systemClock)).reveal();
+            secretEntries.push([secret, value]);
+          }
         } else {
           if (control.secretCapable || isPersonalDataField(policyControl(control))) return { executed: false, skipped: "personal-data field without a secret" };
           const refusal = refused(control);
@@ -568,7 +581,7 @@ export async function navigate(page: Page, options: NavigateOptions): Promise<Na
     const urlBefore = observation.url;
     await settleAfter(page, outcome.control, outcome.navigation, urlBefore, settle);
     const label = outcome.control ? `${outcome.op} ${outcome.control.role} ${JSON.stringify(clip(outcome.control.name, 60))}` : outcome.op;
-    const shownText = outcome.secret !== undefined ? `{{secret:${outcome.secret}}}` : outcome.text;
+    const shownText = outcome.secret !== undefined ? placeholderFor(outcome.secret) : outcome.text;
 
     const url = page.url();
     if (!onDomain(url)) {

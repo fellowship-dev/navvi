@@ -19,6 +19,50 @@ once per run and kept in memory for that run. A bundle that is set but cannot
 be opened (missing or wrong passphrase, altered text, another version) ends
 the run as `configuration_error`. The message never includes a value.
 
+## TOTP codes
+
+A login's second step is the placeholder `{{totp:name}}`. It names a TOTP seed
+stored as the secret `totp:<name>`, resolved from the same sources as any other
+secret, with one addition, checked first among the environment names:
+
+1. `input.secrets["totp:<name>"]`
+2. `NAVVI_TOTP_<NAME>`, then `NAVVI_SECRET_TOTP_<NAME>`
+3. The sealed bundle's `totp:<name>` (a gopass entry's `totp:` line lands
+   here at seal time)
+4. The keychain, account `totp:<name>`
+5. On Apify, the `SECRET_TOTP_<NAME>` record
+
+The seed is an `otpauth://totp/...?secret=BASE32` URI, with optional
+`digits`, `period` and `algorithm` (SHA1, SHA256, SHA512), or a bare base32
+secret, which means 6 digits every 30 s with SHA1. The run checks it up front.
+A seed that is missing or cannot make a code ends the run before the browser
+opens, as `blocked_login_required`. The error names `{{totp:name}}` but never
+the value.
+
+The code is computed in-process (RFC 6238, no `gopass otp`, no binary) at the
+step that types it, not when the run starts. If less than 5 s remain in the
+current window, or this process already used the current window's code for
+that seed, it waits for the next window. Sites refuse a code that expires in
+transit or has already been used once.
+
+- While recording, the navigator names a field `totp:<name>` when it is marked
+  `autocomplete="one-time-code"` or looks like an OTP field (an otp,
+  verification-code or authenticator-code name, id or label). The name comes
+  from the run's `{{totp:name}}`, or `totp:otp` if the run has none.
+- At replay, a `totp:` secret is typed only into an `<input>` of type text,
+  tel or number that is marked one-time-code, looks like an OTP field, or is a
+  short numeric field (`inputmode="numeric"` with `maxlength` 4 to 10). It is
+  never typed into a password field, a textarea or a plain text field. Any
+  other target refuses the step.
+- The seed and every generated code are masked like any other secret: they
+  never enter a chooser question, a log, a trace or the scraper JSON. The
+  trace records only `"secret": "totp:<name>"`.
+
+```sh
+NAVVI_TOTP_ACME='otpauth://totp/Acme:me?secret=JBSWY3DPEHPK3PXP' \
+  navvi "log in with {{totp:acme}} and list my invoices" https://acme.example/login --profile local
+```
+
 ## The sealed bundle
 
 Seal once on the machine that holds the secrets. After that, the bundle and its

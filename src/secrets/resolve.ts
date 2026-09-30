@@ -4,6 +4,7 @@ import { NavviError } from "../billing/budget.js";
 import type { CompiledScraper } from "../scraper/schema.js";
 import type { RunInput } from "../input/schema.js";
 import { BUNDLE_ENV, PASSPHRASE_ENV, openBundle as openSealedBundle } from "./bundle.js";
+import { isTotpName, parseTotpSeed, TOTP_PREFIX } from "./totp.js";
 
 /**
  * Secrets (R39). A scraper only ever carries the placeholder `{{secret:name}}`;
@@ -13,9 +14,20 @@ import { BUNDLE_ENV, PASSPHRASE_ENV, openBundle as openSealedBundle } from "./bu
  * (`security find-generic-password -s navvi -a <name> -w`) and an Apify
  * source. Values live in a `Secret` whose every rendering path is "[secret]".
  * A missing secret ends the run before the browser opens.
+ *
+ * U16: `{{totp:name}}` is the secret `totp:<name>`, a TOTP seed resolved the
+ * same way (plus `NAVVI_TOTP_<NAME>` first among the env names), checked to
+ * be a seed up front and turned into a code only at the step that types it
+ * (totp.ts).
  */
 
 export const SECRET_PLACEHOLDER = /\{\{secret:([a-zA-Z_][a-zA-Z0-9_-]*)\}\}/g;
+export const TOTP_PLACEHOLDER = /\{\{totp:([a-zA-Z_][a-zA-Z0-9_-]*)\}\}/g;
+
+/** How a secret name reads as a placeholder: `{{totp:x}}` for `totp:x`, else `{{secret:x}}`. */
+export function placeholderFor(name: string): string {
+  return isTotpName(name) ? `{{${name}}}` : `{{secret:${name}}}`;
+}
 export const KEYCHAIN_SERVICE = "navvi";
 
 /** How a secret value renders anywhere it might be printed. */
@@ -85,10 +97,12 @@ export class Secret {
 export class MissingSecretError extends NavviError {
   declare readonly status: "blocked_login_required";
   readonly placeholder: string;
-  constructor(name: string, tried: readonly string[]) {
+  /** `problem` replaces "is not available" when a source had a value that is unusable (never the value itself). */
+  constructor(name: string, tried: readonly string[], problem?: string) {
+    const env = isTotpName(name) ? totpEnvName(name) : secretEnvName(name);
     super(
       "blocked_login_required",
-      `secret {{secret:${name}}} is not available; tried ${tried.join(", ")}. Provide it as input.secrets.${name}, ${secretEnvName(name)}, a sealed ${BUNDLE_ENV} bundle (navvi secrets seal) or a keychain item (service ${KEYCHAIN_SERVICE}, account ${name})`,
+      `secret ${placeholderFor(name)} ${problem ?? "is not available"}; tried ${tried.join(", ")}. Provide it as input.secrets.${name}, ${env}, a sealed ${BUNDLE_ENV} bundle (navvi secrets seal) or a keychain item (service ${KEYCHAIN_SERVICE}, account ${name})`,
     );
     this.placeholder = name;
   }
@@ -96,6 +110,12 @@ export class MissingSecretError extends NavviError {
 
 export function secretEnvName(name: string): string {
   return `NAVVI_SECRET_${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
+}
+
+/** U16: the env variable a TOTP seed is read from first, `NAVVI_TOTP_<NAME>` for `totp:<name>`. */
+export function totpEnvName(name: string): string {
+  const bare = isTotpName(name) ? name.slice(TOTP_PREFIX.length) : name;
+  return `NAVVI_TOTP_${bare.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
 }
 
 export type PlaceholderSource = string | CompiledScraper | undefined | null;
@@ -113,7 +133,10 @@ export function findPlaceholders(source: PlaceholderSource | readonly Placeholde
   const list = Array.isArray(source) ? source : [source as PlaceholderSource];
   for (const item of list) {
     if (typeof item === "string") {
-      for (const match of item.matchAll(SECRET_PLACEHOLDER)) add(match[1]!);
+      const found: Array<[index: number, name: string]> = [];
+      for (const match of item.matchAll(SECRET_PLACEHOLDER)) found.push([match.index, match[1]!]);
+      for (const match of item.matchAll(TOTP_PLACEHOLDER)) found.push([match.index, `${TOTP_PREFIX}${match[1]!}`]);
+      for (const [, name] of found.sort((a, b) => a[0] - b[0])) add(name);
     } else if (isScraper(item)) {
       for (const step of item.trace) if (step.secret) add(step.secret);
     }
@@ -173,6 +196,10 @@ export async function resolveSecrets(names: readonly string[], sources: SecretSo
     const tried: string[] = [];
     let value: string | null | undefined = sources.input?.[name];
     tried.push("input.secrets");
+    if (!value && isTotpName(name)) {
+      value = env[totpEnvName(name)];
+      tried.push(totpEnvName(name));
+    }
     if (!value) {
       value = env[secretEnvName(name)];
       tried.push(secretEnvName(name));
@@ -190,6 +217,14 @@ export async function resolveSecrets(names: readonly string[], sources: SecretSo
       tried.push("apify");
     }
     if (!value) throw new MissingSecretError(name, tried);
+    if (isTotpName(name)) {
+      // U16: a seed that cannot make a code fails now, not at the login step.
+      try {
+        parseTotpSeed(value);
+      } catch (error) {
+        throw new MissingSecretError(name, tried, `is ${error instanceof Error ? error.message : "not a TOTP seed"}`);
+      }
+    }
     out.set(name, new Secret(value));
   }
   return out;

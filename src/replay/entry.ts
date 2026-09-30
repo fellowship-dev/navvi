@@ -7,7 +7,8 @@ import type { Profile } from "../input/schema.js";
 import { isHttpHref, matchesUrlPattern } from "../navigate/trace.js";
 import { resolveUrl } from "../scraper/extract.js";
 import type { CompiledScraper, LocatorAlternative, Status, StepExpect, TraceStep } from "../scraper/schema.js";
-import type { Secret } from "../secrets/resolve.js";
+import { placeholderFor, type Secret } from "../secrets/resolve.js";
+import { generateTotp, isOneTimeCodeField, isTotpName, systemClock, type TotpClock } from "../secrets/totp.js";
 
 /**
  * Entry modes and trace replay (R14, R24, R25, KTD14). A compiled list
@@ -47,6 +48,8 @@ export interface ReplayTraceOptions {
   secrets: ReadonlyMap<string, Secret>;
   policy: ReplayPolicy;
   onStepFailed?: ((stepIndex: number, page: Page, reason: string) => Promise<StepFailureAction>) | undefined;
+  /** U16: the clock a TOTP code is generated on at its step; the system clock by default. */
+  clock?: TotpClock | undefined;
 }
 
 /** Locator resolution and action timeout per step. */
@@ -115,6 +118,9 @@ interface LiveControl {
   href: string | undefined;
   autocomplete: string | undefined;
   nameAttr: string | undefined;
+  idAttr: string | undefined;
+  inputMode: string | undefined;
+  maxLength: number | undefined;
   form: { method: string; action: string } | null;
 }
 
@@ -130,6 +136,9 @@ function readLiveControl(locator: Locator): Promise<LiveControl> {
       href: typeof anchor.href === "string" && anchor.href ? anchor.href : undefined,
       autocomplete: input.autocomplete || undefined,
       nameAttr: el.getAttribute("name") ?? undefined,
+      idAttr: el.id || undefined,
+      inputMode: el.getAttribute("inputmode")?.toLowerCase() ?? undefined,
+      maxLength: el.tagName === "INPUT" && input.maxLength > 0 ? input.maxLength : undefined,
       form: form ? { method: (form.getAttribute("method") ?? "get").toLowerCase(), action: form.action || "" } : null,
     };
   });
@@ -164,12 +173,15 @@ const TEXT_ROLES: ReadonlySet<string> = new Set(["textbox", "searchbox", "combob
 
 /**
  * R24: the `password` secret (the name `secretNameFor` gives every password
- * input at compile) goes only into a password input; any other secret (a
- * username, an account code) into a text-like control: a text, email, tel,
- * search or url input, a textarea, or a textbox-role editor.
+ * input at compile) goes only into a password input; a `totp:` secret (U16)
+ * only into a one-time-code input (`isOneTimeCodeField`), never a password or
+ * free-text field; any other secret (a username, an account code) into a
+ * text-like control: a text, email, tel, search or url input, a textarea, or
+ * a textbox-role editor.
  */
 function secretFitsControl(name: string, live: LiveControl, role: string | undefined): boolean {
   if (name === "password") return live.type === "password";
+  if (isTotpName(name)) return isOneTimeCodeField({ ...live, inputType: live.type });
   if (live.tag === "input") return live.type === undefined || TEXT_INPUT_TYPES.has(live.type);
   if (live.tag === "textarea") return true;
   return role !== undefined && TEXT_ROLES.has(role);
@@ -221,13 +233,16 @@ async function runStep(page: Page, step: TraceStep, options: ReplayTraceOptions,
       const locator = await requireLocator(page, step.alternatives);
       if (step.secret !== undefined) {
         const secret = options.secrets.get(step.secret);
-        if (!secret) throw new RefusedError(`secret {{secret:${step.secret}}} was not resolved`);
+        if (!secret) throw new RefusedError(`secret ${placeholderFor(step.secret)} was not resolved`);
         const live = await readLiveControl(locator);
+        const totp = isTotpName(step.secret);
         if (!secretFitsControl(step.secret, live, step.alternatives[0]?.role)) {
-          const fit = step.secret === "password" ? "a password input" : "a text-like input";
-          throw new RefusedError(`secret {{secret:${step.secret}}} may only be typed into ${fit} (R24)`);
+          const fit = step.secret === "password" ? "a password input" : totp ? "a one-time-code input" : "a text-like input";
+          throw new RefusedError(`secret ${placeholderFor(step.secret)} may only be typed into ${fit} (R24)`);
         }
-        await locator.fill(secret.reveal(), { timeout: STEP_TIMEOUT_MS });
+        // U16: the code is generated now, at the step, from the seed; the seed itself is never typed.
+        const value = totp ? await generateTotp(secret, options.clock ?? systemClock) : secret;
+        await locator.fill(value.reveal(), { timeout: STEP_TIMEOUT_MS });
         // the form policy asks whether a password was typed; a username secret is typed text to it
         if (step.secret === "password") state.typedSecret = true;
         else state.typedText = true;

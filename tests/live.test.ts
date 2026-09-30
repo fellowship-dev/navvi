@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createChooser, RecordingChooser } from "../src/chooser/index.js";
 import { run } from "../src/main.js";
 import type { CrawlDeps } from "../src/replay/crawler.js";
+import { BUNDLE_ENV, openBundle, PASSPHRASE_ENV } from "../src/secrets/bundle.js";
 
 /**
  * Live gate (`npm run test:live`): NAVVI_LIVE=1 and a key. One AE1-like list
@@ -57,4 +58,41 @@ describe.skipIf(!LIVE || available.length === 0)("live: python.org/jobs (AE1)", 
 
 describe.skipIf(LIVE && available.length > 0)("live: skipped", () => {
   it.skip(`needs NAVVI_LIVE=1 and AI_GATEWAY_API_KEY, TYPESAFE_API_KEY or ANTHROPIC_API_KEY (live=${LIVE}, keys=${available.length})`, () => undefined);
+});
+
+/**
+ * U16 (R21): an unattended login with a TOTP second step, from a sealed
+ * bundle, against a real site (ISC2 in the plan). Nothing site-specific lives
+ * here: the site, the goal and the credentials all come from the environment,
+ * and the case is skipped unless they are present.
+ *
+ * - NAVVI_LIVE_TOTP_URL    the login page
+ * - NAVVI_LIVE_TOTP_GOAL   the goal, naming the seed as {{totp:<name>}}
+ * - NAVVI_LIVE_TOTP_FIELDS fields to read once logged in (comma separated; default "name")
+ * - NAVVI_SECRETS / NAVVI_SECRETS_PASSPHRASE  a bundle holding `username`, `password` and `totp:<name>`
+ *
+ * Two runs in one process: the first navigates and records the login, the
+ * second replays the stored trace, which needs a fresh code (the spent-window
+ * guard waits for the next window). No run output may contain a bundle value.
+ */
+const TOTP_URL = env.NAVVI_LIVE_TOTP_URL;
+const TOTP_GOAL = env.NAVVI_LIVE_TOTP_GOAL;
+const TOTP_READY = LIVE && available.includes("jev") && !!TOTP_URL && !!TOTP_GOAL && !!env[BUNDLE_ENV] && !!env[PASSPHRASE_ENV];
+
+describe.skipIf(!TOTP_READY)("live: TOTP login from a sealed bundle (R21)", () => {
+  it("logs in with a generated code, then replays the login unattended; no secret value reaches the output", async () => {
+    const values = [...(await openBundle(env[BUNDLE_ENV]!, env[PASSPHRASE_ENV]!)).values()];
+    const actor = new Actor({ storageClient: new MemoryStorage({ localDataDirectory: mkdtempSync(join(dir, "storage-")), persistStorage: false }) });
+    const fields = (env.NAVVI_LIVE_TOTP_FIELDS ?? "name").split(",").map((name) => ({ name: name.trim() })).filter((f) => f.name);
+    const input = { browser: "chromium" as const, startUrls: [TOTP_URL!], mode: "record" as const, profile: "local" as const, goal: TOTP_GOAL!, fields };
+    const deps = (): CrawlDeps => ({ actor, chooser: createChooser({ chooser: "jev", env }), env, storageDir: mkdtempSync(join(dir, "profiles-")), attended: false, maxConcurrency: 1 });
+    const first = await run(input, deps());
+    expect(first.status).toBe("succeeded");
+    const second = await run(input, deps());
+    expect(second.status).toBe("succeeded");
+    expect(second.cacheHit).toBe(true);
+    const rows = (await (await actor.openDataset()).getData()).items;
+    const output = JSON.stringify({ first, second, rows });
+    for (const value of values) if (value.length >= 3) expect(output.includes(value)).toBe(false);
+  }, 600_000);
 });
