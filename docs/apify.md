@@ -26,8 +26,30 @@ The actor input differs from the CLI in three places: `startUrls` takes
 `writer` is `model` (the image has no CLI to run on a subscription); a caller key
 comes as a secret input (`typesafeApiKey`, `gatewayApiKey`,
 `anthropicApiKey`) and is used for that run only. `scriptId` pins a compiled
-scraper by key, with `scraperStore` naming the key-value store when the key
-is bare (default `scraper-cache` in your account). Locally,
+scraper by key: it replays every start URL that matches its template, reports
+the rest as `offTemplate` and never compiles them. `scraperStore` names the
+key-value store the run reads and writes its scrapers in (default
+`scraper-cache` in your account), so a trial run keeps its compiled and healed
+scrapers out of the shared cache; a bare `scriptId` is read from it. Pass the
+store by ID: under limited permissions a store given by name cannot be opened,
+and the run ends `configuration_error` naming the store and that fix.
+
+A few inputs exist for large lists:
+
+- **`maxPages`** is the run's page budget (up to 20,000). Every start URL's
+  first page is read regardless, so a thousand search URLs are a thousand
+  listings; pagination and detail pages stop at the budget.
+- **`maxPagesPerStart`** caps one listing's pagination, its first page
+  included (`1` reads only the first page of each search).
+- **`maxConcurrency`** (default 4) and **`minConcurrency`** set how many replay
+  pages run at once; a compile always runs one page at a time. Replay pages
+  skip images, fonts and media.
+- **`fields[].optional`**: a field that may be empty on a healthy page (a list
+  price that exists only during a discount). Replay never heals its nulls.
+
+Every dataset row carries `_source`, the page it was read on, and `_startUrl`,
+the start URL that produced it, so a list row joins back to its search.
+Locally,
 
 ```sh
 npx apify run --input-file input.json   # runs dist/src/main.js with local storage
@@ -83,6 +105,17 @@ On Apify the actor charges four events, priced in the Apify Console, never in
 code. Every run ends with a `SUMMARY` record in the run's key-value store
 carrying the status, counts, chooser usage, healing events, the `scriptId` to
 pin next time, the charged event counts and the zero-data-retention state.
+It also accounts for the pages that gave no row and were not healed, each with
+a count and the first 50 URLs, present only when non-zero: `blockedPages` (a bot
+challenge), `deadPages` (404/410, or a redirect off the template),
+`transientPages` (5xx after the retry), `unsettledPages` (a weak challenge
+reading that did not settle within 5 s), `noPayloadPages` (the page's own data
+never arrived), `emptyListings` (a list start URL with no items),
+`offTemplate` (start URLs a pinned scraper does not match) and `optionalDrift`
+(optional fields filled on some pages, empty on others). The first challenge
+page of a run is kept as `BLOCKED_PAGE`, `BLOCKED_PAGE_SCREENSHOT` and
+`BLOCKED_PAGE_META` in the same store, so a block can be checked instead of
+trusted; a run where every page was a challenge ends `blocked_bot_detection`.
 
 | Event | Charged |
 | --- | --- |
@@ -101,6 +134,6 @@ the `charging_log` dataset instead.
 Who pays what under pay-per-event, per Apify's pricing docs: the caller pays
 the events; the actor's platform usage (compute, residential proxy, storage)
 is the operator's cost, which is why the event prices carry a compute margin.
-The first platform run under this pricing confirms the split and this
-paragraph is updated with the observed numbers.
+The prices themselves are whatever the Console shows for the actor; this page
+states none.
 

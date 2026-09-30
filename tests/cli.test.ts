@@ -605,6 +605,32 @@ describe("secrets (R27/R39)", () => {
     expect(io.stderr.text).toContain("NAVVI_SECRET_API_TOKEN");
   });
 
+  it("the summary block names the pages that yielded no row and why, and optional-field drift", async () => {
+    const io = makeIo({
+      run: async () =>
+        summary({
+          items: 3,
+          deadPages: { count: 2, urls: [] },
+          transientPages: { count: 1, urls: [] },
+          blockedPages: 1,
+          unsettledPages: { count: 1, urls: [] },
+          noPayloadPages: { count: 4, urls: [] },
+          emptyListings: { count: 5, urls: [] },
+          offTemplate: { count: 6, urls: [] },
+          optionalDrift: [{ field: "price", pages: 2, filled: 7 }],
+        }),
+    });
+    expect(await main(["--mode", "record", "--fields", "a", "https://example.org/"], io)).toBe(0);
+    expect(io.stderr.text).toContain("no row: dead 2  transient 1  blocked 1  unsettled 1  no payload 4  empty listings 5  off template 6");
+    expect(io.stderr.text).toContain("optional drift: price empty on 2 pages, filled on 7");
+  });
+
+  it("a clean run's summary block has no no-row line", async () => {
+    const io = makeIo({ run: async () => summary({ items: 1 }) });
+    expect(await main(["--mode", "record", "--fields", "a", "https://example.org/"], io)).toBe(0);
+    expect(io.stderr.text).not.toContain("no row:");
+  });
+
   it("--secrets-file loads a JSON object and implies the local profile", async () => {
     const file = join(dir, "secrets.json");
     writeFileSync(file, JSON.stringify({ username: "max", password: "p@ss" }));

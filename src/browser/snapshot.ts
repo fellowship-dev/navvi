@@ -32,7 +32,7 @@ export async function ensureEvaluateShim(page: Page): Promise<void> {
 /**
  * Installs the shim and the snapshot script in every document the context
  * opens, so `ensureSnapshotScript` finds it present and skips the injection.
- * `launch()` calls this; TODO: the crawler should call installSnapshot(context) in its guardContext hook (src/replay/crawler.ts, owned elsewhere).
+ * `launch()` and the crawler's context hook call this.
  */
 export async function installSnapshot(context: BrowserContext): Promise<void> {
   await context.addInitScript(SNAPSHOT_INIT_SCRIPT);

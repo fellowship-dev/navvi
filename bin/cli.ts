@@ -296,6 +296,19 @@ function summaryBlock(summary: RunSummary, dataLine: string): string {
   else lines.push("  chooser: none (no model call)");
   lines.push(`  healing events ${summary.healingEvents.length}  unmapped candidates ${summary.unmappedCandidates.length}  unhealed ${summary.unhealed}`);
   if (summary.fieldsNotFound.length > 0) lines.push(`  fields not found: ${summary.fieldsNotFound.join(", ")}`);
+  // Pages that yielded no row, by why: what a person reads to tell a dead list
+  // entry from a flaky site from a block, without opening the run's records.
+  const noRow = [
+    ["dead", summary.deadPages?.count],
+    ["transient", summary.transientPages?.count],
+    ["blocked", summary.blockedPages],
+    ["unsettled", summary.unsettledPages?.count],
+    ["no payload", summary.noPayloadPages?.count],
+    ["empty listings", summary.emptyListings?.count],
+    ["off template", summary.offTemplate?.count],
+  ].filter((entry): entry is [string, number] => typeof entry[1] === "number" && entry[1] > 0);
+  if (noRow.length > 0) lines.push(`  no row: ${noRow.map(([label, count]) => `${label} ${count}`).join("  ")}`);
+  for (const drift of summary.optionalDrift ?? []) lines.push(`  optional drift: ${drift.field} empty on ${drift.pages} pages, filled on ${drift.filled}`);
   if (dataLine) lines.push(`  ${dataLine}`);
   return lines.join("\n") + "\n";
 }

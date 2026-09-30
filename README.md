@@ -82,9 +82,7 @@ Run the same command again, or point it at another page of the same kind
 No key and no signed-in CLI? `--decider agent` makes your coding agent answer the
 questions itself — see [Give it to your agent](#give-it-to-your-agent).
 
-> Until 3.1.0 is on npm, `npm install -g navvi` gives 3.0.0, which predates the
-> single compiler and `--work`. From source:
-> `git clone https://github.com/fellowship-dev/navvi.git && cd navvi && NAVVI_SKIP_BROWSER_DOWNLOAD=1 npm ci && npx playwright install chromium && npm run build`, then `node dist/bin/cli.js …`.
+From source: `git clone https://github.com/fellowship-dev/navvi.git && cd navvi && NAVVI_SKIP_BROWSER_DOWNLOAD=1 npm ci && npx playwright install chromium && npm run build`, then `node dist/bin/cli.js …`.
 
 ## What you get
 
@@ -98,12 +96,46 @@ questions itself — see [Give it to your agent](#give-it-to-your-agent).
     items 2  pages 2  templates 1  cache hit no
     decider jev: 3 decisions, 10115 input tokens, 7.3s waiting, $0.0004
     writer claude: 1 text question, 18709 input tokens, 7.7s waiting, $0.0000
+    healing events 0  unmapped candidates 0  unhealed 0
+    data: 2 records on stdout
   ```
+
+- **A run report that accounts for every page.** The run summary (the `SUMMARY`
+  record on Apify) counts the pages that gave no row instead of healing them, each
+  with the first 50 URLs, and a key appears only when it is non-zero:
+
+  ```json
+  {
+    "status": "succeeded",
+    "items": 918,
+    "pages": 1000,
+    "unhealed": 0,
+    "blockedPages": 3,
+    "deadPages": { "count": 41, "urls": ["https://example.com/p/retired-item"] },
+    "transientPages": { "count": 2, "urls": ["…"] },
+    "unsettledPages": { "count": 1, "urls": ["…"] },
+    "noPayloadPages": { "count": 4, "urls": ["…"] },
+    "emptyListings": { "count": 12, "urls": ["https://example.com/search?q=…"] },
+    "offTemplate": { "count": 5, "urls": ["https://example.com/category/…"] },
+    "optionalDrift": [{ "field": "listPrice", "pages": 610, "filled": 308 }]
+  }
+  ```
+
+  `blockedPages` is a bot challenge (the first is kept as `BLOCKED_PAGE`, with a
+  screenshot); `deadPages` answered 404/410 or redirected off the template;
+  `transientPages` still answered 5xx after a retry; `unsettledPages` never
+  settled past a weak challenge reading; `noPayloadPages` never received the data
+  the page loads for itself; `emptyListings` are searches that found nothing;
+  `offTemplate` are start URLs a pinned scraper does not match, never compiled;
+  `optionalDrift` is an optional field filled on some pages and empty on others.
 
 - **Typed values when you ask**: `--fields name,price:money,stock:boolean` reads
   `$ 6.990` as `6990` and `Agotado` as `false`; a value that does not coerce is `null`.
 - **A URL list as input**: `--from-url <url>` fetches the pages to scrape from an
   endpoint (newline text or JSON), so a backend can feed the daily list.
+- **Optional fields** (Apify actor input): a field declared
+  `"optional": true` may be empty on a healthy page, such as a list price that
+  exists only during a discount; replay never heals its nulls.
 
 ## How it works
 
@@ -206,7 +238,10 @@ the TypeSafe API if the Gateway is unavailable, saying so in the summary.
 - The run stays on the start URLs' domains (`--allow-domain` widens it); private
   hosts need `--allow-private-host`; destructive-looking clicks need `--allow-mutation`.
 - Defaults: 10 pages, 1000 items, or the limit the prompt states ("up to 10",
-  "the first 3 pages"); `--max-pages` and `--max-items` win over both.
+  "the first 3 pages"); `--max-pages` and `--max-items` win over both. In list
+  mode every start URL's first page is read; `maxPages` bounds the pages after
+  them, and on the actor `maxPagesPerStart` caps one listing's pagination and
+  `maxConcurrency`/`minConcurrency` set how many replay pages run at once.
 - Validate what you extract, not just that it is non-empty: a filled form is not
   always a finished search.
 

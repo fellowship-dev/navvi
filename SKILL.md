@@ -29,7 +29,7 @@ npx navvi "<what to extract or do>" <url...> [--out data.json|data.csv]
 
 Add `--work <dir>` to keep every compile step as a readable file (spec, sample, what each tier found, `rationale.md` for why each field was bound); `navvi make` below is the same pipeline as a resumable driver.
 
-Optional structure when the prompt is not enough: `--mode list|record --fields a,b,c --goal "<navigation>" --from-url <url> --max-pages N --follow-details`. A field may declare an output type, `--fields name,price:money,stock:boolean` (types: `text`, `money`, `integer`, `number`, `boolean`, `url`); the run coerces the value and a value that does not coerce is `null`. `npx navvi --help` lists every flag.
+Optional structure when the prompt is not enough: `--mode list|record --fields a,b,c --goal "<navigation>" --from-url <url> --max-pages N --follow-details`. In list mode every start URL's first page is read (a thousand search URLs are a thousand listings) and `--max-pages` bounds the pages after them. A field may declare an output type, `--fields name,price:money,stock:boolean` (types: `text`, `money`, `integer`, `number`, `boolean`, `url`); the run coerces the value and a value that does not coerce is `null`. `npx navvi --help` lists every flag.
 
 ## Two Commands That Read No Page
 
@@ -72,7 +72,7 @@ Without `--decider`, the first of these applies and the choice prints on stderr 
 2. **Claude Code or Codex installed and signed in** (`claude` or `codex` on PATH): navvi runs it for each batch on your subscription. Nothing to configure; `NAVVI_CLAUDE_MODEL` (default `haiku`) and `NAVVI_CODEX_MODEL` pick the model. An installed CLI that is not signed in is skipped, and the reason names the sign-in command (`claude`, `codex login`).
 3. **Otherwise `agent`**: you are the model and answer the questions yourself, as below.
 
-Without `--writer` the decider writes its own text — every backend but Jev can. **Text questions under `jev` prefer your subscription.** Jev's text questions are handed to another backend, and that hand-off runs the other way round: `claude`, then `codex` when on PATH, then a metered API key (`ANTHROPIC_API_KEY` before `AI_GATEWAY_API_KEY`). `AI_GATEWAY_API_KEY` therefore routes Jev over the Vercel AI Gateway, which is free for Jev, while text work still goes to a signed-in CLI subscription; the metered Gateway text model is reached only with no CLI installed. A CLI that turns out to be signed out is tried once and the run continues with the next backend. `--writer model` (or `--chooser model`) asked for explicitly is always the API model.
+Without `--writer` the decider writes its own text — every backend but Jev can. **Text questions under `jev` prefer your subscription.** Jev's text questions are handed to another backend, and that hand-off runs the other way round: `claude`, then `codex` when on PATH, then a metered API key (`ANTHROPIC_API_KEY` before `AI_GATEWAY_API_KEY`). `AI_GATEWAY_API_KEY` therefore routes Jev over the Vercel AI Gateway, which is free for Jev, while text work still goes to a signed-in CLI subscription; the metered Gateway text model is reached only with no CLI installed. A CLI that turns out to be signed out is tried once and the run continues with the next backend, but once a signed-in CLI has failed a question the chain may try the other CLI and ends there: a signed-out CLI never becomes a route to a metered API. Claude Code and Codex run from a neutral temp directory, so your project's `CLAUDE.md` and hooks never reach them. `--writer model` (or `--chooser model`) asked for explicitly is always the API model.
 
 **`--chooser <name>` still works and means what it always did**: it names the decider and leaves the writer derived. `--decider` and `--writer` win over it when both are given, so `--chooser jev --decider claude` runs Claude Code. When a second source answered the text, the stderr summary adds a `writer` line with its share of the tokens and cost, so each kind of question is attributable.
 
@@ -115,8 +115,9 @@ If you cannot keep stdin open (a tool that runs a command to completion), add `-
 
 ## Output
 
-- stdout (or `--out <file>`): a JSON array of records, one object per item, each with a `_source` URL; `.csv` or `--csv` writes CSV with a header from the union of keys
-- stderr: a summary block (status, items, pages, chooser usage, a `writer` line when a second source answered the text, healing events, unmapped candidates) unless `--quiet`
+- stdout (or `--out <file>`): a JSON array of records, one object per item, each with `_source` (the page it was read on) and `_startUrl` (the start URL that produced it, so a row joins back to its search); `.csv` or `--csv` writes CSV with a header from the union of keys
+- stderr: a summary block (status, items, pages, chooser usage, a `writer` line when a second source answered the text, healing events, unmapped candidates, unhealed) unless `--quiet`
+- The run summary (the `SUMMARY` record on Apify) also counts pages that gave no row and were not healed, each with the first 50 URLs, present only when non-zero: `blockedPages` (a bot challenge; the first is kept as `BLOCKED_PAGE`), `deadPages` (404/410 or redirected off the template), `transientPages` (5xx after a retry), `unsettledPages` (a weak challenge reading that never settled), `noPayloadPages` (the page's own data never arrived), `emptyListings` (a search with no results), `offTemplate` (start URLs a pinned `scriptId` does not match, never compiled) and `optionalDrift` (an optional field filled on some pages and empty on others). Read them before trusting a count of items
 - `storage/key_value_stores/scraper-cache/<cacheKey>.json`: the compiled scraper. Copy or commit that file; the rest of `storage/` holds browser profiles with live sessions and must not be shared
 
 ## Statuses and Exit Codes

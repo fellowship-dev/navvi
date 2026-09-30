@@ -24,6 +24,7 @@
     "SKILL.md",
     "llms.txt",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {

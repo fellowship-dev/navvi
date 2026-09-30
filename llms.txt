@@ -8,6 +8,7 @@
 - [README: Install](README.md#install): from zero to records in three lines.
 - [README: Why use Jev](README.md#why-use-jev): the decision race — the same 19 real navigation questions: Jev 3.5 s, Haiku over the API 12.6 s, Haiku through Claude Code 31-38 s, all 19/19.
 - [README: How it works](README.md#how-it-works): one compiler, cheapest evidence first, questions instead of guesses, zero-model replay.
+- [README: What you get](README.md#what-you-get): records with `_source` and `_startUrl`, the stderr summary, and the run report's page counters (`blockedPages`, `deadPages`, `transientPages`, `unsettledPages`, `noPayloadPages`, `emptyListings`, `offTemplate`, `optionalDrift`).
 - [README: Choosers](README.md#choosers): jev, claude, codex, model, agent; the default order; Jev's writer and transport fallback.
 - [README: Exit codes](README.md#exit-codes): what each status means and what to do next.
 
@@ -16,7 +17,7 @@
 - `npx navvi --help`: every flag, including `make`'s.
 - `storage/key_value_stores/scraper-cache/<cacheKey>.json`: the compiled scraper from a plain run; `<work>/scraper.json` with `--work` or `make`.
 - `storage/questions/<token>.json`: a parked question batch waiting for `--answers <file> --resume <token>`.
-- [docs/apify.md](docs/apify.md): the Apify actor, residential proxies, pay-per-event.
+- [docs/apify.md](docs/apify.md): the Apify actor: its input (`scraperStore`, optional fields, `maxPagesPerStart`, `maxConcurrency`/`minConcurrency`), the `SUMMARY` record, residential proxies, pay-per-event.
 - [docs/architecture.md](docs/architecture.md): every module and import, generated from the code and checked in CI.
 - [docs/decisions-race-provenance.json](docs/decisions-race-provenance.json): the decision race's questions, per-batch latencies and answers.
 - [docs/measurements.md](docs/measurements.md): questions, wait time and cost with and without Jev.
