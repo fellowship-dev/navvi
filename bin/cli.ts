@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Actor } from "apify";
@@ -20,6 +20,7 @@ import { run as runNavvi, type RunSummary } from "../src/main.js";
 import type { Notifier } from "../src/prestep/human.js";
 import type { CompiledTemplate, CrawlActor, CrawlDeps } from "../src/replay/crawler.js";
 import { secretEnvName } from "../src/secrets/resolve.js";
+import { BUNDLE_ENV, gatherSecrets, openBundle, sealBundle, SecretsBundleError } from "../src/secrets/bundle.js";
 
 /**
  * U17 / R35: `npx navvi "<prompt>" <url...>`. Runnable by an agent without
@@ -166,6 +167,58 @@ function defaultSecretPrompt(io: CliIo): (name: string) => Promise<string | null
       stdin.on("data", onData);
     });
   };
+}
+
+/**
+ * U15: `navvi secrets seal|list`. Seal prints the armored bundle and nothing
+ * else on stdout (or writes it 0600 with --out); the names it sealed go to
+ * stderr. No value and no passphrase is ever printed.
+ */
+async function secretsCommand(args: CliArgs, io: CliIo): Promise<number> {
+  const command = args.secretsCommand!;
+  const passphrase = io.env[command.passphraseEnv] ?? "";
+  if (command.verb === "list") {
+    let armored: string | undefined;
+    if (command.bundleIn) {
+      try {
+        armored = readFileSync(resolve(io.cwd, command.bundleIn), "utf8");
+      } catch (error) {
+        throw new CliError(`--in ${command.bundleIn}: ${error instanceof Error && "code" in error ? String(error.code) : "cannot read the file"}`);
+      }
+    } else {
+      armored = io.env[BUNDLE_ENV];
+    }
+    if (!armored) throw new CliError(`no bundle: set ${BUNDLE_ENV} or give --in <file>`);
+    if (!passphrase) throw new CliError(`set ${command.passphraseEnv} to the passphrase the bundle was sealed with`);
+    const names = [...(await openBundle(armored, passphrase)).keys()].sort();
+    io.stdout.write(names.map((name) => `${name}\n`).join(""));
+    return EXIT.ok;
+  }
+  if (passphrase.length < 12) {
+    throw new CliError(`set ${command.passphraseEnv} to a passphrase of at least 12 characters (e.g. \`openssl rand -base64 32\`) before sealing; it becomes the second secret the run needs`);
+  }
+  const { secrets, problems } = await gatherSecrets(command.sources, { env: io.env, cwd: io.cwd });
+  const wanted = [...new Set(command.sources.map((source) => source.name).filter((name): name is string => name !== undefined))];
+  const unanswered = wanted.filter((name) => secrets[name] === undefined);
+  const fileFailed = command.sources.some((source) => source.name === undefined && problems.some((line) => line.startsWith(`${source.from}:`)));
+  for (const line of problems) io.stderr.write(`navvi: ${line}\n`);
+  if (unanswered.length > 0 || fileFailed) {
+    throw new CliError(unanswered.length > 0 ? `nothing sealed: no source answered ${unanswered.join(", ")}` : "nothing sealed: a secrets file could not be read");
+  }
+  if (Object.keys(secrets).length === 0) throw new CliError("nothing sealed: the sources held no secrets");
+  const armored = await sealBundle(secrets, passphrase);
+  const names = Object.keys(secrets).sort();
+  if (args.out) {
+    const file = resolve(io.cwd, args.out);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, `${armored}\n`, { mode: 0o600 });
+    chmodSync(file, 0o600);
+    if (!args.quiet) io.stderr.write(`navvi: sealed ${names.length} secret${names.length === 1 ? "" : "s"} (${names.join(", ")}) -> ${file}\n`);
+  } else {
+    io.stdout.write(`${armored}\n`);
+    if (!args.quiet) io.stderr.write(`navvi: sealed ${names.length} secret${names.length === 1 ? "" : "s"} (${names.join(", ")}); set the line above as ${BUNDLE_ENV} and the passphrase as NAVVI_SECRETS_PASSPHRASE\n`);
+  }
+  return EXIT.ok;
 }
 
 // ---------------------------------------------------------------- input
@@ -349,6 +402,17 @@ export async function main(argv: readonly string[], io: CliIo): Promise<number> 
       return heuristics(args, io);
     } catch (error) {
       if (error instanceof UnknownHeuristicError) {
+        io.stderr.write(`navvi: ${error.message}\n`);
+        return EXIT.configuration;
+      }
+      throw error;
+    }
+  }
+  if (args.command === "secrets") {
+    try {
+      return await secretsCommand(args, io);
+    } catch (error) {
+      if (error instanceof CliError || error instanceof SecretsBundleError) {
         io.stderr.write(`navvi: ${error.message}\n`);
         return EXIT.configuration;
       }

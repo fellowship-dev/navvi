@@ -14,9 +14,23 @@ export const NOTIFY_CHANNELS = ["console", "telegram"] as const;
  * and default one — `navvi "<prompt>" <url...>` — so every existing invocation
  * keeps parsing exactly as it did.
  */
-export const COMMANDS = ["run", "spec", "heuristics", "make"] as const;
+export const COMMANDS = ["run", "spec", "heuristics", "make", "secrets"] as const;
 export type Command = (typeof COMMANDS)[number];
 const SUBCOMMANDS: readonly string[] = ["spec", "heuristics", "make"];
+
+/** U15: `navvi secrets seal|list`. */
+export const SECRETS_VERBS = ["seal", "list"] as const;
+export type SecretsVerb = (typeof SECRETS_VERBS)[number];
+
+export interface SecretsArgs {
+  verb: SecretsVerb;
+  /** `--name <n> --from <source>` pairs, in order; a name applies to every `--from` after it until the next `--name`. */
+  sources: Array<{ name: string | undefined; from: string }>;
+  /** The env variable holding the passphrase (default NAVVI_SECRETS_PASSPHRASE). */
+  passphraseEnv: string;
+  /** `list --in <file>`: a bundle in a file instead of NAVVI_SECRETS. */
+  bundleIn: string | undefined;
+}
 
 export interface CliArgs {
   command: Command;
@@ -109,6 +123,8 @@ export interface CliArgs {
   quiet: boolean;
   help: boolean;
   version: boolean;
+  /** U15: set only under `navvi secrets`. */
+  secretsCommand?: SecretsArgs | undefined;
 }
 
 export type ParseResult = { ok: true; args: CliArgs } | { ok: false; error: string };
@@ -243,6 +259,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     let onlyPositionals = false;
     // Only the very first token selects a command, so a prompt is never eaten by one.
     let start = 0;
+    if (argv[0] === "secrets") return { ok: true, args: parseSecretsArgs(argv.slice(1), args) };
     if (argv.length > 0 && SUBCOMMANDS.includes(argv[0]!)) {
       args.command = argv[0] as Command;
       start = 1;
@@ -283,6 +300,75 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/**
+ * U15: `navvi secrets` has its own small grammar and shares no flag with the
+ * run: `seal --name <n> --from <source>... [--passphrase-env <VAR>] [--out <file>]`
+ * and `list [--in <file>] [--passphrase-env <VAR>]`. Never a value on the
+ * command line: sources are references (gopass entry, env name, file path).
+ */
+function parseSecretsArgs(argv: readonly string[], args: CliArgs): CliArgs {
+  args.command = "secrets";
+  const verb = argv[0];
+  if (verb === undefined) throw new Error("navvi secrets needs seal or list");
+  if (verb === "--help") {
+    args.help = true;
+    return args;
+  }
+  if (!(SECRETS_VERBS as readonly string[]).includes(verb)) throw new Error(`navvi secrets ${verb}: expected seal or list`);
+  const out: SecretsArgs = { verb: verb as SecretsVerb, sources: [], passphraseEnv: "NAVVI_SECRETS_PASSPHRASE", bundleIn: undefined };
+  let name: string | undefined;
+  let nameUsed = true;
+  for (let i = 1; i < argv.length; i++) {
+    const token = argv[i]!;
+    const eq = token.startsWith("--") ? token.indexOf("=") : -1;
+    const flag = eq >= 0 ? token.slice(0, eq) : token;
+    if (flag === "--help") {
+      args.help = true;
+      continue;
+    }
+    if (flag === "--quiet") {
+      args.quiet = true;
+      continue;
+    }
+    const allowed = out.verb === "seal" ? ["--name", "--from", "--passphrase-env", "--out"] : ["--in", "--passphrase-env"];
+    if (!allowed.includes(flag)) throw new Error(token.startsWith("--") ? `navvi secrets ${out.verb} does not take ${flag}` : `navvi secrets ${out.verb}: unexpected "${token}"; values are never given on the command line`);
+    let value: string;
+    if (eq >= 0) {
+      value = token.slice(eq + 1);
+    } else {
+      const next = argv[i + 1];
+      if (next === undefined) throw new Error(`${flag} needs a value`);
+      value = next;
+      i += 1;
+    }
+    switch (flag) {
+      case "--name":
+        if (!nameUsed) throw new Error(`--name ${name} has no --from after it`);
+        name = value;
+        nameUsed = false;
+        break;
+      case "--from":
+        if (!/^(gopass|env|file):./.test(value)) throw new Error(`--from must be gopass:<entry>, env:<VAR> or file:<secrets.json>, got "${value}"`);
+        out.sources.push({ name, from: value });
+        nameUsed = true;
+        break;
+      case "--passphrase-env":
+        out.passphraseEnv = value;
+        break;
+      case "--out":
+        args.out = value;
+        break;
+      case "--in":
+        out.bundleIn = value;
+        break;
+    }
+  }
+  if (!nameUsed) throw new Error(`--name ${name} has no --from after it`);
+  if (out.verb === "seal" && out.sources.length === 0 && !args.help) throw new Error("navvi secrets seal needs at least one --from");
+  args.secretsCommand = out;
+  return args;
 }
 
 function positional(args: CliArgs, token: string): void {
@@ -409,6 +495,8 @@ export function usage(): string {
        navvi spec "<brief>" [flags]
        navvi make ["<brief>"] --work <dir> [flags]
        navvi heuristics [<id>] [--json]
+       navvi secrets seal --name <n> --from gopass:<entry>|env:<VAR>|file:<json> ... [--out <file>]
+       navvi secrets list [--in <file>]
 
 Compile it once so you never drive it again. Prompt in, JSON out; the second
 run replays the compiled scraper with zero model calls and heals drift.
@@ -432,6 +520,14 @@ Commands
                             could not answer are listed on stderr. Reads no page.
   heuristics                List the heuristics that steer investigation and compiling, each
                             with the encounter that produced it. Give an <id> for one.
+  secrets seal              Seal named secrets into one encrypted bundle (scrypt + AES-256-GCM) for
+                            NAVVI_SECRETS; the passphrase comes from NAVVI_SECRETS_PASSPHRASE
+                            (--passphrase-env <VAR> to name another). --name <n> --from <source>,
+                            repeatable; several --from after one --name are tried in order.
+                            gopass:<entry> seals the password as <n>, its username: line as
+                            <n>_username and its totp: line as totp:<n>. file:<json> without
+                            --name seals every key. Prints the bundle only (--out writes it, 0600).
+  secrets list              The names in NAVVI_SECRETS (or --in <file>); never a value. See docs/secrets.md.
 
 Input
   <prompt>                  What to extract or do, in plain words. Optional when --mode and --fields are given.
@@ -509,6 +605,8 @@ Browser, profile, secrets
   --profile store|local     local keeps cookies and takes secrets (implied by --secret / --secrets-file).
   --secret <name>           Read the value from NAVVI_SECRET_<NAME> (or prompt on a TTY). Repeatable.
   --secrets-file <file>     JSON object of name -> value. Values never appear on the command line.
+                            A sealed bundle in NAVVI_SECRETS (+ NAVVI_SECRETS_PASSPHRASE) answers after
+                            NAVVI_SECRET_<NAME> and before the keychain.
   --fresh-profile           Discard the stored profile first.
   --force-recompile         Ignore the cached scraper.   --script-id <id>  Replay a stored scraper by id.
   --storage <dir>           Scrapers, profiles and parked questions (default ./storage).

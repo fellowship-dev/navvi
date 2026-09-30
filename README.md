@@ -233,8 +233,8 @@ the TypeSafe API if the Gateway is unavailable, saying so in the summary.
   than guessing.
 - No captcha solving. `--headed` hands a challenge to the person at the keyboard.
 - Logins use `--profile local`; secrets come from `NAVVI_SECRET_<NAME>`,
-  `--secrets-file` or a TTY prompt — never the command line, a question, a log or
-  the scraper JSON.
+  `--secrets-file`, a TTY prompt or a sealed bundle — never the command line, a
+  question, a log or the scraper JSON.
 - The run stays on the start URLs' domains (`--allow-domain` widens it); private
   hosts need `--allow-private-host`; destructive-looking clicks need `--allow-mutation`.
 - Defaults: 10 pages, 1000 items, or the limit the prompt states ("up to 10",
@@ -244,6 +244,13 @@ the TypeSafe API if the Gateway is unavailable, saying so in the summary.
   `maxConcurrency`/`minConcurrency` set how many replay pages run at once.
 - Validate what you extract, not just that it is non-empty: a filled form is not
   always a finished search.
+
+## Secrets
+
+`navvi secrets seal` turns gopass entries, env vars and a secrets file into one
+encrypted bundle: set it as `NAVVI_SECRETS` plus `NAVVI_SECRETS_PASSPHRASE` on
+Apify or any server and logins replay unattended, no gpg needed. See
+[docs/secrets.md](docs/secrets.md).
 
 ## More
 

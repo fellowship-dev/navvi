@@ -3,11 +3,13 @@ import { inspect } from "node:util";
 import { NavviError } from "../billing/budget.js";
 import type { CompiledScraper } from "../scraper/schema.js";
 import type { RunInput } from "../input/schema.js";
+import { BUNDLE_ENV, PASSPHRASE_ENV, openBundle as openSealedBundle } from "./bundle.js";
 
 /**
  * Secrets (R39). A scraper only ever carries the placeholder `{{secret:name}}`;
  * code resolves the value at replay from, in order, the input map, the
- * environment (`NAVVI_SECRET_<NAME>`), the macOS keychain
+ * environment (`NAVVI_SECRET_<NAME>`), a sealed bundle (U15: `NAVVI_SECRETS`
+ * opened with `NAVVI_SECRETS_PASSPHRASE`, see bundle.ts), the macOS keychain
  * (`security find-generic-password -s navvi -a <name> -w`) and an Apify
  * source. Values live in a `Secret` whose every rendering path is "[secret]".
  * A missing secret ends the run before the browser opens.
@@ -86,7 +88,7 @@ export class MissingSecretError extends NavviError {
   constructor(name: string, tried: readonly string[]) {
     super(
       "blocked_login_required",
-      `secret {{secret:${name}}} is not available; tried ${tried.join(", ")}. Provide it as input.secrets.${name}, ${secretEnvName(name)} or a keychain item (service ${KEYCHAIN_SERVICE}, account ${name})`,
+      `secret {{secret:${name}}} is not available; tried ${tried.join(", ")}. Provide it as input.secrets.${name}, ${secretEnvName(name)}, a sealed ${BUNDLE_ENV} bundle (navvi secrets seal) or a keychain item (service ${KEYCHAIN_SERVICE}, account ${name})`,
     );
     this.placeholder = name;
   }
@@ -137,6 +139,8 @@ export interface SecretSources {
   runCommand?: CommandRunner | undefined;
   /** Apify source, e.g. a secret input field or a key-value record; null when absent. */
   apify?: ((name: string) => Promise<string | null>) | undefined;
+  /** How a sealed bundle is opened; injectable for tests. Defaults to bundle.ts's `openBundle`. */
+  openBundle?: ((armored: string, passphrase: string) => Promise<Map<string, string>>) | undefined;
 }
 
 async function fromKeychain(name: string, sources: SecretSources): Promise<string | null> {
@@ -155,6 +159,16 @@ async function fromKeychain(name: string, sources: SecretSources): Promise<strin
 export async function resolveSecrets(names: readonly string[], sources: SecretSources = {}): Promise<Map<string, Secret>> {
   const out = new Map<string, Secret>();
   const env = sources.env ?? process.env;
+  // U15: opened at most once per resolution (once per run), only when a name
+  // gets past the env, and kept in memory for this call alone. A bundle that
+  // will not open is a configuration error, not a missing secret.
+  const armored = env[BUNDLE_ENV];
+  let bundle: Promise<Map<string, string>> | undefined;
+  const fromBundle = async (name: string): Promise<string | undefined> => {
+    if (!armored) return undefined;
+    bundle ??= (sources.openBundle ?? openSealedBundle)(armored, env[PASSPHRASE_ENV] ?? "");
+    return (await bundle).get(name);
+  };
   for (const name of new Set(names)) {
     const tried: string[] = [];
     let value: string | null | undefined = sources.input?.[name];
@@ -162,6 +176,10 @@ export async function resolveSecrets(names: readonly string[], sources: SecretSo
     if (!value) {
       value = env[secretEnvName(name)];
       tried.push(secretEnvName(name));
+    }
+    if (!value && armored) {
+      value = await fromBundle(name);
+      tried.push(BUNDLE_ENV);
     }
     if (!value) {
       value = await fromKeychain(name, sources);
