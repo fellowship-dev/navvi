@@ -5,7 +5,7 @@ import { parseInput, defaultBrowser, resolveSources, type RunInput } from "./inp
 import { promptToInput } from "./input/prompt.js";
 import { NavviError, NeedsHumanError } from "./billing/budget.js";
 import { zeroCharges, type ChargeCounts } from "./billing/charge.js";
-import { createChooser } from "./chooser/index.js";
+import { createChooser, type Chooser } from "./chooser/index.js";
 import { runCrawl, type CrawlDeps } from "./replay/crawler.js";
 import { redactRunInput } from "./secrets/resolve.js";
 
@@ -107,11 +107,61 @@ export function summaryFor(status: Status, input: RunInput | null, message: stri
 }
 
 /**
- * Run entry: validates the input, applies the defaults, parses a prompt-only
- * input through the run's chooser (KTD11) and runs the crawler. `deps` is for
- * tests and the CLI; the chooser built here is the one the crawler uses.
+ * U11 / R14, KTD11: the input keys the published actor accepts -- the
+ * properties of `.actor/input_schema.json` less the actor-only keys
+ * `actorInput` has already moved into the run's environment. A maintained
+ * list rather than a runtime read of the schema file, which the image need
+ * not ship; tests/input-schema.test.ts fails when the two disagree.
  */
-export async function run(raw: unknown, deps: CrawlDeps = {}): Promise<RunSummary> {
+export const PLATFORM_INPUT_KEYS = [
+  "prompt", "startUrls", "mode", "description", "fields", "goal", "followDetailPages", "detailFields",
+  "maxPages", "maxPagesPerStart", "maxItems", "maxConcurrency", "minConcurrency", "browser", "proxy",
+  "allowedDomains", "chooser", "decider", "writer", "deciderTransport", "scriptId", "forceRecompile",
+  "profile", "freshProfile",
+] as const;
+
+/** True when the run is on the Apify platform, where the input is the published surface only (KTD11). */
+export function isOnPlatform(env: NodeJS.ProcessEnv): boolean {
+  return Boolean(env.APIFY_IS_AT_HOME);
+}
+
+/**
+ * U11 / R14: on the platform, a key the published schema does not declare is
+ * refused with configuration_error naming every such key. Refused rather than
+ * stripped: `allowPrivateHosts`, `secrets`, `headed`, `allowMutations` and
+ * `urlLists` are CLI-only because they widen what a run may reach or do, and
+ * a caller who sent one must learn the run did not honour it instead of
+ * getting a quietly different run. The Console only ever sends declared keys,
+ * so only an API caller can meet this. `startUrls` entries may still be
+ * `{ requestsFromUrl }`; those become `urlLists` after this check. Returns
+ * the input unchanged (not a copy) when it passes.
+ */
+export function lockPlatformInput(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const allowed = new Set<string>(PLATFORM_INPUT_KEYS);
+  const refused = Object.keys(raw).filter((key) => !allowed.has(key)).sort();
+  if (refused.length > 0) {
+    throw new NavviError(
+      "configuration_error",
+      `invalid input\nnot accepted on the platform (CLI only or unknown): ${refused.join(", ")}`,
+    );
+  }
+  return raw;
+}
+
+/** What `prepareInput` hands the crawler, or the summary of a run that stopped before it. */
+export type PreparedInput = { input: RunInput; chooser: Chooser } | { summary: RunSummary };
+
+/**
+ * Validation, the platform lock (KTD11), the prompt parse (KTD11 of the
+ * prompt plan) and the defaults: everything `run` does before the crawler.
+ * On the platform the profile is forced to `store` after the prompt is
+ * parsed, since a prompt that expects secrets would otherwise pick `local`.
+ */
+export async function prepareInput(raw: unknown, deps: CrawlDeps = {}): Promise<PreparedInput> {
+  const env = deps.env ?? process.env;
+  const onPlatform = isOnPlatform(env);
+  if (onPlatform) raw = lockPlatformInput(raw);
   let input: RunInput;
   try {
     input = parseInput(raw);
@@ -119,7 +169,6 @@ export async function run(raw: unknown, deps: CrawlDeps = {}): Promise<RunSummar
     if (error instanceof ZodError) throw new InvalidInputError(error);
     throw error;
   }
-  const env = deps.env ?? process.env;
   // U14: `chooser` names the decider and only the decider; `decider`/`writer` win over it.
   const sources = resolveSources(input, env);
   const chooser = deps.chooser ?? createChooser({ ...sources, env });
@@ -131,17 +180,29 @@ export async function run(raw: unknown, deps: CrawlDeps = {}): Promise<RunSummar
       input = (await promptToInput(input.prompt, raw as Partial<RunInput>, chooser, deps.actor ?? Actor)).input;
     } catch (error) {
       if (error instanceof NeedsHumanError) {
-        return { ...summaryFor("needs_human", input, error.message), needsHuman: { token: error.token, questionsFile: error.questionsFile } };
+        return { summary: { ...summaryFor("needs_human", input, error.message), needsHuman: { token: error.token, questionsFile: error.questionsFile } } };
       }
       // The prompt-derived input is validated like the raw one: a failure is a configuration error, not a crash.
       if (error instanceof ZodError) throw new InvalidInputError(error);
       throw error;
     }
   }
+  if (onPlatform) input.profile = "store";
   input.chooser ??= sources.decider;
   input.decider ??= sources.decider;
   input.browser ??= defaultBrowser(env);
-  return runCrawl(input, { ...deps, chooser });
+  return { input, chooser };
+}
+
+/**
+ * Run entry: validates the input, applies the defaults, parses a prompt-only
+ * input through the run's chooser (KTD11) and runs the crawler. `deps` is for
+ * tests and the CLI; the chooser built here is the one the crawler uses.
+ */
+export async function run(raw: unknown, deps: CrawlDeps = {}): Promise<RunSummary> {
+  const prepared = await prepareInput(raw, deps);
+  if ("summary" in prepared) return prepared.summary;
+  return runCrawl(prepared.input, { ...deps, chooser: prepared.chooser });
 }
 
 /**

@@ -1,7 +1,11 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ACTOR_ONLY_KEYS, actorInput } from "../src/main.js";
+import { ACTOR_ONLY_KEYS, PLATFORM_INPUT_KEYS, actorInput, lockPlatformInput, prepareInput, run } from "../src/main.js";
+import { NavviError } from "../src/billing/budget.js";
+import type { Answer, Chooser, ChooserUsage, Question } from "../src/chooser/chooser.js";
+import { makeActor } from "./helpers.js";
 import { BaseInputSchema, LIMITS, parseInput } from "../src/input/schema.js";
 
 /**
@@ -170,3 +174,76 @@ describe("scraperStore names where a run keeps its scrapers", () => {
   });
 });
 
+
+/**
+ * U11 / R14, KTD11: on the platform (APIFY_IS_AT_HOME) the input is the
+ * published schema's surface and nothing else. CLI-only keys are refused, not
+ * stripped, so a caller who sent `allowPrivateHosts` learns the run did not
+ * honour it; and the profile is `store` whatever the prompt implied.
+ */
+describe("platform input lock (R14, KTD11)", () => {
+  const ON = { APIFY_IS_AT_HOME: "1" };
+  const base = { startUrls: ["https://example.org/a"], mode: "record", fields: [{ name: "x" }] };
+
+  it("the allowlist is exactly the published schema's properties less the actor-only keys", () => {
+    const published = Object.keys(schema.properties).filter((k) => !(ACTOR_ONLY_KEYS as readonly string[]).includes(k)).sort();
+    expect([...PLATFORM_INPUT_KEYS].sort()).toEqual(published);
+  });
+
+  it.each([
+    ["allowPrivateHosts", ["127.0.0.1"]],
+    ["secrets", { password: "x" }],
+    ["headed", true],
+    ["allowMutations", ["checkout"]],
+    ["urlLists", ["https://example.org/list.txt"]],
+    ["somethingElse", 1],
+  ])("refuses %s on the platform with configuration_error naming it", async (key, value) => {
+    const raw = { ...base, [key]: value };
+    const error = (() => { try { lockPlatformInput(raw); } catch (e) { return e; } return null; })();
+    expect(error).toBeInstanceOf(NavviError);
+    expect((error as NavviError).status).toBe("configuration_error");
+    expect((error as Error).message).toContain(key);
+    // run() refuses before anything else happens: no chooser, no crawl.
+    await expect(run(raw, { env: ON })).rejects.toMatchObject({ status: "configuration_error" });
+  });
+
+  it("names every refused key at once and passes a published-only input through untouched", () => {
+    expect(() => lockPlatformInput({ ...base, headed: true, allowPrivateHosts: ["10.0.0.1"] })).toThrow(/allowPrivateHosts.*headed|headed.*allowPrivateHosts/);
+    const ok = { ...base, startUrls: [{ requestsFromUrl: "https://example.org/list.txt" }], profile: "store", proxy: { useApifyProxy: true } };
+    expect(lockPlatformInput(ok)).toEqual(ok);
+    expect(lockPlatformInput(null)).toBeNull();
+  });
+
+  it("off the platform the CLI keeps its full surface", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "navvi-lock-"));
+    const raw = { ...base, allowPrivateHosts: ["127.0.0.1"], headed: true, allowMutations: ["checkout"], profile: "local", secrets: { password: "{{secret:pw}}" } };
+    const prepared = await prepareInput(raw, { env: {}, actor: makeActor(dir), chooser: new ScriptChooser([]) });
+    expect("input" in prepared && prepared.input).toMatchObject({ allowPrivateHosts: ["127.0.0.1"], headed: true, allowMutations: ["checkout"], profile: "local" });
+  });
+
+  it("forces the store profile after prompt parsing, where a prompt expecting secrets would have chosen local", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "navvi-lock-"));
+    const answer = JSON.stringify({ mode: "record", description: "Orders", fields: [{ name: "order" }], goal: "log in and open orders", secretsExpected: ["password"] });
+    const prompt = "Log in and type my password from the secret store, then list my orders";
+    const off = await prepareInput({ prompt, startUrls: ["https://example.org/a"] }, { env: {}, actor: makeActor(dir), chooser: new ScriptChooser([answer]) });
+    expect("input" in off && off.input.profile).toBe("local");
+    const on = await prepareInput({ prompt, startUrls: ["https://example.org/a"] }, { env: ON, actor: makeActor(dir), chooser: new ScriptChooser([answer]) });
+    expect("input" in on && on.input.profile).toBe("store");
+  });
+});
+
+/** A chooser answering text questions from a script. */
+class ScriptChooser implements Chooser {
+  readonly name = "model" as const;
+  constructor(private readonly script: string[]) {}
+  async ask(batch: Question[]): Promise<Answer[]> {
+    return batch.map((q) => {
+      const text = this.script.shift();
+      if (text === undefined) throw new Error("script exhausted");
+      return { id: q.id, index: null, text };
+    });
+  }
+  usage(): ChooserUsage {
+    return { chooser: this.name, questions: 0, textQuestions: 0, batches: 0, inputTokens: 0, outputTokens: 0, waitMs: 0, costUsd: 0, zeroDataRetention: "not_applicable" };
+  }
+}

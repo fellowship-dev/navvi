@@ -114,6 +114,64 @@ describe("request guard (R26)", () => {
   });
 });
 
+/**
+ * U11 / KTD12: the DNS check behind the static guard. A list URL whose public
+ * name resolves to a private address is never fetched, and a page's
+ * subresource on such a name is aborted by the route guard.
+ */
+describe("DNS check (R15, KTD12)", () => {
+  const privateName = async (host: string): Promise<string[]> => {
+    if (host === "lists.example.com" || host === "assets.example.com") return ["10.0.0.5"];
+    throw new Error(`ENOTFOUND ${host}`);
+  };
+
+  it("does not fetch a list whose name resolves to 10.0.0.5, and fails closed on a resolver error", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const logged: string[] = [];
+    try {
+      const urls = await loadListSources([], ["https://lists.example.com/urls.txt", "https://nowhere.example.com/urls.txt"], [], undefined, (m) => logged.push(m), privateName);
+      expect(urls).toEqual([]);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(logged.join("\n")).toMatch(/lists\.example\.com.*private/);
+      expect(logged.join("\n")).toMatch(/nowhere\.example\.com/);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("the route guard aborts a subresource whose name resolves to a private address", async () => {
+    const helper = await startHelperServer({
+      "/page.html": { type: "text/html; charset=utf-8", body: `<!doctype html><title>P</title><h1>Internal page</h1><img src="http://assets.example.com/x.png" alt="">` },
+    });
+    try {
+      const actor = makeActor(dir);
+      const startUrls = [`${helper.baseUrl}/page.html`];
+      const key = keyFor(startUrls, { fields: ["heading"], profile: "store" });
+      const store = await ScraperStore.open({ actor });
+      await store.put(
+        seeded({
+          ...key,
+          mode: "record",
+          entry: { mode: "direct", url: startUrls[0]! },
+          fields: { heading: { alternatives: [{ selector: "h1", fingerprint: { samples: ["Internal page"], shape: "text" } }] } },
+        }),
+      );
+      const resolved: string[] = [];
+      const summary = await runCrawl(
+        fixtureInput({ startUrls, mode: "record", fields: F("heading") }),
+        makeDeps(dir, actor, new RecordedChooser({ fixture: "crawler/empty" }), { resolveHost: async (host: string) => { resolved.push(host); return privateName(host); } }),
+      );
+      expect(summary.status).toBe("succeeded");
+      expect(summary.blockedRequests).toBe(1);
+      expect(resolved).toContain("assets.example.com");
+      // the allowlisted fixture host is an IP literal: never resolved
+      expect(resolved).not.toContain("127.0.0.1");
+    } finally {
+      await helper.close();
+    }
+  }, 60_000);
+});
+
 describe("list sources (R34)", () => {
   it("expands a JSON or plain-text URL list and policy-checks every entry", async () => {
     const helper = await startHelperServer({

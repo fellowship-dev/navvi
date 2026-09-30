@@ -107,23 +107,140 @@ export const LIMITS = {
   navigationRequests: 60,
 } as const;
 
-const PRIVATE_HOST_PATTERNS = [
-  /^localhost$/i,
-  /\.local$/i,
-  /\.internal$/i,
-  /^127\./,
-  /^10\./,
-  /^192\.168\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^169\.254\./,
-  /^0\./,
-  /^\[?::1\]?$/,
-  /^\[?fe80:/i,
-  /^\[?fc/i,
-  /^\[?fd/i,
-];
+/**
+ * R26 / U11 R15: which hosts a run may never reach. Classification works on
+ * parsed addresses, not string prefixes: the old prefix table let
+ * `[::ffff:a9fe:a9fe]` (169.254.169.254 as IPv4-mapped IPv6), `[::]`, CGNAT,
+ * multicast and `localhost.` through, and refused any public *name* that
+ * happened to start with "fc" or "fd". `fc00::/7` is an IPv6 rule and only
+ * ever applies to an IPv6 literal.
+ */
+const PRIVATE_NAME_SUFFIXES = [".localhost", ".local", ".internal"];
 
-/** R26: only http(s) to a public host, unless the host is explicitly allowlisted. */
+/** Blocked IPv4 ranges as [first octets as a 32-bit network, prefix length]. */
+const PRIVATE_V4_RANGES: Array<[string, number]> = [
+  ["0.0.0.0", 8], // "this network", includes the unspecified 0.0.0.0
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10], // CGNAT (RFC 6598)
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16], // link-local, cloud metadata
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24], // IETF protocol assignments
+  ["192.0.2.0", 24], // TEST-NET-1
+  ["192.88.99.0", 24], // 6to4 relay anycast
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15], // benchmarking
+  ["198.51.100.0", 24], // TEST-NET-2
+  ["203.0.113.0", 24], // TEST-NET-3
+  ["224.0.0.0", 4], // multicast
+  ["240.0.0.0", 4], // reserved, includes broadcast 255.255.255.255
+];
+const PRIVATE_V4: Array<[number, number]> = PRIVATE_V4_RANGES.map(([net, bits]) => [v4ToInt(parseV4(net)!), bits]);
+
+function parseV4(ip: string): number[] | null {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return null;
+  const octets = parts.map((p) => (/^\d{1,3}$/.test(p) ? Number(p) : NaN));
+  return octets.every((o) => Number.isInteger(o) && o >= 0 && o <= 255) ? octets : null;
+}
+
+function v4ToInt(octets: number[]): number {
+  return ((octets[0]! << 24) | (octets[1]! << 16) | (octets[2]! << 8) | octets[3]!) >>> 0;
+}
+
+function isPrivateV4(octets: number[]): boolean {
+  const ip = v4ToInt(octets);
+  return PRIVATE_V4.some(([net, bits]) => ip >>> (32 - bits) === net >>> (32 - bits));
+}
+
+/** Eight 16-bit groups, or null. Accepts `::` compression and a trailing dotted IPv4 (resolver answers use it). */
+function parseV6(ip: string): number[] | null {
+  let text = ip.toLowerCase();
+  const zone = text.indexOf("%");
+  if (zone >= 0) text = text.slice(0, zone);
+  const lastColon = text.lastIndexOf(":");
+  if (lastColon >= 0 && text.slice(lastColon + 1).includes(".")) {
+    // A dotted IPv4 tail (`::ffff:10.0.0.5`) becomes its two hex groups.
+    const v4 = parseV4(text.slice(lastColon + 1));
+    if (!v4) return null;
+    text = `${text.slice(0, lastColon + 1)}${((v4[0]! << 8) | v4[1]!).toString(16)}:${((v4[2]! << 8) | v4[3]!).toString(16)}`;
+  }
+  const halves = text.split("::");
+  if (halves.length > 2) return null;
+  const toGroups = (part: string): number[] | null => {
+    if (part === "") return [];
+    const groups = part.split(":").map((g) => (/^[0-9a-f]{1,4}$/.test(g) ? parseInt(g, 16) : NaN));
+    return groups.every((g) => Number.isInteger(g)) ? groups : null;
+  };
+  const head = toGroups(halves[0]!);
+  const rest = halves.length === 2 ? toGroups(halves[1]!) : [];
+  if (!head || !rest) return null;
+  const known = head.length + rest.length;
+  if (halves.length === 1 && known !== 8) return null;
+  if (halves.length === 2 && known > 7) return null;
+  return [...head, ...new Array<number>(8 - known).fill(0), ...rest];
+}
+
+function embeddedV4(hi: number, lo: number): number[] {
+  return [hi >> 8, hi & 0xff, lo >> 8, lo & 0xff];
+}
+
+function isPrivateV6(g: number[]): boolean {
+  // ::/96 (unspecified, loopback, IPv4-compatible) and ::ffff:0:0/96 (IPv4-mapped).
+  if (g.slice(0, 5).every((x) => x === 0)) {
+    if (g[5] === 0xffff) return isPrivateV4(embeddedV4(g[6]!, g[7]!));
+    if (g[5] === 0) return true;
+  }
+  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return isPrivateV4(embeddedV4(g[6]!, g[7]!)); // NAT64
+  if (g[0] === 0x2002) return isPrivateV4(embeddedV4(g[1]!, g[2]!)); // 6to4
+  if ((g[0]! & 0xfe00) === 0xfc00) return true; // ULA fc00::/7
+  if ((g[0]! & 0xffc0) === 0xfe80) return true; // link-local fe80::/10
+  if ((g[0]! & 0xffc0) === 0xfec0) return true; // site-local fec0::/10 (deprecated)
+  if ((g[0]! & 0xff00) === 0xff00) return true; // multicast
+  if (g[0] === 0x2001 && g[1] === 0x0db8) return true; // documentation
+  return false;
+}
+
+/**
+ * True for a private, loopback, link-local, CGNAT, multicast, unspecified,
+ * broadcast or reserved address, IPv4 or IPv6 (IPv4-mapped IPv6 is judged by
+ * the IPv4 it carries). Anything that does not parse as an address is treated
+ * as private: this classifies resolver answers, and an answer it cannot read
+ * must not open the door.
+ */
+export function isPrivateAddress(ip: string): boolean {
+  const text = ip.trim().replace(/^\[|\]$/g, "");
+  const v4 = parseV4(text);
+  if (v4) return isPrivateV4(v4);
+  const v6 = text.includes(":") ? parseV6(text) : null;
+  if (v6) return isPrivateV6(v6);
+  return true;
+}
+
+/** An IP literal as the URL parser prints a hostname: dotted IPv4, or bracketed IPv6. */
+export function isIpLiteral(host: string): boolean {
+  return parseV4(host) !== null || (host.startsWith("[") && host.endsWith("]"));
+}
+
+/** The hostname rules: `localhost`, `*.localhost`, `.local`, `.internal`, each with or without the trailing dot. */
+export function isPrivateHostname(host: string): boolean {
+  const name = host.toLowerCase().replace(/\.$/, "");
+  if (name === "localhost") return true;
+  return PRIVATE_NAME_SUFFIXES.some((suffix) => name.endsWith(suffix));
+}
+
+/** A URL hostname (as `new URL()` normalizes it) that a run may not reach without an allowlist entry. */
+export function isPrivateHost(host: string): boolean {
+  if (!host) return true;
+  if (isIpLiteral(host)) return isPrivateAddress(host);
+  return isPrivateHostname(host);
+}
+
+/**
+ * R26: only http(s) to a public host, unless the host is explicitly
+ * allowlisted. This is the static half; a name's resolved addresses are
+ * checked by `makeHostCheck` in browser/policy.ts (KTD12).
+ */
 export function isAllowedUrl(raw: string, allowPrivateHosts: readonly string[] = []): boolean {
   let url: URL;
   try {
@@ -135,7 +252,7 @@ export function isAllowedUrl(raw: string, allowPrivateHosts: readonly string[] =
   const host = url.hostname;
   if (!host) return false;
   if (allowPrivateHosts.includes(host)) return true;
-  return !PRIVATE_HOST_PATTERNS.some((p) => p.test(host));
+  return !isPrivateHost(host);
 }
 
 const urlField = z.string().url();

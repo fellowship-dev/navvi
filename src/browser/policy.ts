@@ -1,4 +1,5 @@
-import { isAllowedUrl, type Profile } from "../input/schema.js";
+import { lookup } from "node:dns/promises";
+import { isAllowedUrl, isIpLiteral, isPrivateAddress, type Profile } from "../input/schema.js";
 import { normalize } from "../util/text.js";
 
 /**
@@ -22,6 +23,66 @@ export function isAllowedRequestUrl(url: string, allowPrivateHosts: readonly str
   }
   if (IN_PAGE_SCHEMES.has(parsed.protocol)) return parsed.protocol !== "about:" || url === "about:blank";
   return isAllowedUrl(url, allowPrivateHosts);
+}
+
+/** Every address a hostname resolves to. Injectable so tests never touch DNS. */
+export type HostResolver = (host: string) => Promise<string[]>;
+
+/** `node:dns` lookup, all addresses, in the resolver's own order (the OS resolver Node's `fetch` uses too). */
+export const defaultResolver: HostResolver = async (host) => (await lookup(host, { all: true, verbatim: true })).map((a) => a.address);
+
+/**
+ * KTD12 / R15: the DNS half of the URL guard. A public-looking name that
+ * resolves to a private address (a rebinding domain, a wildcard DNS service
+ * pointing at 127.0.0.1, an internal CNAME) is refused. Run after the static
+ * `isAllowedRequestUrl`, which already refused IP literals and private names.
+ *
+ * - Cached per host for the checker's lifetime (one run); the promise is
+ *   shared, so concurrent requests to one host resolve it once.
+ * - Fail-closed: a resolver error, or an empty answer, refuses. A failed
+ *   lookup is not cached, so a transient resolver hiccup refuses that request
+ *   and the next one asks again.
+ * - IP literals are never resolved (the static guard classified them), and an
+ *   `allowPrivateHosts` entry (CLI only) skips the check, which is how the
+ *   fixture server on 127.0.0.1 or a named test host stays reachable.
+ *
+ * Residual (known, accepted): this resolves the name in Node, and Chromium
+ * resolves it again on its own when it connects. A rebinding server that
+ * answers public here and private a moment later passes the check; so does a
+ * run behind a proxy, where the proxy resolves the name and this lookup is
+ * the actor's view, not the proxy's. It closes the static cases (a name that
+ * always points inside), not the time-of-check race.
+ */
+export function makeHostCheck(allowPrivateHosts: readonly string[] = [], resolve: HostResolver = defaultResolver): (url: string) => Promise<boolean> {
+  const cache = new Map<string, Promise<boolean>>();
+  const judge = (host: string): Promise<boolean> => {
+    const cached = cache.get(host);
+    if (cached) return cached;
+    const pending = resolve(host).then(
+      (addresses) => addresses.length > 0 && !addresses.some(isPrivateAddress),
+      () => {
+        cache.delete(host);
+        return false;
+      },
+    );
+    cache.set(host, pending);
+    return pending;
+  };
+  return async (raw) => {
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      return false;
+    }
+    if (IN_PAGE_SCHEMES.has(url.protocol)) return true;
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    const host = url.hostname.toLowerCase();
+    if (!host) return false;
+    if (allowPrivateHosts.includes(url.hostname)) return true;
+    if (isIpLiteral(host)) return !isPrivateAddress(host);
+    return judge(host.replace(/\.$/, ""));
+  };
 }
 
 /** Second-level public suffixes where the registrable domain is three labels. */

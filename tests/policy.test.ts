@@ -6,9 +6,11 @@ import {
   isModelTextAllowed,
   isOnAllowedDomain,
   isSecretCapable,
+  makeHostCheck,
   registrableDomain,
   type Control,
 } from "../src/browser/policy.js";
+import { isPrivateAddress, isPrivateHostname } from "../src/input/schema.js";
 
 const noMutations = { allowMutations: [] as string[] };
 const postForm = (hasTypedText: boolean): Control => ({
@@ -76,6 +78,112 @@ describe("url guard (R26)", () => {
     expect(isAllowedRequestUrl("https://news.ycombinator.com/", [])).toBe(true);
     expect(isAllowedRequestUrl("http://127.0.0.1:4321/fixture", [])).toBe(false);
     expect(isAllowedRequestUrl("http://127.0.0.1:4321/fixture", ["127.0.0.1"])).toBe(true);
+  });
+});
+
+/**
+ * U11 / R15: host classification over parsed addresses, not string prefixes.
+ * The old table let IPv4-mapped IPv6, the unspecified address, CGNAT,
+ * multicast and `localhost.` through, and refused any public name starting
+ * with "fc" or "fd".
+ */
+describe("url guard: parsed-address classification (R15)", () => {
+  it.each([
+    "http://[::ffff:a9fe:a9fe]/latest/meta-data/",
+    "http://[::ffff:127.0.0.1]/",
+    "http://[::]/",
+    "http://0.0.0.0/",
+    "http://100.64.0.1/",
+    "http://100.127.255.254/",
+    "http://224.0.0.1/",
+    "http://239.255.255.250/",
+    "http://255.255.255.255/",
+    "http://240.0.0.1/",
+    "http://198.18.0.1/",
+    "http://192.0.0.8/",
+    "http://0x7f.1/",
+    "http://2130706433/",
+    "http://127.0.0.1./",
+    "http://localhost./",
+    "http://LOCALHOST/",
+    "http://x.localhost/",
+    "http://a.b.localhost./",
+    "http://[fe80::1]/",
+    "http://[febf::1]/",
+    "http://[fc00::1]/",
+    "http://[fd12:3456::1]/",
+    "http://[ff02::1]/",
+    "http://[::127.0.0.1]/",
+    "http://[64:ff9b::a9fe:a9fe]/",
+    "http://[2002:a9fe:a9fe::1]/",
+    "http://printer.local/",
+    "http://box.internal/",
+  ])("refuses %s", (url) => {
+    expect(isAllowedUrl(url)).toBe(false);
+    expect(isAllowedRequestUrl(url, [])).toBe(false);
+  });
+
+  it.each(["https://fcexample.com/", "https://fdexample.org/", "https://fe80example.net/", "https://localhost.example.com/", "https://example.com./", "http://100.63.255.255/", "http://100.128.0.1/", "http://8.8.8.8/", "http://[2606:4700:4700::1111]/", "http://[::ffff:8.8.8.8]/"])(
+    "allows the public host %s",
+    (url) => {
+      expect(isAllowedUrl(url)).toBe(true);
+    },
+  );
+
+  it("classifies raw resolver answers, IPv4, IPv6 and mapped", () => {
+    for (const ip of ["10.0.0.5", "172.16.0.1", "192.168.1.1", "169.254.169.254", "::1", "::ffff:10.0.0.5", "::ffff:a00:5", "fe80::1", "fd00::1"]) expect(isPrivateAddress(ip), ip).toBe(true);
+    for (const ip of ["93.184.216.34", "2606:4700::1", "::ffff:93.184.216.34"]) expect(isPrivateAddress(ip), ip).toBe(false);
+    // Not an address at all: fail closed.
+    expect(isPrivateAddress("not-an-ip")).toBe(true);
+    expect(isPrivateHostname("fcexample.com")).toBe(false);
+    expect(isPrivateHostname("localhost.")).toBe(true);
+  });
+});
+
+/**
+ * U11 / R15, KTD12: a public name that resolves to a private address is
+ * refused. The lookup is cached per host and fails closed.
+ */
+describe("url guard: DNS check (R15, KTD12)", () => {
+  const resolverFor = (answers: Record<string, string[] | Error>) => {
+    const calls: string[] = [];
+    const resolve = async (host: string): Promise<string[]> => {
+      calls.push(host);
+      const answer = answers[host];
+      if (answer === undefined) throw new Error(`ENOTFOUND ${host}`);
+      if (answer instanceof Error) throw answer;
+      return answer;
+    };
+    return { resolve, calls };
+  };
+
+  it("refuses a public name resolving to 10.0.0.5, allows one resolving to a public address, and caches per host", async () => {
+    const { resolve, calls } = resolverFor({ "rebind.example.com": ["93.184.216.34", "10.0.0.5"], "shop.example.com": ["93.184.216.34", "2606:4700::1"] });
+    const check = makeHostCheck([], resolve);
+    expect(await check("https://rebind.example.com/")).toBe(false);
+    expect(await check("https://shop.example.com/a")).toBe(true);
+    expect(await check("https://shop.example.com/b")).toBe(true);
+    expect(calls.filter((h) => h === "shop.example.com")).toHaveLength(1);
+  });
+
+  it("fails closed: a resolver error or an empty answer refuses", async () => {
+    const { resolve } = resolverFor({ "down.example.com": new Error("EAI_AGAIN"), "empty.example.com": [] });
+    const check = makeHostCheck([], resolve);
+    expect(await check("https://down.example.com/")).toBe(false);
+    expect(await check("https://empty.example.com/")).toBe(false);
+    expect(await check("https://unknown.example.com/")).toBe(false);
+  });
+
+  it("does not resolve IP literals, in-page schemes or allowlisted hosts; allowPrivateHosts still permits the fixture host", async () => {
+    const { resolve, calls } = resolverFor({ "fixture.test": ["127.0.0.1"] });
+    const check = makeHostCheck(["127.0.0.1", "fixture.test"], resolve);
+    expect(await check("http://127.0.0.1:4321/fixture")).toBe(true);
+    expect(await check("http://fixture.test:4321/fixture")).toBe(true);
+    expect(await check("data:text/plain,x")).toBe(true);
+    expect(await check("http://93.184.216.34/")).toBe(true);
+    expect(calls).toEqual([]);
+    // Without the allowlist the same name is refused by what it resolves to.
+    expect(await makeHostCheck([], resolve)("http://fixture.test:4321/")).toBe(false);
   });
 });
 

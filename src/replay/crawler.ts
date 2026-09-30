@@ -7,7 +7,7 @@ import { Charger, type ChargingActor } from "../billing/charge.js";
 import { buildCrawleeLaunchContext, restoreProfileCookies, saveProfileCookies } from "../browser/launch.js";
 import { createLaunchCounter, formatLaunchFailure, isLaunchFailure, launchFailureReport, resolveRelaunchKnobs, type RelaunchKnobs } from "../browser/relaunch.js";
 import { captureJson, describeSkips, newestUsableResponse, type Capture, type CapturedResponse } from "../browser/network-capture.js";
-import { hostOf, isAllowedRequestUrl, registrableDomain } from "../browser/policy.js";
+import { defaultResolver, hostOf, isAllowedRequestUrl, makeHostCheck, registrableDomain, type HostResolver } from "../browser/policy.js";
 import { ConfigurationError, createChooser, NavviError, NeedsHumanError, StateTooLargeError, summarizeUsage, type Chooser } from "../chooser/index.js";
 import { compile, compileTemplate, type CompileRationale, type RenderPages, type TemplateCompile } from "../compile/index.js";
 import { LIMITS, isAllowedUrl, resolveSources, type FieldType, type Mode, type Profile, type ProxyInput, type RunInput } from "../input/schema.js";
@@ -172,6 +172,12 @@ export interface CrawlDeps {
   minConcurrency?: number | undefined;
   fetchText?: ((url: string) => Promise<{ contentType: string; body: string }>) | undefined;
   /**
+   * U11 / KTD12: resolves a hostname to every address it answers, for the DNS
+   * half of the request guard and the list-source fetch. Defaults to
+   * `node:dns` lookup; tests pass a stub so no test touches real DNS.
+   */
+  resolveHost?: HostResolver | undefined;
+  /**
    * Where the crawler's diagnostic sentences go — a skipped list, a healing
    * that found nothing, a launch failure. Defaults to stderr. A caller that
    * collects its own output must pass this, or it will be diagnosing from
@@ -269,7 +275,13 @@ export function makeRequestGuard(allowPrivateHosts: readonly string[], urls: rea
 
 // ---------------------------------------------------------------- list sources (R34)
 
-async function defaultFetchText(url: string): Promise<{ contentType: string; body: string }> {
+/**
+ * A list source over HTTP. The host's resolved addresses are checked first
+ * (KTD12, fail-closed), and redirects are not followed (a 3xx is not ok), so a
+ * public list cannot bounce the fetch to a private address.
+ */
+async function defaultFetchText(url: string, allowPrivateHosts: readonly string[] = [], resolve: HostResolver = defaultResolver): Promise<{ contentType: string; body: string }> {
+  if (!(await makeHostCheck(allowPrivateHosts, resolve)(url))) throw new Error(`list source ${url} refused: its host did not resolve, or resolves to a private address`);
   const response = await fetch(url, { redirect: "manual" });
   if (!response.ok) throw new Error(`list source ${url} answered ${response.status}`);
   return { contentType: response.headers.get("content-type") ?? "", body: await response.text() };
@@ -349,9 +361,11 @@ export async function loadListSources(
   startUrls: readonly string[],
   urlLists: readonly string[],
   allowPrivateHosts: readonly string[],
-  fetchText: (url: string) => Promise<{ contentType: string; body: string }> = defaultFetchText,
+  fetchTextOverride?: (url: string) => Promise<{ contentType: string; body: string }>,
   log: (message: string) => void = defaultCtxLog,
+  resolve: HostResolver = defaultResolver,
 ): Promise<string[]> {
+  const fetchText = fetchTextOverride ?? ((url: string) => defaultFetchText(url, allowPrivateHosts, resolve));
   const out: string[] = [];
   const push = (url: string) => {
     if (isAllowedUrl(url, allowPrivateHosts) && !out.includes(url)) out.push(url);
@@ -779,9 +793,14 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   if (started.limitReached && started.charged === 0) return fail("charge_limit", "charge limit reached before actor-start");
 
   // R34: list sources, then the policy on every URL.
-  const urls = await loadListSources(input.startUrls ?? [], input.urlLists, input.allowPrivateHosts, deps.fetchText, ctxLog);
+  const resolveHost = deps.resolveHost ?? defaultResolver;
+  const urls = await loadListSources(input.startUrls ?? [], input.urlLists, input.allowPrivateHosts, deps.fetchText, ctxLog, resolveHost);
   if (urls.length === 0) return fail("no_items_found", "no allowed start URL");
   const guard = makeRequestGuard(input.allowPrivateHosts, urls);
+  // KTD12: the DNS half, cached per host for this run, fail-closed. Chromium
+  // resolves names itself when it connects, so this is a check of the name,
+  // not of the connection (see `makeHostCheck` for the residual).
+  const hostCheck = makeHostCheck(input.allowPrivateHosts, resolveHost);
 
   // Cache lookup per template (R5, R38) before any browser work.
   const store = deps.store ?? (await ScraperStore.open({ actor, ...(env.NAVVI_SCRAPER_STORE ? { storeName: env.NAVVI_SCRAPER_STORE } : {}) }));
@@ -924,14 +943,14 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     // cache-bypass half of 89e9633 and not the validator-stripping half, and a
     // second visit to a URL in one context read every `network` field null on
     // the default browser. See that function's header.
-    await context.route("**/*", (route) => {
+    await context.route("**/*", async (route) => {
       const request = route.request();
       // After the policy (R26), which counts what it refuses: a replay reads the
       // DOM, JSON-LD and payloads, never pixels, so images, fonts and media --
       // the bulk of a product page's bytes, and on a one-CPU platform run what
       // kept the autoscaler at one page at a time -- are skipped on replay
       // pages. Compile and sample pages load everything, as before.
-      if (!guard(request.url())) {
+      if (!guard(request.url()) || !(await hostCheck(request.url()))) {
         state.blockedRequests += 1;
         return route.abort("blockedbyclient");
       }
