@@ -75,6 +75,8 @@ export function buildSpecQuestion(brief: string, errors: readonly string[] = [])
     state: fitBrief(brief, premise),
     maxLength: TEXT_INPUT_CAP,
     schema: SPEC_DRAFT_JSON_SCHEMA,
+    // U13: the caller's own words, not page text: the injection guard leaves it alone.
+    trusted: true,
   };
 }
 

@@ -34,7 +34,7 @@ const LAYERS = [
   {
     name: "vocabulary",
     comment: "The nouns every stage shares. These must not know which stage is running.",
-    modules: ["input", "scraper", "declared", "agree", "browser", "chooser", "blocked", "heuristics", "template", "billing", "secrets", "util"],
+    modules: ["input", "scraper", "declared", "agree", "browser", "chooser", "guard", "blocked", "heuristics", "template", "billing", "secrets", "util"],
   },
 ];
 

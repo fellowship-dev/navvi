@@ -42,6 +42,7 @@ graph TD
     agree
     browser
     chooser
+    guard
     blocked
     heuristics
     template
@@ -71,6 +72,7 @@ graph TD
   browser --> input
   browser --> util
   chooser --> billing
+  chooser --> guard
   chooser --> secrets
   chooser --> util
   cli --> chooser
@@ -212,6 +214,7 @@ is running.
 | `agree` | 217 | "Keep only what the samples agree on": the intersection over a set of samples, and the distinction between a sample that disagreed, a sample that could not answer, and a sample that was never asked. Also written four times before it was a module — see the 2026-09-22 defect in its header. |
 | `browser` | 1203 | Playwright: launch, profiles, relaunch, navigation guards, typing, the injected snapshot and the network capture. The only module that says `chromium`. |
 | `chooser` | 2407 | Asking an intelligence a question and trusting only the index that comes back. One interface over Jev, an API model, a signed-in CLI, the host agent and recorded answers. |
+| `guard` | 379 | The prompt-injection pre-filter (U13, R17): the rules for page text that instructs the model reading it, and the quarantine that cuts it out of a question and counts why. Imports nothing; `chooser` runs it on every question that is not the caller's own words. Its eval is `evals/injection/`. |
 | `blocked` | 284 | The challenge lexicon: what "this site is refusing us" looks like, written once so the live check and the offline check cannot disagree. |
 | `heuristics` | 804 | The named, overridable rules that decide what a model is even asked, each shipping with its fixture. |
 | `template` | 222 | A **page template**: a host plus a URL pattern with the varying path segments blanked — `/producto/{slug}`, `/p/{id}`, `?page={page}`. Pages under one key share one set of alternatives, which is what makes a listing and its detail pages two things instead of two hundred. It surfaces as `RunSummary.templates`. It is not string interpolation. |

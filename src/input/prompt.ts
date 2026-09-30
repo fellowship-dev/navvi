@@ -88,6 +88,8 @@ export function buildPromptQuestion(prompt: string, errors: readonly string[] = 
     state: fitPrompt(prompt, premise),
     maxLength: TEXT_INPUT_CAP,
     schema: STRUCTURED_JSON_SCHEMA,
+    // U13: the caller's own words, not page text: the injection guard leaves it alone.
+    trusted: true,
   };
 }
 

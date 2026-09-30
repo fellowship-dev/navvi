@@ -1,0 +1,79 @@
+{
+  "comment": "Pinned sources for the prompt-injection eval (U13 / R17). Every file is fetched at its commit into evals/injection/.cache by `npx tsx evals/injection/fetch.ts`; nothing here is redistributed except the few strings in samples.json and templates.json, each attributed in NOTICE. `role` says how the eval uses a source: dev (the rules were tuned against it), test (never looked at while tuning), held-out (local only, never vendored, never committed beyond counts).",
+  "sources": [
+    {
+      "name": "cyberseceval-prompt-injection",
+      "repository": "https://github.com/meta-llama/PurpleLlama",
+      "commit": "172c1074069eb88ec834124272c1b1c4f8893445",
+      "licence": "MIT",
+      "licenceFile": "CybersecurityBenchmarks/LICENSE",
+      "licenceNote": "The repository root is the Llama 3.2 Community License; the benchmark directory is MIT. Cite CybersecurityBenchmarks/LICENSE.",
+      "files": ["CybersecurityBenchmarks/datasets/prompt_injection/prompt_injection.json", "CybersecurityBenchmarks/LICENSE"],
+      "use": "The 55 rows with injection_type=indirect are positives, split by prompt_id parity: odd ids dev, even ids test. The 196 direct rows are out of scope (user-typed attacks) and are not scored.",
+      "role": "dev+test"
+    },
+    {
+      "name": "bipia-text-attacks",
+      "repository": "https://github.com/microsoft/BIPIA",
+      "commit": "a004b69ec0dd446e0afd461d98cb5e96e120a5d0",
+      "licence": "MIT",
+      "licenceFile": "LICENSE",
+      "licenceNote": "MIT for the repository's own work, including the attack strings. The carve-out in LICENSE covers the host datasets under benchmark/ (WikiTableQuestions and Stack Exchange are CC-BY-SA-4.0); none of them is used. Repository archived 2026-09-16, hence the pinned commit.",
+      "files": ["benchmark/text_attack_train.json", "benchmark/text_attack_test.json", "LICENSE"],
+      "use": "Attack goals, composed into synthetic product-page text by the harness. text_attack_train.json is dev, text_attack_test.json is test.",
+      "role": "dev+test"
+    },
+    {
+      "name": "agentdojo-attack-templates",
+      "repository": "https://github.com/ethz-spylab/agentdojo",
+      "commit": "089ed468cf3ed0322acc66b0211f26d9d90dbf60",
+      "licence": "MIT",
+      "licenceFile": "LICENSE",
+      "files": ["src/agentdojo/attacks/baseline_attacks.py", "src/agentdojo/attacks/important_instructions_attacks.py", "LICENSE"],
+      "use": "The five fixed wrapper strings (direct, ignore_previous, system_message, injecagent, important_instructions), copied verbatim into templates.json and wrapped around every BIPIA goal, plus the goal bare.",
+      "role": "dev+test"
+    },
+    {
+      "name": "wainjectbench-text",
+      "repository": "https://github.com/Norrrrrrr-lyn/WAInjectBench",
+      "commit": "ee55236860820b3639c9039a2aa367b2cb86d114",
+      "licence": "none stated",
+      "licenceNote": "No LICENSE file, and it aggregates CC-BY-NC material from Meta's WASP. Held out: fetched only with --held-out, read locally, never vendored, only counts and rates are committed.",
+      "files": [
+        "data/text/benign/web_text.jsonl",
+        "data/text/benign/comment_issue.jsonl",
+        "data/text/benign/email_msg.jsonl",
+        "data/text/malicious/wasp.jsonl",
+        "data/text/malicious/VPI_web_text.jsonl",
+        "data/text/malicious/VPI_E_M.jsonl",
+        "data/text/malicious/EIA_w_EI.jsonl",
+        "data/text/malicious/EIA_wo_EI.jsonl",
+        "data/text/malicious/VWA_adv_w_EI.jsonl",
+        "data/text/malicious/VWA_adv_wo_EI.jsonl",
+        "data/text/malicious/popup.jsonl"
+      ],
+      "use": "Held-out benchmark: real benign web text for the false-positive rate, and web-borne injections by subset.",
+      "role": "held-out",
+      "heldOut": true
+    }
+  ],
+  "notUsed": [
+    { "name": "SEP", "repository": "https://github.com/egozverev/Should-It-Be-Executed-Or-Processed", "reason": "Optional per the addendum (CC-BY-4.0 dataset). Not needed for the first measurement; the held-out WAInjectBench benign text is the harder negative set." },
+    { "name": "facebookresearch/wasp, rogue-security/prompt-injections-benchmark", "reason": "CC-BY-NC-4.0." },
+    { "name": "JasperLS/prompt-injections, xTRam1/safe-guard-prompt-injection, jayavibhav/prompt-injection", "reason": "No stated licence." },
+    { "name": "JailbreakBench, deepset/prompt-injections, Lakera Gandalf, HackAPrompt", "reason": "Direct jailbreak corpora; the threat here is indirect injection in page text." }
+  ],
+  "bar": {
+    "name": "Llama Prompt Guard 2 86M",
+    "url": "https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M",
+    "modelCard": "https://github.com/meta-llama/PurpleLlama/blob/172c1074069eb88ec834124272c1b1c4f8893445/Llama-Prompt-Guard-2/86M/MODEL_CARD.md",
+    "licence": "Llama 4 Community License (gated download)",
+    "published": {
+      "recallAt1PctFprEnglish": 0.975,
+      "aucEnglish": 0.998,
+      "agentDojoAprAt3PctUtilityReduction": 0.812,
+      "latencyMsA100_512Tokens": 92.4,
+      "note": "Meta's private direct-jailbreak benchmark and AgentDojo; not our corpus. Run on our corpus with evals/injection/promptguard.py once the gated model is accessible."
+    }
+  }
+}

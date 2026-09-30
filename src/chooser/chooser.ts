@@ -1,6 +1,7 @@
 import { APICallError } from "@ai-sdk/provider";
 import { type Chooser as ChooserId } from "../input/schema.js";
 import { Budget, ModelUnavailableError, NavviError, NeedsHumanError } from "../billing/budget.js";
+import { sanitizeJson, sanitizeState, sanitizeText, type Finding, type GuardJson } from "../guard/index.js";
 import { maskSecrets } from "../secrets/resolve.js";
 import { isRecord, sleep } from "../util/text.js";
 
@@ -35,6 +36,12 @@ export interface Question {
   context?: QuestionContext | undefined;
   /** choice only: structured facts per option, in option order, same length as `options`. */
   optionContext?: readonly JsonValue[] | undefined;
+  /**
+   * U13: the state is the caller's own words (a brief, a run prompt), not page
+   * text, so the injection guard leaves the question alone. Everything else is
+   * treated as carrying page text: unmarked means guarded.
+   */
+  trusted?: boolean;
 }
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -83,6 +90,19 @@ export interface ChooserUsage {
    * run stayed on the transport it started on.
    */
   transportFallback?: TransportFallback;
+  /** U13: page text the injection guard cut out of questions before this chooser saw them. Absent when nothing was cut. */
+  injectionFlags?: InjectionFlags;
+}
+
+/**
+ * U13 / R17: what the injection guard quarantined. `count` is spans cut,
+ * `questions` how many questions carried at least one, `reasons` the count per
+ * rule. A run that cut nothing reports nothing.
+ */
+export interface InjectionFlags {
+  count: number;
+  questions: number;
+  reasons: Record<string, number>;
 }
 
 /** U7: which route the decider left, which it took, and the failure that made it switch (sanitized). */
@@ -124,6 +144,8 @@ export interface UsageSummary {
   writer?: { name: string; textQuestions: number; inputTokens: number; waitMs: number; costUsd: number };
   /** U7 / KTD6: the decider's transport failed and the run finished over another. */
   transportFallback?: TransportFallback;
+  /** U13: page text quarantined as a suspected prompt injection before any question was asked. */
+  injectionFlags?: InjectionFlags;
 }
 
 export function summarizeUsage(usage: ChooserUsage): UsageSummary {
@@ -138,7 +160,76 @@ export function summarizeUsage(usage: ChooserUsage): UsageSummary {
       ? { writer: { name: usage.writer.chooser, textQuestions: usage.writer.textQuestions, inputTokens: usage.writer.inputTokens, waitMs: usage.writer.waitMs, costUsd: usage.writer.costUsd } }
       : {}),
     ...(usage.transportFallback ? { transportFallback: { ...usage.transportFallback } } : {}),
+    ...(usage.injectionFlags ? { injectionFlags: { ...usage.injectionFlags, reasons: { ...usage.injectionFlags.reasons } } } : {}),
   };
+}
+
+/** U13: two guard tallies as one. */
+export function addInjectionFlags(a: InjectionFlags | undefined, b: InjectionFlags | undefined): InjectionFlags | undefined {
+  if (!a) return b && { ...b, reasons: { ...b.reasons } };
+  if (!b) return { ...a, reasons: { ...a.reasons } };
+  const reasons = { ...a.reasons };
+  for (const [rule, n] of Object.entries(b.reasons)) reasons[rule] = (reasons[rule] ?? 0) + n;
+  return { count: a.count + b.count, questions: a.questions + b.questions, reasons };
+}
+
+/**
+ * U13 / R17: the injection guard at the one door every backend shares. Every
+ * question not marked `trusted` has its premise, state, options and structured
+ * context sanitized: text that instructs the model reading it is replaced by a
+ * marker, so the chooser never sees a flagged span, and each cut is counted.
+ * A question with nothing flagged comes back as the same object.
+ *
+ * It runs only when a question is asked. Pinned replay asks none, so it costs
+ * a healthy replay nothing; healing asks, so healing is guarded.
+ *
+ * A text question's premise and state were trimmed to fit TEXT_INPUT_CAP; if
+ * the marker would push it back over, the flagged span is cut with no marker.
+ */
+export function guardQuestions(batch: readonly Question[]): { batch: Question[]; flags: InjectionFlags | undefined } {
+  let flags: InjectionFlags | undefined;
+  const cache = new Map<string, { text: string; findings: Finding[] }>();
+  const out = batch.map((q) => {
+    if (q.trusted) return q;
+    const guard = (marker?: string): { q: Question; findings: Finding[] } => {
+      const findings: Finding[] = [];
+      const text = (value: string, json: boolean): string => {
+        const key = `${json ? "j" : "t"}${marker === undefined ? "" : `:${marker}`}\u0000${value}`;
+        let s = cache.get(key);
+        if (!s) {
+          s = json ? sanitizeState(value, marker) : sanitizeText(value, marker);
+          cache.set(key, s);
+        }
+        findings.push(...s.findings);
+        return s.text;
+      };
+      const premise = text(q.premise, false);
+      const state = text(q.state, true);
+      // An option's identity is code-enumerated (a selector, a control); only the page text it quotes is guarded.
+      const options = q.options?.map((o) => {
+        const at = o.indexOf(OPTION_VALUE_SEPARATOR);
+        return at < 0 ? text(o, false) : o.slice(0, at + OPTION_VALUE_SEPARATOR.length) + text(o.slice(at + OPTION_VALUE_SEPARATOR.length), false);
+      });
+      const context = q.context && sanitizeJson(q.context as GuardJson, marker);
+      const optionContext = q.optionContext && sanitizeJson(q.optionContext as GuardJson, marker);
+      if (context) findings.push(...context.findings);
+      if (optionContext) findings.push(...optionContext.findings);
+      if (findings.length === 0) return { q, findings };
+      const next: Question = { ...q, premise, state };
+      if (options) next.options = options;
+      if (context) next.context = context.value as QuestionContext;
+      if (optionContext) next.optionContext = optionContext.value as readonly JsonValue[];
+      return { q: next, findings };
+    };
+    let guarded = guard();
+    if (guarded.findings.length > 0 && q.kind === "text" && guarded.q.premise.length + guarded.q.state.length > TEXT_INPUT_CAP) guarded = guard("");
+    if (guarded.findings.length === 0) return q;
+    const reasons: Record<string, number> = {};
+    for (const f of guarded.findings) reasons[f.rule] = (reasons[f.rule] ?? 0) + 1;
+    flags = addInjectionFlags(flags, { count: guarded.findings.length, questions: 1, reasons });
+    return guarded.q;
+  });
+  return { batch: out, flags };
 }
 
 export interface Chooser {
@@ -431,6 +522,8 @@ export abstract class BaseChooser implements Chooser {
   private delegatedZeroDataRetention: ZeroDataRetentionState | undefined;
   /** U14: the writer that actually answered, set the first time text work is delegated. */
   private writerName: ChooserName | undefined;
+  /** U13: what the injection guard cut from this chooser's questions. */
+  private injection: InjectionFlags | undefined;
 
   /** U14: what a delegated writer cost, for backends whose own tokens are free. */
   protected get delegatedCostUsd(): number {
@@ -462,6 +555,7 @@ export abstract class BaseChooser implements Chooser {
     };
     // U14: name the second source only once it has answered something.
     if (this.writerName !== undefined) usage.writer = { chooser: this.writerName, ...this.delegated };
+    if (this.injection) usage.injectionFlags = addInjectionFlags(this.injection, undefined)!;
     return usage;
   }
 
@@ -503,8 +597,11 @@ export abstract class BaseChooser implements Chooser {
     }
   }
 
-  async ask(batch: Question[]): Promise<Answer[]> {
-    if (batch.length === 0) return [];
+  async ask(asked: Question[]): Promise<Answer[]> {
+    if (asked.length === 0) return [];
+    // U13: page text is guarded before any backend, or a text fallback, can read it.
+    const { batch, flags } = guardQuestions(asked);
+    if (flags) this.injection = addInjectionFlags(this.injection, flags);
     this.checkQuestions(batch);
     const byId = new Map<string, Answer>();
     const text = batch.filter((q) => q.kind === "text");

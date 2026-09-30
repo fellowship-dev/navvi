@@ -1,0 +1,67 @@
+navvi
+Copyright (c) Fellowship Dev. Licensed under the MIT License (see LICENSE).
+
+This repository's prompt-injection eval (evals/injection/) and its unit test
+(tests/guard.test.ts) use attack strings from the third-party sources below.
+Only the few strings in evals/injection/samples.json and the wrapper templates
+in evals/injection/templates.json are copied into this repository; everything
+else is fetched at the pinned commit by evals/injection/fetch.ts into a
+gitignored cache and is not redistributed. The manifest with every URL, commit
+and licence is evals/injection/corpora.json.
+
+--------------------------------------------------------------------------------
+Meta CyberSecEval, prompt injection dataset
+https://github.com/meta-llama/PurpleLlama/tree/main/CybersecurityBenchmarks
+Commit 172c1074069eb88ec834124272c1b1c4f8893445
+File: CybersecurityBenchmarks/datasets/prompt_injection/prompt_injection.json
+Licence: MIT, per CybersecurityBenchmarks/LICENSE
+  (the PurpleLlama repository root is under the Llama 3.2 Community License;
+  the benchmark directory is MIT)
+Copyright (c) Meta Platforms, Inc. and affiliates.
+Used: three verbatim fragments of indirect-injection rows in samples.json;
+the full file is fetched, not copied.
+
+--------------------------------------------------------------------------------
+BIPIA: Benchmark for Indirect Prompt Injection Attacks
+https://github.com/microsoft/BIPIA (archived 2026-09-16)
+Commit a004b69ec0dd446e0afd461d98cb5e96e120a5d0
+Files: benchmark/text_attack_train.json, benchmark/text_attack_test.json
+Licence: MIT
+Copyright (c) Microsoft Corporation.
+BIPIA's LICENSE carves out the host datasets under benchmark/
+(WikiTableQuestions and Stack Exchange, CC-BY-SA-4.0; OpenAI Evals invoices,
+MIT). None of them is used here: only BIPIA's own attack strings.
+Used: five verbatim attack goals in samples.json; the full files are fetched,
+not copied.
+
+--------------------------------------------------------------------------------
+AgentDojo
+https://github.com/ethz-spylab/agentdojo
+Commit 089ed468cf3ed0322acc66b0211f26d9d90dbf60
+Files: src/agentdojo/attacks/baseline_attacks.py,
+       src/agentdojo/attacks/important_instructions_attacks.py
+Licence: MIT
+Copyright (c) 2024 Edoardo Debenedetti, Jie Zhang, Mislav Balunovic,
+Luca Beurer-Kellner, Marc Fischer, and Florian Tramer
+Used: the five fixed attack wrappers, verbatim, in templates.json.
+
+--------------------------------------------------------------------------------
+WAInjectBench (held out, not redistributed)
+https://github.com/Norrrrrrr-lyn/WAInjectBench (arXiv:2510.01354)
+Commit ee55236860820b3639c9039a2aa367b2cb86d114
+Licence: none stated; it aggregates CC-BY-NC-4.0 material from
+facebookresearch/wasp. Fetched only on request (fetch.ts --held-out) into the
+gitignored cache and scored locally. No text from it is in this repository;
+evals/injection/REPORT.md carries counts and rates only.
+
+--------------------------------------------------------------------------------
+Baselines referenced, not included
+- Llama Prompt Guard 2 86M, https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M
+  (Llama 4 Community License, gated). Its published numbers are quoted from
+  https://github.com/meta-llama/PurpleLlama/blob/172c1074069eb88ec834124272c1b1c4f8893445/Llama-Prompt-Guard-2/86M/MODEL_CARD.md
+- protectai/deberta-v3-base-prompt-injection-v2,
+  https://huggingface.co/protectai/deberta-v3-base-prompt-injection-v2 (Apache-2.0).
+  Run locally by evals/injection/promptguard.py; no weights are included.
+- Taxonomy follows OWASP LLM01:2025 Prompt Injection,
+  https://genai.owasp.org/llmrisk/llm01-prompt-injection/ (CC-BY-SA-4.0; no text
+  reproduced).

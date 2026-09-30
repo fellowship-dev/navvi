@@ -4,7 +4,7 @@ import { AgentChooser, type AgentChooserOptions } from "./agent.js";
 import { CliChooser, CliUnavailableError, HARNESS_LABEL, SIGN_IN_COMMAND, findOnPath, probeCli, type CliChooserOptions, type CliHarness, type CliProbe } from "./cli.js";
 import { JevChooser, type JevChooserOptions } from "./jev.js";
 import { ModelChooser, type ModelChooserOptions } from "./model.js";
-import type { Answer, Chooser, ChooserUsage, Question, ZeroDataRetentionState } from "./chooser.js";
+import { addInjectionFlags, type Answer, type Chooser, type ChooserUsage, type Question, type ZeroDataRetentionState } from "./chooser.js";
 
 export * from "./chooser.js";
 export * from "./questions.js";
@@ -223,6 +223,8 @@ export class TextFallbackChain implements Chooser {
       total.costUsd += one.costUsd;
       retention = retention === undefined || retention === one.zeroDataRetention ? one.zeroDataRetention : "unknown";
       if (one.reportedCostUsd !== undefined) reported = (reported ?? 0) + one.reportedCostUsd;
+      const flags = addInjectionFlags(total.injectionFlags, one.injectionFlags);
+      if (flags) total.injectionFlags = flags;
     }
     if (retention !== undefined) total.zeroDataRetention = retention;
     const billing = this.built[this.index]?.usage().billing;

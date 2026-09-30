@@ -202,5 +202,8 @@ export function chooserLines(c: UsageSummary): string[] {
   if (w) lines.push(`  writer ${w.name}: ${plural(w.textQuestions, "text question", "text questions")}, ${cost(w.inputTokens, w.waitMs, w.costUsd)}`);
   const f = c.transportFallback;
   if (f) lines.push(`  decider transport: fell back from ${f.from} to ${f.to} (${f.reason})`);
+  // U13: quarantined page text is said, never silent.
+  const g = c.injectionFlags;
+  if (g) lines.push(`  injection guard: ${plural(g.count, "span", "spans")} of page text quarantined in ${plural(g.questions, "question", "questions")} (${Object.entries(g.reasons).map(([rule, n]) => `${rule} ${n}`).join(", ")})`);
   return lines;
 }
