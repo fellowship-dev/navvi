@@ -227,6 +227,19 @@ export const ACTOR_ONLY_KEYS = ["typesafeApiKey", "gatewayApiKey", "anthropicApi
 
 const CALLER_KEY_ENV: Record<string, string> = { typesafeApiKey: "TYPESAFE_API_KEY", gatewayApiKey: "AI_GATEWAY_API_KEY", anthropicApiKey: "ANTHROPIC_API_KEY" };
 
+/**
+ * U12 / R16: true when the actor input carries a non-empty caller key, the
+ * same test `actorInput` applies before moving one into the run's env. Such a
+ * run is bring-your-own-key and is charged no `decision`: the caller pays
+ * their provider for the questions. Without one the run answers on the
+ * operator's key and every answered question is a `decision`.
+ */
+export function hasCallerKey(raw: unknown): boolean {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const record = raw as Record<string, unknown>;
+  return Object.keys(CALLER_KEY_ENV).some((key) => typeof record[key] === "string" && (record[key] as string).trim().length > 0);
+}
+
 
 /**
  * Splits the actor input into the run input and the run's environment. A
@@ -261,7 +274,7 @@ async function main() {
   const raw = (await Actor.getInput()) ?? {};
   try {
     const { input, env } = actorInput(raw);
-    const summary = await run(input, { env });
+    const summary = await run(input, { env, callerKey: hasCallerKey(raw) });
     await Actor.setValue("SUMMARY", summary);
     const message = summary.message ? `${summary.status}: ${summary.message}` : summary.status;
     // needs_human is a hold, not a failure: the CLI (U17) maps it to exit code 3.

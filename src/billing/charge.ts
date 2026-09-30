@@ -1,15 +1,16 @@
 import type { ChargeResult } from "apify";
+import { NavviError } from "./budget.js";
 
 /**
- * R20 / KTD10: pay-per-event charging. Four events, priced in Console, never
- * in code. The charger is a thin wrapper over `Actor.charge` that counts what
+ * R20 / KTD10: pay-per-event charging. Five events, priced in Console, never
+ * in code; the fifth, `decision`, is U12 / R16 (see `billDecisions`). The charger is a thin wrapper over `Actor.charge` that counts what
  * was charged and remembers a reached limit, so the crawler can check
  * `canAfford` before every page (R28 style) and end the run `charge_limit`
  * with the items pushed so far (AE13). Without pay-per-event pricing (every
  * local run, a run under a different pricing model) it is a no-op.
  */
 
-export const CHARGE_EVENTS = ["actor-start", "scraper-compiled", "page-scraped", "result-item"] as const;
+export const CHARGE_EVENTS = ["actor-start", "scraper-compiled", "page-scraped", "result-item", "decision"] as const;
 export type ChargeEvent = (typeof CHARGE_EVENTS)[number];
 export type ChargeCounts = Record<ChargeEvent, number>;
 
@@ -30,7 +31,7 @@ export interface ChargeOutcome {
 }
 
 export function zeroCharges(): ChargeCounts {
-  return { "actor-start": 0, "scraper-compiled": 0, "page-scraped": 0, "result-item": 0 };
+  return { "actor-start": 0, "scraper-compiled": 0, "page-scraped": 0, "result-item": 0, decision: 0 };
 }
 
 export class Charger {
@@ -90,5 +91,58 @@ export class Charger {
     if (result.eventChargeLimitReached) this.exhausted.add(event);
     if (charged < count) this.limitReached = true;
     return { charged, limitReached: charged < count };
+  }
+}
+
+/**
+ * What `billDecisions` wraps: the chooser's shape, spelled structurally so
+ * billing does not import the chooser. `Chooser` satisfies it both ways.
+ */
+export interface AnsweringSource<N extends string, Q, A, U> {
+  readonly name: N;
+  ask(batch: Q[]): Promise<A[]>;
+  usage(): U;
+}
+
+/**
+ * U12 / R16: the `decision` event, one per chooser question answered (a batch
+ * of N is N events). The caller wraps the run's chooser only when the
+ * operator's key is in use: a bring-your-own-key run pays its provider and is
+ * never billed twice for the same question (Max, 2026-09-20). A pinned replay
+ * asks nothing, so charges nothing.
+ *
+ * The room is checked before the chooser is asked, so a spent budget buys no
+ * model call; a batch the budget covers only in part ends the run
+ * `charge_limit` like the other events (thrown as a NavviError, which the
+ * crawler turns into the run's stop).
+ */
+export function billDecisions<N extends string, Q, A, U>(source: AnsweringSource<N, Q, A, U>, charger: Charger): AnsweringSource<N, Q, A, U> {
+  return {
+    // A chain reports the member currently answering, so the name is read, not copied.
+    get name() {
+      return source.name;
+    },
+    usage: () => source.usage(),
+    ask: async (batch) => {
+      if (batch.length > 0 && !charger.canAfford("decision")) {
+        charger.limitReached = true;
+        throw new NavviError("charge_limit", "charge limit reached before a chooser decision");
+      }
+      const answers = await source.ask(batch);
+      await chargeAnswered(charger, answers.length);
+      return answers;
+    },
+  };
+}
+
+/** Charges `n` answered questions as `decision`, at most what the room allows; throws `charge_limit` when that is fewer. */
+export async function chargeAnswered(charger: Charger, n: number): Promise<void> {
+  // Clamped to the room like `result-item`: asking for more would have the
+  // platform charge one event over the limit.
+  const want = Math.min(n, charger.room("decision"));
+  const outcome = await charger.charge("decision", want);
+  if (charger.enabled && outcome.charged < n) {
+    charger.limitReached = true;
+    throw new NavviError("charge_limit", `charge limit reached after ${charger.counts.decision} chooser decisions`);
   }
 }

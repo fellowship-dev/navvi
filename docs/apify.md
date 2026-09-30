@@ -101,7 +101,7 @@ automatically.
 
 ## Pay-per-event
 
-On Apify the actor charges four events, priced in the Apify Console, never in
+On Apify the actor charges five events, priced in the Apify Console, never in
 code. Every run ends with a `SUMMARY` record in the run's key-value store
 carrying the status, counts, chooser usage, healing events, the `scriptId` to
 pin next time, the charged event counts and the zero-data-retention state.
@@ -123,9 +123,11 @@ trusted; a run where every page was a challenge ends `blocked_bot_detection`.
 | `scraper-compiled` | Once per template, the first time a page passes the fingerprint check with a scraper compiled this run; a cache hit charges nothing |
 | `page-scraped` | Per scraped page (listing, paginated page, detail page); the limit is checked before every page |
 | `result-item` | Per dataset item |
+| `decision` | Per chooser question answered (compile, navigation, healing, prompt parse; a batch of N is N), only when the run uses the operator's key. A run that brings its own key (`typesafeApiKey`, `gatewayApiKey` or `anthropicApiKey`) pays its provider and is charged none; a pinned replay that asks nothing charges none |
 
 When the run's charge limit is reached the items pushed so far stay in the
-dataset and the run ends `charge_limit`. Off the platform nothing is charged
+dataset and the run ends `charge_limit`. A `decision` is checked before the
+chooser is asked, so a spent budget buys no model call. Off the platform nothing is charged
 and every count in the summary is zero; a local run with
 `ACTOR_TEST_PAY_PER_EVENT=1 ACTOR_USE_CHARGING_LOG_DATASET=1` charges at $1
 per event against `ACTOR_MAX_TOTAL_CHARGE_USD` and writes the charging log to

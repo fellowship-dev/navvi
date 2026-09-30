@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { Actor, type ConfigurationOptions } from "apify";
 import { MemoryStorage } from "crawlee";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { CHARGE_EVENTS, Charger, type ChargeEvent, type ChargingActor } from "../src/billing/charge.js";
+import { NavviError } from "../src/billing/budget.js";
+import { CHARGE_EVENTS, Charger, billDecisions, type ChargeEvent, type ChargingActor } from "../src/billing/charge.js";
+import type { Answer, Chooser, ChooserUsage, Question } from "../src/chooser/chooser.js";
+import { hasCallerKey } from "../src/main.js";
 import { RecordedChooser } from "../src/chooser/recorded.js";
 import { runCrawl, type CrawlActor } from "../src/replay/crawler.js";
 import { cacheKey } from "../src/scraper/schema.js";
@@ -121,7 +124,8 @@ function holdCharges(actor: CrawlActor, event: ChargeEvent, n: number): CrawlAct
   };
 }
 
-const UNIT_PRICES: Record<ChargeEvent, number> = { "actor-start": 1, "scraper-compiled": 1, "page-scraped": 1, "result-item": 1 };
+/** `decision` is free here, so the budgets below stay the page and item arithmetic they were written as; the decision tests price it. */
+const UNIT_PRICES: Record<ChargeEvent, number> = { "actor-start": 1, "scraper-compiled": 1, "page-scraped": 1, "result-item": 1, decision: 0 };
 const zeroCounts = () => Object.fromEntries(CHARGE_EVENTS.map((e) => [e, 0]));
 
 describe("Charger", () => {
@@ -202,7 +206,7 @@ describe("charging through a crawl (R20, AE13)", () => {
     expect(summary.items).toBe(10);
     expect(summary.pages).toBe(1);
     expect(summary.requests).toEqual({ compile: 1, list: 1, record: 0 });
-    expect(summary.charges).toEqual({ "actor-start": 1, "scraper-compiled": 1, "page-scraped": 1, "result-item": 10 });
+    expect(summary.charges).toEqual({ "actor-start": 1, "scraper-compiled": 1, "page-scraped": 1, "result-item": 10, decision: summary.chooser!.questions });
     expect(await datasetItems(base)).toHaveLength(10);
     expect(summary.message).toMatch(/charge limit/);
   });
@@ -292,7 +296,7 @@ describe("charging through a crawl (R20, AE13)", () => {
     // $1.00: actor-start $0.05 + scraper-compiled $0.50 + the listing page $0.02
     // leaves 43 result-items of room; charging the 25 rows first leaves $0.18,
     // which buys the three detail samples and six more detail pages, no more.
-    const prices: Record<ChargeEvent, number> = { "actor-start": 0.05, "scraper-compiled": 0.5, "page-scraped": 0.02, "result-item": 0.01 };
+    const prices: Record<ChargeEvent, number> = { "actor-start": 0.05, "scraper-compiled": 0.5, "page-scraped": 0.02, "result-item": 0.01, decision: 0 };
     const fake = new FakeCharging(prices, 1);
     const chooser = new RecordedChooser({ fixture: "replay/python-jobs-detail" });
     const raw = {
@@ -347,4 +351,116 @@ describe("charging through a crawl (R20, AE13)", () => {
     expect(items).toHaveLength(10);
     expect(summary.items).toBe(10);
   }, 60_000);
+});
+
+/** A chooser that answers every question with option 0, for counting what a batch charges. */
+class FirstOption implements Chooser {
+  readonly name = "recorded" as const;
+  asked = 0;
+  async ask(batch: Question[]): Promise<Answer[]> {
+    this.asked += batch.length;
+    return batch.map((q) => ({ id: q.id, index: 0 }));
+  }
+  usage(): ChooserUsage {
+    return { chooser: "recorded", questions: this.asked, textQuestions: 0, batches: 0, inputTokens: 0, outputTokens: 0, waitMs: 0, costUsd: 0, zeroDataRetention: "not_applicable" };
+  }
+}
+
+const question = (id: string): Question => ({ id, kind: "choice", premise: "which one", state: "{}", options: ["a", "b"] });
+
+/**
+ * U12 / R16: the fifth event. `decision` is charged per chooser question
+ * answered, only on the operator's key: a bring-your-own-key run pays its
+ * provider and is never billed twice for the same question (Max, 2026-09-20).
+ */
+describe("the decision event (U12, R16)", () => {
+  it("a batch of 3 answered questions charges 3 decision", async () => {
+    const fake = new FakeCharging({ ...UNIT_PRICES, decision: 1 }, 100);
+    const charger = Charger.for(fake.actor(makeActor(dir)));
+    const billed = billDecisions(new FirstOption(), charger);
+    expect(await billed.ask([question("a"), question("b"), question("c")])).toHaveLength(3);
+    expect(charger.counts.decision).toBe(3);
+    expect(fake.calls).toEqual([{ eventName: "decision", count: 3 }]);
+    // an empty batch asks nothing and charges nothing
+    expect(await billed.ask([])).toEqual([]);
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  it("a limit reached mid-batch ends charge_limit with the answered questions it could charge", async () => {
+    const fake = new FakeCharging({ ...UNIT_PRICES, decision: 1 }, 2);
+    const charger = Charger.for(fake.actor(makeActor(dir)));
+    const billed = billDecisions(new FirstOption(), charger);
+    const error = await billed.ask([question("a"), question("b"), question("c")]).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(NavviError);
+    expect((error as NavviError).status).toBe("charge_limit");
+    expect(charger.limitReached).toBe(true);
+    // the room, not the batch: never the platform's over-charge by one
+    expect(charger.counts.decision).toBe(2);
+    expect(fake.calls).toEqual([{ eventName: "decision", count: 2 }]);
+    // the next batch is refused before the chooser is asked: no unpaid model spend
+    const inner = new FirstOption();
+    const again = billDecisions(inner, charger);
+    await expect(again.ask([question("d")])).rejects.toMatchObject({ status: "charge_limit" });
+    expect(inner.asked).toBe(0);
+  });
+
+  it("only a non-empty caller key makes a run bring-your-own-key", () => {
+    expect(hasCallerKey({ typesafeApiKey: "ts" })).toBe(true);
+    expect(hasCallerKey({ gatewayApiKey: " gw " })).toBe(true);
+    expect(hasCallerKey({ anthropicApiKey: "ant" })).toBe(true);
+    expect(hasCallerKey({ typesafeApiKey: "  ", gatewayApiKey: "" })).toBe(false);
+    expect(hasCallerKey({ startUrls: ["https://example.org/"] })).toBe(false);
+    expect(hasCallerKey(null)).toBe(false);
+  });
+
+  const jobs = (over: Record<string, unknown> = {}) => ({ ...over, startUrls: [`${server.baseUrl}/fixtures/python-jobs.html`], mode: "list", fields: F("title", "company", "location", "date", "link"), description: "python job listing" });
+
+  it("a compile on the operator key charges one decision per question answered; with a caller key, none", async () => {
+    const operator = new FakeCharging({ ...UNIT_PRICES, decision: 1 }, 1000);
+    const summary = await runCrawl(fixtureInput(jobs({ forceRecompile: true })), makeDeps(dir, operator.actor(makeActor(dir)), new RecordedChooser({ fixture: "compile/python-jobs" })));
+    expect(summary.status).toBe("succeeded");
+    expect(summary.chooser!.questions).toBeGreaterThan(0);
+    expect(summary.charges.decision).toBe(summary.chooser!.questions);
+    expect(operator.charged.decision).toBe(summary.chooser!.questions);
+
+    const caller = new FakeCharging({ ...UNIT_PRICES, decision: 1 }, 1000);
+    const byok = await runCrawl(fixtureInput(jobs({ forceRecompile: true })), makeDeps(dir, caller.actor(makeActor(dir)), new RecordedChooser({ fixture: "compile/python-jobs" }), { callerKey: true }));
+    expect(byok.chooser!.questions).toBeGreaterThan(0);
+    expect(byok.charges.decision).toBe(0);
+    expect(caller.calls.map((c) => c.eventName)).not.toContain("decision");
+  }, 60_000);
+
+  it("a pinned replay that asks no question charges no decision", async () => {
+    // one actor, so the replay reads the scraper the warm-up stored
+    const base = makeActor(dir);
+    const warm = new FakeCharging({ ...UNIT_PRICES, decision: 1 }, 1000);
+    await runCrawl(fixtureInput(jobs({ forceRecompile: true })), makeDeps(dir, warm.actor(base), new RecordedChooser({ fixture: "compile/python-jobs" })));
+    const replay = new FakeCharging({ ...UNIT_PRICES, decision: 1 }, 1000);
+    const summary = await runCrawl(fixtureInput(jobs()), makeDeps(dir, replay.actor(base), new RecordedChooser({ fixture: "crawler/empty" })));
+    expect(summary.cacheHit).toBe(true);
+    expect(summary.chooser!.questions).toBe(0);
+    expect(summary.charges.decision).toBe(0);
+    expect(replay.calls.map((c) => c.eventName)).not.toContain("decision");
+  }, 60_000);
+
+  it("a compile whose budget runs out mid-batch ends charge_limit like the other events", async () => {
+    // actor-start and two decisions: the compile's first batch asks more than that
+    const fake = new FakeCharging({ ...UNIT_PRICES, decision: 1 }, 3);
+    const summary = await runCrawl(fixtureInput(jobs({ forceRecompile: true })), makeDeps(dir, fake.actor(makeActor(dir)), new RecordedChooser({ fixture: "compile/python-jobs" })));
+    expect(summary.status).toBe("charge_limit");
+    expect(summary.message).toMatch(/charge limit/);
+    expect(summary.items).toBe(0);
+    expect(summary.charges["actor-start"]).toBe(1);
+    expect(summary.charges.decision).toBeGreaterThanOrEqual(1);
+    expect(summary.charges["result-item"]).toBe(0);
+  }, 60_000);
+
+  it("the prompt parse's questions, asked before the crawl, are charged after actor-start", async () => {
+    const fake = new FakeCharging({ ...UNIT_PRICES, decision: 1 }, 1000);
+    const chooser = new FirstOption();
+    await chooser.ask([question("p1"), question("p2")]);
+    const summary = await runCrawl(fixtureInput({ startUrls: [`${server.baseUrl}/fixtures/challenge.html`], mode: "list", fields: F("title"), description: "anything" }), makeDeps(dir, fake.actor(makeActor(dir)), chooser));
+    expect(fake.calls.slice(0, 2)).toEqual([{ eventName: "actor-start", count: 1 }, { eventName: "decision", count: 2 }]);
+    expect(summary.charges.decision).toBe(2);
+  });
 });

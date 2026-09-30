@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { Actor } from "apify";
 import { PlaywrightCrawler, ProxyConfiguration, type Configuration, type Dataset, type KeyValueStore, type PlaywrightCrawlingContext } from "crawlee";
 import type { BrowserContext, Page, Request } from "playwright";
-import { Charger, type ChargingActor } from "../billing/charge.js";
+import { Charger, billDecisions, chargeAnswered, type ChargingActor } from "../billing/charge.js";
 import { buildCrawleeLaunchContext, restoreProfileCookies, saveProfileCookies } from "../browser/launch.js";
 import { createLaunchCounter, formatLaunchFailure, isLaunchFailure, launchFailureReport, resolveRelaunchKnobs, type RelaunchKnobs } from "../browser/relaunch.js";
 import { captureJson, describeSkips, newestUsableResponse, type Capture, type CapturedResponse } from "../browser/network-capture.js";
@@ -155,6 +155,12 @@ export interface CrawlDeps {
   /** Observe each actual crawler page before navigation (e.g. recording compile and replay). */
   onPage?: ((page: Page) => Promise<void>) | undefined;
   chooser?: Chooser | undefined;
+  /**
+   * U12 / R16: the caller brought their own model key (an actor-only input key,
+   * see `hasCallerKey` in main.ts). No `decision` is charged then: the caller
+   * pays their provider and is never billed twice for the same question.
+   */
+  callerKey?: boolean | undefined;
   actor?: CrawlActor | undefined;
   store?: ScraperStore | undefined;
   navigator?: NavigatorHook | undefined;
@@ -740,7 +746,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   const ctxLog = deps.log ?? defaultCtxLog;
   const env = deps.env ?? process.env;
   const actor: CrawlActor = deps.actor ?? Actor;
-  const chooser = deps.chooser ?? createChooser({ ...resolveSources(input, env), env });
+  const runChooser = deps.chooser ?? createChooser({ ...resolveSources(input, env), env });
   const navigator: NavigatorHook = deps.navigator ?? defaultNavigator;
   const healer: HealerHook = deps.healer ?? createHealer();
   const paginateHook: PaginateHook = deps.paginate ?? defaultPaginate;
@@ -783,6 +789,8 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   };
   const plans: TemplatePlan[] = [];
   const charger = Charger.for(actor);
+  // U12 / R16: every question answered on the operator's key is a `decision`.
+  const chooser = deps.callerKey ? runChooser : billDecisions(runChooser, charger);
   const fail = (status: Status, message: string): RunSummary => {
     state.stop = { status, message };
     return summaryOf(input, state, plans, chooser, charger);
@@ -791,6 +799,16 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
   // R20: actor-start is the first charge of the run; a budget that cannot cover it ends the run before anything else.
   const started = await charger.charge("actor-start");
   if (started.limitReached && started.charged === 0) return fail("charge_limit", "charge limit reached before actor-start");
+  // U12: questions answered before the crawl (the prompt parse, on this same chooser) are charged right after actor-start.
+  const answeredBefore = deps.callerKey ? 0 : runChooser.usage().questions;
+  if (answeredBefore > 0) {
+    try {
+      await chargeAnswered(charger, answeredBefore);
+    } catch (error) {
+      if (error instanceof NavviError) return fail("charge_limit", error.message);
+      throw error;
+    }
+  }
 
   // R34: list sources, then the policy on every URL.
   const resolveHost = deps.resolveHost ?? defaultResolver;
