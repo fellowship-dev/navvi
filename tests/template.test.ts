@@ -230,3 +230,20 @@ describe("matchesTemplate", () => {
     for (const [key, members] of groupByTemplate(urls)) for (const url of members) expect(matchesTemplate(key, url)).toBe(true);
   });
 });
+
+describe("a path segment that echoes the URL's own query is the query (search pages that put the term in the path)", () => {
+  const a = "https://tienda.example/paracetamol?_q=paracetamol&map=ft";
+  const b = "https://tienda.example/acido%20acetil?_q=acido%20acetil&map=ft";
+  const category = "https://tienda.example/medicamentos";
+  it("groups searches for different terms into one template, apart from a plain page of the same depth", () => {
+    const grouped = groupByTemplate([a, b, category]);
+    expect(grouped.get("tienda.example/{q}")).toEqual([a, b]);
+    expect(grouped.get("tienda.example/medicamentos")).toEqual([category]);
+  });
+  it("names one search URL's template {q} on its own too, and matches every search of it", () => {
+    const [key] = [...groupByTemplate([a]).keys()];
+    expect(key).toBe("tienda.example/{q}");
+    expect(matchesTemplate(key!, b)).toBe(true);
+    expect(matchesTemplate(key!, "https://tienda.example/ibuprofeno?_q=ibuprofeno")).toBe(true);
+  });
+});

@@ -11,6 +11,7 @@ import type { CompiledScraper } from "../scraper/schema.js";
  * - uuid / long hex / opaque id -> `{id}`
  * - slug-like or varying        -> `{slug}`
  * - identical across all URLs   -> kept literally (even when numeric)
+ * - echoes a query value        -> `{q}` (a search term carried in the path)
  * - a trailing page extension   -> kept as a literal suffix: `/producto/{slug}.html`
  * - query string dropped except pagination keys, kept as `?page={page}` so a
  *   paginated listing is its own template, apart from its bare first page.
@@ -44,6 +45,13 @@ interface ParsedUrl {
   extension: string;
   /** Sorted pagination keys present in the query string. */
   pagination: string[];
+  /**
+   * Per segment: does it echo one of the URL's own query values? A search page
+   * that puts the term in its path (`/<term>?_q=<term>&map=ft`) has a literal-
+   * looking segment that is really the query, and read as a literal it made
+   * every search a template of its own (2026-09-30).
+   */
+  echoes: boolean[];
 }
 
 function parse(url: string): ParsedUrl | null {
@@ -65,7 +73,17 @@ function parse(url: string): ParsedUrl | null {
     }
   }
   const pagination = PAGINATION_KEYS.filter((key) => parsed.searchParams.has(key)).sort();
-  return { url, host: parsed.host.toLowerCase(), segments, extension, pagination };
+  const queryValues = new Set([...parsed.searchParams.values()].map((v) => v.trim().toLowerCase()).filter((v) => v.length > 0));
+  const echoes = segments.map((segment) => queryValues.has(decodeSegment(segment).trim().toLowerCase()));
+  return { url, host: parsed.host.toLowerCase(), segments, extension, pagination, echoes };
+}
+
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
 }
 
 function requireParsed(url: string): ParsedUrl {
@@ -81,7 +99,7 @@ function requireParsed(url: string): ParsedUrl {
  */
 function bucketId(p: ParsedUrl): string {
   const first = p.segments[0];
-  const prefix = first !== undefined && classify(first) === "literal" ? first : "*";
+  const prefix = first !== undefined && !p.echoes[0] && classify(first) === "literal" ? first : "*";
   return JSON.stringify([p.host, p.segments.length, p.extension, p.pagination, prefix]);
 }
 
@@ -89,6 +107,7 @@ function patternOf(members: readonly ParsedUrl[]): string {
   const first = members[0];
   if (!first) throw new Error("a template needs at least one URL");
   const parts = first.segments.map((_, index) => {
+    if (members.some((m) => m.echoes[index])) return "{q}";
     const values = new Set(members.map((m) => m.segments[index] ?? ""));
     const [only] = values;
     if (values.size === 1 && only !== undefined) {
@@ -136,7 +155,7 @@ export function matchesTemplate(key: string, url: string): boolean {
     const part = decodeURIComponent(escaped); // the URL parser escaped the braces
     const actual = parsed.segments[index]!;
     if (part === "{n}") return NUMERIC.test(actual);
-    if (part === "{id}" || part === "{slug}") return actual.length > 0;
+    if (part === "{id}" || part === "{slug}" || part === "{q}") return actual.length > 0;
     return escaped === actual;
   });
 }
