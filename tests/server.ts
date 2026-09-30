@@ -142,6 +142,8 @@ export async function startFixtureServer(): Promise<FixtureServer> {
         return;
       }
 
+      // A frame that never answers, so a page embedding it never fires `load`.
+      if (pathname === "/demo/buscador/colgado") return;
       // A store's search: one template (`/demo/buscador/buscar`), items that depend on `q`.
       if (pathname === "/demo/buscador/buscar" || pathname === "/demo/buscador/" || pathname === "/demo/buscador") {
         const q = url.searchParams.get("q") ?? "";
@@ -150,6 +152,8 @@ export async function startFixtureServer(): Promise<FixtureServer> {
         if (q.startsWith("gone-")) return void sendHtml(res, 404, "<!doctype html><title>No encontrado</title><h1>Página no encontrada</h1>");
         if (q.startsWith("challenge-")) return void (await sendFile(res, path.join(FIXTURES_DIR, "challenge.html"), 503));
         if (q.startsWith("retirado-")) return void redirect(res, "/demo/buscador/");
+        // A results page whose `load` never fires: an embedded frame that never answers.
+        if (q.startsWith("lento-")) return void sendHtml(res, 200, `${searchPage(q, 1)}<iframe src="/demo/buscador/colgado"></iframe>`);
         return void sendHtml(res, 200, searchPage(q, Number(url.searchParams.get("page") ?? "1")));
       }
 

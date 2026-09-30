@@ -174,6 +174,8 @@ export interface CrawlDeps {
   /** A person is present for bot-challenge handoffs (R41). Defaults to `input.headed`. */
   attended?: boolean | undefined;
   maxConcurrency?: number | undefined;
+  /** How long a navigation may take before it fails (default 60 s); a test shortens it. */
+  navigationTimeoutSecs?: number | undefined;
   /** Requests running from the start (Crawlee scales up from one otherwise); never above `maxConcurrency`. */
   minConcurrency?: number | undefined;
   fetchText?: ((url: string) => Promise<{ contentType: string; body: string }>) | undefined;
@@ -1029,7 +1031,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
           : {}),
       maxRequestRetries: 1,
       requestHandlerTimeoutSecs: REQUEST_HANDLER_TIMEOUT_SECS,
-      navigationTimeoutSecs: 60,
+      navigationTimeoutSecs: deps.navigationTimeoutSecs ?? 60,
       useSessionPool: true,
       persistCookiesPerSession: false,
       sessionPoolOptions: buildSessionPoolOptions(singleSession, relaunchKnobs),
@@ -1040,7 +1042,10 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
         // A record replay waits for the document, then for `load` up to a cap
         // (handleRecord): the full `load` of a store page waits on every
         // third-party script, and was most of an ~18 s page on the platform.
-        if (label === "record" && gotoOptions) gotoOptions.waitUntil = "domcontentloaded";
+        // A list page waits for its item anchor instead (handleList): a store's
+        // search page whose `load` never fired (a frame that never answers)
+        // timed every visit out at 60 s on the platform (2026-09-30).
+        if ((label === "record" || label === "list") && gotoOptions) gotoOptions.waitUntil = "domcontentloaded";
         await guardContext(page.context());
         // U5: a record-mode compile runs the payload tier, which reads what
         // the page fetched for itself; the capture has to be listening before

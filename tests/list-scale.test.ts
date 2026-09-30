@@ -72,6 +72,21 @@ const run = async (actor: ReturnType<typeof makeActor>, scriptId: string, startU
 };
 
 describe("list mode at scale", () => {
+  it("a results page whose load never fires is read once its items are there (list pages navigate to the document, not to load)", async () => {
+    const actor = makeActor(dir);
+    const scriptId = await seedSearch(actor);
+    const startUrls = [search("lento-amoxicilina"), search("lento-losartan")];
+    const chooser = new RecordedChooser({ fixture: "crawler/empty" });
+    const summary = await runCrawl(
+      fixtureInput({ mode: "list", fields: F(...FIELDS), startUrls, scriptId, maxPagesPerStart: 1 }),
+      makeDeps(dir, actor, chooser, { maxConcurrency: 2, navigationTimeoutSecs: 5 }),
+    );
+    const rows = await datasetItems(actor);
+    expect(new Set(rows.map((r) => r._startUrl))).toEqual(new Set(startUrls));
+    expect(summary.items).toBe(rows.length);
+    expect(chooser.usage().questions).toBe(0);
+  }, 60_000);
+
   it("50 search URLs of one template replay with one scraper and no question; every row carries its start URL, even with maxPages below the start list", async () => {
     const actor = makeActor(dir);
     const scriptId = await seedSearch(actor);
