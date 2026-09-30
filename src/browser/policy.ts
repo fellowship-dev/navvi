@@ -39,9 +39,10 @@ export const defaultResolver: HostResolver = async (host) => (await lookup(host,
  *
  * - Cached per host for the checker's lifetime (one run); the promise is
  *   shared, so concurrent requests to one host resolve it once.
- * - Fail-closed: a resolver error, or an empty answer, refuses. A failed
- *   lookup is not cached, so a transient resolver hiccup refuses that request
- *   and the next one asks again.
+ * - Fail-closed: a resolver error, or an empty answer, refuses. The refusal
+ *   is cached for the run too (a negative cache), so a host that never
+ *   resolves costs one lookup, not one per request; a transient resolver
+ *   hiccup therefore refuses that host until the next run.
  * - IP literals are never resolved (the static guard classified them), and an
  *   `allowPrivateHosts` entry (CLI only) skips the check, which is how the
  *   fixture server on 127.0.0.1 or a named test host stays reachable.
@@ -60,10 +61,7 @@ export function makeHostCheck(allowPrivateHosts: readonly string[] = [], resolve
     if (cached) return cached;
     const pending = resolve(host).then(
       (addresses) => addresses.length > 0 && !addresses.some(isPrivateAddress),
-      () => {
-        cache.delete(host);
-        return false;
-      },
+      () => false,
     );
     cache.set(host, pending);
     return pending;

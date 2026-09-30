@@ -162,6 +162,42 @@ describe("list mode at scale", () => {
     expect(new Set(whole.rows.map((r) => r._startUrl))).toEqual(new Set([search("amoxicilina")]));
   }, 60_000);
 
+  it("maxPages bounds the pages beyond each listing's first: 20 searches, maxPages 5, two pages each reads every first page and five second pages", async () => {
+    const actor = makeActor(dir);
+    const scriptId = await seedSearch(actor);
+    const startUrls = queries(20).map(search);
+    const { summary, rows } = await run(actor, scriptId, startUrls, { maxPages: 5, maxPagesPerStart: 2 });
+    expect(summary.status).toBe("succeeded");
+    expect(summary.pages).toBe(25);
+    expect(summary.items).toBe(20 * 3 + 5 * 2);
+    expect(new Set(rows.map((r) => r._startUrl))).toEqual(new Set(startUrls));
+    const paged = startUrls.filter((url) => rows.some((r) => r._startUrl === url && r._source === `${url}&page=2`));
+    expect(paged).toHaveLength(5);
+  }, 120_000);
+
+  it("a search that redirects to a category listing is read: the anchor decides, not the template", async () => {
+    const actor = makeActor(dir);
+    const scriptId = await seedSearch(actor);
+    const redirected = search("categoria-analgesicos");
+    const { summary, rows } = await run(actor, scriptId, [search("amoxicilina"), redirected], { maxPagesPerStart: 1 });
+    expect(summary.status).toBe("succeeded");
+    expect(summary.deadPages).toBeUndefined();
+    const mine = rows.filter((r) => r._startUrl === redirected);
+    expect(mine.map((r) => r.name).sort()).toEqual(["Suero fisiológico", "analgesicos 10 mg", "analgesicos 15 mg"]);
+  }, 60_000);
+
+  it("every listing empty under the anchor says the anchor may have drifted, and how to recompile", async () => {
+    const actor = makeActor(dir);
+    const scriptId = await seedSearch(actor);
+    const empties = ["uno", "dos", "tres"].map((w) => search(`sin-resultados-${w}`));
+    const { summary, rows } = await run(actor, scriptId, empties, { maxPagesPerStart: 1 });
+    expect(rows).toHaveLength(0);
+    expect(summary.status).toBe("no_items_found");
+    expect(summary.emptyListings?.count).toBe(3);
+    expect(summary.message).toContain("ul.resultados > li.producto");
+    expect(summary.message).toContain("--force-recompile");
+  }, 60_000);
+
   it("the same product found by two queries is two rows, one per start URL", async () => {
     const actor = makeActor(dir);
     const scriptId = await seedSearch(actor);
@@ -172,7 +208,7 @@ describe("list mode at scale", () => {
     expect(new Set(both.map((r) => r._startUrl))).toEqual(new Set(startUrls));
   }, 60_000);
 
-  it("a search URL answering 404, 500, a challenge or a redirect off the template yields no row, no healing, and is counted", async () => {
+  it("a search URL answering 404, 500, a challenge or a redirect to a page without results yields no row, no healing, and is counted", async () => {
     const actor = makeActor(dir);
     const scriptId = await seedSearch(actor);
     const good = [search("amoxicilina"), search("omeprazol")];
@@ -184,8 +220,9 @@ describe("list mode at scale", () => {
     expect(summary.status).toBe("succeeded");
     expect(summary.items).toBe(6);
     expect(new Set(rows.map((r) => r._startUrl))).toEqual(new Set(good));
-    expect(summary.deadPages?.count).toBe(2);
-    expect(new Set(summary.deadPages?.urls)).toEqual(new Set([gone, retired]));
+    expect(summary.deadPages).toEqual({ count: 1, urls: [gone] });
+    // a listing that redirected is read, and the anchor decides: the store's home page holds no result
+    expect(summary.emptyListings).toEqual({ count: 1, urls: [retired] });
     expect(summary.transientPages).toEqual({ count: 1, urls: [failing] });
     expect(summary.blockedPages).toBe(1);
     expect(summary.healingEvents).toEqual([]);

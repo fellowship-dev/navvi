@@ -36,9 +36,10 @@ and the run ends `configuration_error` naming the store and that fix.
 
 A few inputs exist for large lists:
 
-- **`maxPages`** is the run's page budget (up to 20,000). Every start URL's
-  first page is read regardless, so a thousand search URLs are a thousand
-  listings; pagination and detail pages stop at the budget.
+- **`maxPages`** is the run's budget of pages beyond each start URL's first
+  (up to 20,000). Every start URL's first page is read regardless and does not
+  count against it, so a thousand search URLs are a thousand listings;
+  pagination and detail pages stop once they number `maxPages`.
 - **`maxPagesPerStart`** caps one listing's pagination, its first page
   included (`1` reads only the first page of each search).
 - **`maxConcurrency`** (default 4) and **`minConcurrency`** set how many replay

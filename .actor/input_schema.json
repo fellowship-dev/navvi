@@ -187,7 +187,7 @@
     "maxPages": {
       "title": "Max pages",
       "type": "integer",
-      "description": "The run's page budget, pagination and detail pages included. Every start URL's first page is read regardless (1000 search URLs are 1000 listings); pagination and detail pages stop once the run has scraped this many pages.",
+      "description": "The run's budget of pages beyond each start URL's first: pagination and detail pages. Every start URL's first page is read regardless and does not count against it (1000 search URLs are 1000 listings); pagination and detail pages stop once they number this many.",
       "minimum": 1,
       "maximum": 20000,
       "default": 10,

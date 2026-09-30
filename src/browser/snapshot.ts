@@ -114,6 +114,10 @@ export interface SnapshotControl {
   autocomplete?: string | undefined;
   nameAttr?: string | undefined;
   idAttr?: string | undefined;
+  /** `inputmode` of an `<input>`, lower case; with `maxLength`, how a short numeric OTP field is recognized (U16). */
+  inputMode?: string | undefined;
+  /** `maxlength` of an `<input>` when set (positive). */
+  maxLength?: number | undefined;
   /** Code-enumerated locator for pointer controls without a native accessibility role. */
   css?: string | undefined;
   /** R24: true only for password inputs, which are only reachable through a secret step. */

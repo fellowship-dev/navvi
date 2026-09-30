@@ -501,6 +501,38 @@ describe("crawler runs", () => {
     expect(JSON.stringify(summary)).not.toContain("hunter2-proxy");
   });
 
+  it("a login trace's start page is judged after the trace: a private page answering 404 before login is not a dead URL", async () => {
+    const actor = makeActor(dir);
+    const store = await ScraperStore.open({ actor });
+    const loginUrls = [`${server.baseUrl}/login/private.html`];
+    const key = keyFor(loginUrls, { fields: ["order", "total"], profile: "local" });
+    await store.put(
+      seeded({
+        ...key,
+        profile: "local",
+        entry: { mode: "trace", url: `${server.baseUrl}/login/` },
+        trace: [
+          { op: "type", text: "max@example.com", alternatives: [{ role: "textbox", name: "Email", exact: true }] },
+          { op: "type", secret: "password", alternatives: [{ role: "textbox", name: "Password", exact: true }] },
+          { op: "click", alternatives: [{ role: "button", name: "Log in", exact: true }], target: { form: { method: "post", action: "/login" } }, expect: { role: "heading", name: "Orders" } },
+        ],
+        item: { anchorSelector: "ul.orders > li.order", span: 1 },
+        fields: {
+          order: { alternatives: [{ selector: "a", fingerprint: { samples: ["Order #1001"], shape: "text" } }] },
+          total: { alternatives: [{ selector: "span.total", fingerprint: { samples: ["$ 45.990"], shape: "money" } }] },
+        },
+      }),
+    );
+    const summary = await runCrawl(
+      fixtureInput({ startUrls: loginUrls, mode: "list", fields: F("order", "total"), profile: "local", settleMs: 1_000 }),
+      makeDeps(dir, actor, new RecordedChooser({ fixture: "crawler/empty" }), { storageDir: mkdtempSync(join(dir, "private-login-")), env: { NAVVI_SECRET_PASSWORD: "hunter2-secret" } }),
+    );
+    expect(summary.deadPages).toBeUndefined();
+    expect(summary.traceReplays).toBe(1);
+    expect(summary.status).toBe("succeeded");
+    expect(summary.items).toBe(5);
+  }, 60_000);
+
   it("a login trace under local keeps its cookie in the profile for the next run, and freshProfile discards it", async () => {
     const actor = makeActor(dir);
     const store = await ScraperStore.open({ actor });

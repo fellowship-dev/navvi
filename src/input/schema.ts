@@ -317,9 +317,10 @@ export const BaseInputSchema = z
     fields: z.array(FieldSchema).optional(),
     goal: z.string().optional(),
     /**
-     * The run's page budget. Every start URL's first page is read whatever it
-     * says (a list of 1000 search URLs is 1000 listings, not 10); pagination
-     * and detail pages stop once the run has scraped this many pages.
+     * The run's page budget: pages beyond each start URL's first. Every start
+     * URL's first page is read whatever it says (a list of 1000 search URLs is
+     * 1000 listings, not 10) and does not spend it; pagination and detail pages
+     * stop once they number this many. `pages` in the summary counts them all.
      */
     maxPages: z.number().int().min(1).max(LIMITS.maxPages).default(10),
     /** List mode: pages one start URL's listing may span, its first included; unset, only `maxPages` bounds it. */

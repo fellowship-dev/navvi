@@ -130,16 +130,17 @@ describe("pagination (R15)", () => {
     expect(new Set(items.map((i) => i.title)).size).toBe(40);
     expect(items[39]).toMatchObject({ title: "Post 40", likes: "280 likes" });
 
-    const capped = await runCrawl(input({ startUrls: urls, mode: "list", fields: F("title", "likes"), maxPages: 2 }), makeDeps(makeActor(), chooser, { store }));
+    const capped = await runCrawl(input({ startUrls: urls, mode: "list", fields: F("title", "likes"), maxPages: 1 }), makeDeps(makeActor(), chooser, { store }));
+    // maxPages bounds the pages beyond the listing's first: the first plus one
     expect(capped.pages).toBe(2);
     expect(capped.items).toBe(20);
   });
 
-  it("a compiled next link crawls three pages and stops at maxPages; a lower maxPages stops earlier", async () => {
+  it("a compiled next link crawls three pages and stops at maxPages beyond the first; a lower maxPages stops earlier", async () => {
     const actor = makeActor();
     const urls = [`${server.baseUrl}/fixtures/python-jobs-1.html`];
     await seedJobs(actor, urls);
-    const three = await runCrawl(input({ startUrls: urls, mode: "list", fields: F(...JOB_FIELDS), maxPages: 3 }), makeDeps(actor));
+    const three = await runCrawl(input({ startUrls: urls, mode: "list", fields: F(...JOB_FIELDS), maxPages: 2 }), makeDeps(actor));
     expect(three.status).toBe("succeeded");
     expect(three.pages).toBe(3);
     // page 2 repeats one row of page 1 (R16): 5 + 4 + 5
@@ -154,7 +155,7 @@ describe("pagination (R15)", () => {
     ]);
     expect(items[13]).toMatchObject({ title: "Python Tooling Engineer", company: "Astral", link: `${server.baseUrl}/fixtures/jobs/113.html` });
 
-    const two = await runCrawl(input({ startUrls: urls, mode: "list", fields: F(...JOB_FIELDS), maxPages: 2 }), makeDeps(makeActor(), undefined, { store: await ScraperStore.open({ actor }) }));
+    const two = await runCrawl(input({ startUrls: urls, mode: "list", fields: F(...JOB_FIELDS), maxPages: 1 }), makeDeps(makeActor(), undefined, { store: await ScraperStore.open({ actor }) }));
     expect(two.pages).toBe(2);
     expect(two.items).toBe(9);
   });
@@ -206,11 +207,11 @@ describe("detail pages (R18)", () => {
     const actor = makeActor();
     const urls = [`${server.baseUrl}/fixtures/python-jobs.html`];
     const chooser = new RecordedChooser({ fixture: "replay/python-jobs-detail" });
-    const raw = { startUrls: urls, mode: "list", fields: F("title"), description: "python job listing", followDetailPages: true, detailFields: F("description"), maxPages: 4 };
+    const raw = { startUrls: urls, mode: "list", fields: F("title"), description: "python job listing", followDetailPages: true, detailFields: F("description"), maxPages: 3 };
     const summary = await runCrawl(input(raw), makeDeps(actor, chooser));
     expect(summary.status).toBe("succeeded");
     expect(summary.items).toBe(25);
-    // the listing plus three detail pages
+    // the listing plus three detail pages, the budget (maxPages) beyond the listing
     expect(summary.pages).toBe(4);
     expect(summary.requests).toEqual({ compile: 1, list: 1, record: 0 });
     expect(summary.fieldsNotFound).toEqual([]);

@@ -247,3 +247,18 @@ describe("a path segment that echoes the URL's own query is the query (search pa
     expect(matchesTemplate(key!, "https://tienda.example/ibuprofeno?_q=ibuprofeno")).toBe(true);
   });
 });
+
+describe("the query-echo rule is narrow: only the last, non-numeric path segment echoing a query value of 3+ characters", () => {
+  it("does not read a language prefix that repeats a lang parameter as the query", () => {
+    const withQuery = ["https://shop.example/es/producto/abc?lang=es", "https://shop.example/es/producto/def?lang=es"];
+    const plain = ["https://shop.example/es/producto/abc", "https://shop.example/es/producto/def"];
+    expect([...groupByTemplate(withQuery).keys()]).toEqual([...groupByTemplate(plain).keys()]);
+    expect([...groupByTemplate(withQuery).keys()][0]).not.toContain("{q}");
+  });
+  it("does not read a numeric id repeated in a sku parameter as the query", () => {
+    const withQuery = ["https://shop.example/p/123?sku=123", "https://shop.example/p/456?sku=456"];
+    const plain = ["https://shop.example/p/123", "https://shop.example/p/456"];
+    expect([...groupByTemplate(withQuery).keys()]).toEqual([...groupByTemplate(plain).keys()]);
+    expect([...groupByTemplate(withQuery).keys()][0]).not.toContain("{q}");
+  });
+});

@@ -31,7 +31,9 @@ import { fileURLToPath } from "node:url";
  * - `/demo/buscador/buscar?q=<q>[&page=<n>]`  a store's search results (see `searchPage`): three pages of items
  *   that depend on `q`, one product found by every query; `q` starting `error-` answers 500, `gone-` 404,
  *   `challenge-` the bot challenge (503), `retirado-` redirects (302) off the template to `/demo/buscador/`,
- *   `sin-resultados-` a "no results" page whose recommendations sit outside the results list
+ *   `sin-resultados-` a "no results" page whose recommendations sit outside the results list, `categoria-<c>`
+ *   redirects (302) to the category listing `/demo/buscador/categoria/<c>` (another template, same results markup)
+ * - `/login/private.html`  the orders page, answered 404 until the session cookie exists
  */
 
 export type DemoVersion = "v1" | "v2";
@@ -159,6 +161,11 @@ export async function startFixtureServer(): Promise<FixtureServer> {
           redirect(res, "/login/");
           return;
         }
+        // A private page the site hides behind a 404 until the session exists (as code hosts do).
+        if (rest === "private.html") {
+          if (!hasSessionCookie(req)) return void sendHtml(res, 404, "<!doctype html><title>Not found</title><h1>Page not found</h1>");
+          return void (await sendFile(res, path.join(DEMO_DIR, "login", "account.html")));
+        }
         const file = resolveWithin(path.join(DEMO_DIR, "login"), rest || (login === "renamed" ? "index-renamed.html" : "index.html"));
         if (!file) return void notFound(res);
         await sendFile(res, file);
@@ -174,6 +181,9 @@ export async function startFixtureServer(): Promise<FixtureServer> {
 
       // A frame that never answers, so a page embedding it never fires `load`.
       if (pathname === "/demo/buscador/colgado") return;
+      // A category listing a search can redirect to: the results markup on another path.
+      const category = /^\/demo\/buscador\/categoria\/([^/]+)$/.exec(pathname);
+      if (category) return void sendHtml(res, 200, searchPage(decodeURIComponent(category[1]!), Number(url.searchParams.get("page") ?? "1")));
       // A store's search: one template (`/demo/buscador/buscar`), items that depend on `q`.
       if (pathname === "/demo/buscador/buscar" || pathname === "/demo/buscador/" || pathname === "/demo/buscador") {
         const q = url.searchParams.get("q") ?? "";
@@ -182,6 +192,7 @@ export async function startFixtureServer(): Promise<FixtureServer> {
         if (q.startsWith("gone-")) return void sendHtml(res, 404, "<!doctype html><title>No encontrado</title><h1>Página no encontrada</h1>");
         if (q.startsWith("challenge-")) return void (await sendFile(res, path.join(FIXTURES_DIR, "challenge.html"), 503));
         if (q.startsWith("retirado-")) return void redirect(res, "/demo/buscador/");
+        if (q.startsWith("categoria-")) return void redirect(res, `/demo/buscador/categoria/${encodeURIComponent(q.slice("categoria-".length))}`);
         // A search that found nothing on a store whose page carries a reCAPTCHA
         // widget and little text: it reads like a weak challenge (2026-09-30).
         if (q.startsWith("vacio-widget-")) return void sendHtml(res, 200, `<!doctype html><title>Buscar</title><h1>Resultados</h1><ul class="resultados"></ul><div class="g-recaptcha" data-sitekey="ejemplo"></div>`);

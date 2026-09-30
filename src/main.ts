@@ -1,7 +1,7 @@
 import { Actor } from "apify";
 import { causeChain, isLaunchFailure, RETIRE_AFTER_PAGE_COUNT_ENV, SESSION_MAX_ERROR_SCORE_ENV, SESSION_MAX_USAGE_COUNT_ENV } from "./browser/relaunch.js";
 import { ZodError } from "zod";
-import { parseInput, defaultBrowser, resolveSources, type RunInput } from "./input/schema.js";
+import { parseInput, defaultBrowser, resolveSources, type Decider, type RunInput, type SourceInput } from "./input/schema.js";
 import { promptToInput } from "./input/prompt.js";
 import { NavviError, NeedsHumanError } from "./billing/budget.js";
 import { zeroCharges, type ChargeCounts } from "./billing/charge.js";
@@ -50,7 +50,7 @@ export interface RunSummary {
   blockedPages?: number;
   /** Replay pages (records or listings) that still answered 5xx after the retry (the first 50 by name); no row, no healing. */
   transientPages?: { count: number; urls: string[] };
-  /** Replay pages (records or listings) the site answered 404/410, or that redirected off the template: dead URLs in the start list (the first 50 by name); no row, no healing. */
+  /** Replay pages (records or listings) the site answered 404/410, or record pages that redirected off the template: dead URLs in the start list (the first 50 by name); no row, no healing. A listing that redirects is read; its anchor decides. */
   deadPages?: { count: number; urls: string[] };
   /** Replay pages that still read as a weak challenge (a captcha widget on a page that renders almost nothing) after waiting up to 5 s for the scraper's anchor: a page still rendering, not a block (the first 50 by name); no row, no healing. */
   unsettledPages?: { count: number; urls: string[] };
@@ -229,15 +229,48 @@ const CALLER_KEY_ENV: Record<string, string> = { typesafeApiKey: "TYPESAFE_API_K
 
 /**
  * U12 / R16: true when the actor input carries a non-empty caller key, the
- * same test `actorInput` applies before moving one into the run's env. Such a
- * run is bring-your-own-key and is charged no `decision`: the caller pays
- * their provider for the questions. Without one the run answers on the
- * operator's key and every answered question is a `decision`.
+ * same test `actorInput` applies before moving one into the run's env. Having
+ * one is necessary but not sufficient for a bring-your-own-key run; see
+ * `callerPays`, which checks the key is the one the run's sources use.
  */
 export function hasCallerKey(raw: unknown): boolean {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return false;
   const record = raw as Record<string, unknown>;
   return Object.keys(CALLER_KEY_ENV).some((key) => typeof record[key] === "string" && (record[key] as string).trim().length > 0);
+}
+
+/**
+ * U12 / R16: true when every metered question of the run is answered on a key
+ * the caller supplied -- the run is bring-your-own-key and is charged no
+ * `decision`. A caller key the run does not use is not enough: an
+ * `anthropicApiKey` beside a Jev decider on the operator's TypeSafe key still
+ * answers on the operator's key. The decider's key follows the transport
+ * resolution (`selectProvider` in jev.ts, `resolveModel` in model.ts); the
+ * writer's, for text questions, is the metered model any Jev writer chain can
+ * reach. A decider that needs no key (agent, a CLI) is never caller-paid.
+ */
+export function callerPays(raw: unknown, base: NodeJS.ProcessEnv = process.env): boolean {
+  if (!hasCallerKey(raw)) return false;
+  const { input, env } = actorInput(raw, base);
+  const record = raw as Record<string, unknown>;
+  const supplied = new Set(
+    Object.keys(CALLER_KEY_ENV)
+      .filter((key) => typeof record[key] === "string" && (record[key] as string).trim().length > 0)
+      .map((key) => CALLER_KEY_ENV[key]!),
+  );
+  const sources = resolveSources(input as SourceInput, env);
+  const modelKey = env.ANTHROPIC_API_KEY ? "ANTHROPIC_API_KEY" : env.AI_GATEWAY_API_KEY ? "AI_GATEWAY_API_KEY" : undefined;
+  const keyOf = (source: Decider): string | undefined => {
+    if (source === "jev") return (sources.deciderTransport ?? (env.AI_GATEWAY_API_KEY ? "gateway" : "typesafe")) === "gateway" ? "AI_GATEWAY_API_KEY" : "TYPESAFE_API_KEY";
+    if (source === "model") return modelKey;
+    return undefined;
+  };
+  const deciderKey = keyOf(sources.decider);
+  if (!deciderKey || !supplied.has(deciderKey)) return false;
+  // Text questions: an explicit writer other than the decider, or Jev's derived chain, which ends at a metered model whenever a model key exists.
+  const writerKey =
+    sources.writer && sources.writer !== sources.decider ? keyOf(sources.writer) : !sources.writer && sources.decider === "jev" ? modelKey : undefined;
+  return !writerKey || supplied.has(writerKey);
 }
 
 
@@ -274,7 +307,7 @@ async function main() {
   const raw = (await Actor.getInput()) ?? {};
   try {
     const { input, env } = actorInput(raw);
-    const summary = await run(input, { env, callerKey: hasCallerKey(raw) });
+    const summary = await run(input, { env, callerKey: callerPays(raw) });
     await Actor.setValue("SUMMARY", summary);
     const message = summary.message ? `${summary.status}: ${summary.message}` : summary.status;
     // needs_human is a hold, not a failure: the CLI (U17) maps it to exit code 3.

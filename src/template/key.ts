@@ -73,8 +73,16 @@ function parse(url: string): ParsedUrl | null {
     }
   }
   const pagination = PAGINATION_KEYS.filter((key) => parsed.searchParams.has(key)).sort();
-  const queryValues = new Set([...parsed.searchParams.values()].map((v) => v.trim().toLowerCase()).filter((v) => v.length > 0));
-  const echoes = segments.map((segment) => queryValues.has(decodeSegment(segment).trim().toLowerCase()));
+  // Query echo (a search page that puts its term in the path): narrow on
+  // purpose. Only the LAST segment counts, only when it is non-numeric, and
+  // only when it repeats a query value of 3+ characters, so `/es/x?lang=es`
+  // and `/p/123?sku=123` keep their ordinary templates.
+  const queryValues = new Set([...parsed.searchParams.values()].map((v) => v.trim().toLowerCase()).filter((v) => v.length >= 3));
+  const echoes = segments.map((segment, index) => {
+    if (index !== segments.length - 1) return false;
+    const decoded = decodeSegment(segment).trim().toLowerCase();
+    return !NUMERIC.test(decoded) && queryValues.has(decoded);
+  });
   return { url, host: parsed.host.toLowerCase(), segments, extension, pagination, echoes };
 }
 

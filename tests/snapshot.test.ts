@@ -14,7 +14,7 @@ import {
   type Candidates,
   type LeafCandidate,
 } from "../src/browser/snapshot.js";
-import { recordStep } from "../src/navigate/trace.js";
+import { recordStep, secretNameFor } from "../src/navigate/trace.js";
 import { freshnessToken, isStale, waitForSettle } from "../src/browser/guards.js";
 import { startFixtureServer, type FixtureServer } from "./server.js";
 
@@ -399,6 +399,19 @@ describe("controls (R24, R38)", () => {
       await page.setContent(`<form method="post" action="/x"><input type="file" name="f"><input type="hidden" name="h" value="1"><input type="text" name="cc-number"><input name="cardnumber"><input type="text" name="q"><button>Send it</button><button>Go</button></form>`);
       const controls = await getControls(page, { profile: "local" });
       expect(controls.map((c) => c.nameAttr ?? c.name)).toEqual(["q"]);
+    });
+  });
+
+  it("records inputmode and maxlength, so a short numeric OTP field without OTP hints is the run's totp:<name>", async () => {
+    await withPage("/fixtures/search-form.html", async (page) => {
+      await page.setContent(`<form method="post" action="/verify"><input type="text" name="pin" aria-label="Enter the code" inputmode="numeric" maxlength="6"><input type="text" name="q" aria-label="Query"><button>Verify</button></form>`);
+      const controls = await getControls(page, { profile: "local" });
+      const field = controls.find((c) => c.nameAttr === "pin")!;
+      expect(field).toMatchObject({ inputMode: "numeric", maxLength: 6 });
+      expect(controls.find((c) => c.nameAttr === "q")).toMatchObject({ inputMode: undefined, maxLength: undefined });
+      expect(secretNameFor(field, ["username", "password", "totp:acme"])).toBe("totp:acme");
+      // No seed in the run: a short numeric field is just as likely a PIN, so it is not guessed to be a TOTP field.
+      expect(secretNameFor(field, ["username", "password"])).toBe("pin");
     });
   });
 

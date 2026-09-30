@@ -36,7 +36,7 @@ a program calls the actor.
 | `fields[].optional` | A field that may be empty on a healthy page (a list price shown only during a discount). Replay never heals its nulls. |
 | `scriptId` | Replay exactly this compiled scraper (the `SUMMARY` of an earlier run names it). Start URLs of another shape are reported as `offTemplate` and never compiled. |
 | `scraperStore` | The key-value store the run reads and writes its scrapers in (default: `scraper-cache` in your account). **Pass it by ID**: under limited permissions a store given by name cannot be opened and the run ends `configuration_error`. |
-| `maxPages` | The run's page budget (up to 20,000). Every start URL's first page is read regardless. |
+| `maxPages` | The run's budget of pages beyond each start URL's first, pagination and detail pages (up to 20,000). Every start URL's first page is read regardless and does not count against it. |
 | `maxPagesPerStart` | List mode: how many pages one listing may span, its first included (`1` reads only the first page of each search). |
 | `maxConcurrency` / `minConcurrency` | Replay pages open at once (default 4, up to 20). A compile always runs one page at a time. |
 | `proxy` | Apify Proxy or your own proxy URLs, never both. Choose the `RESIDENTIAL` group when a run ends `blocked_bot_detection`. |

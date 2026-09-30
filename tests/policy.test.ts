@@ -174,6 +174,17 @@ describe("url guard: DNS check (R15, KTD12)", () => {
     expect(await check("https://unknown.example.com/")).toBe(false);
   });
 
+  it("caches a failed lookup for the run: a never-resolving host is asked once", async () => {
+    const { resolve, calls } = resolverFor({ "empty.example.com": [] });
+    const check = makeHostCheck([], resolve);
+    for (let i = 0; i < 3; i++) {
+      expect(await check(`https://gone.example.com/${i}`)).toBe(false);
+      expect(await check(`https://empty.example.com/${i}`)).toBe(false);
+    }
+    expect(calls.filter((h) => h === "gone.example.com")).toHaveLength(1);
+    expect(calls.filter((h) => h === "empty.example.com")).toHaveLength(1);
+  });
+
   it("does not resolve IP literals, in-page schemes or allowlisted hosts; allowPrivateHosts still permits the fixture host", async () => {
     const { resolve, calls } = resolverFor({ "fixture.test": ["127.0.0.1"] });
     const check = makeHostCheck(["127.0.0.1", "fixture.test"], resolve);

@@ -935,6 +935,8 @@
         autocomplete: e.getAttribute("autocomplete") || undefined,
         nameAttr: e.getAttribute("name") || undefined,
         idAttr: e.id || undefined,
+        inputMode: tag === "input" && e.getAttribute("inputmode") ? e.getAttribute("inputmode").toLowerCase() : undefined,
+        maxLength: tag === "input" && e.maxLength > 0 ? e.maxLength : undefined,
         css: nativeRole ? undefined : selectorFor(e, document.documentElement),
         secretCapable: inputType === "password",
         href: tag === "a" ? e.href : undefined,

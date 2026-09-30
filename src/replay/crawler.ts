@@ -156,8 +156,9 @@ export interface CrawlDeps {
   onPage?: ((page: Page) => Promise<void>) | undefined;
   chooser?: Chooser | undefined;
   /**
-   * U12 / R16: the caller brought their own model key (an actor-only input key,
-   * see `hasCallerKey` in main.ts). No `decision` is charged then: the caller
+   * U12 / R16: every metered question runs on a key the caller brought (an
+   * actor-only input key the resolved decider and writer use, see `callerPays`
+   * in main.ts). No `decision` is charged then: the caller
    * pays their provider and is never billed twice for the same question.
    */
   callerKey?: boolean | undefined;
@@ -469,6 +470,12 @@ interface RunState {
   fatal: NavviError | null;
   items: number;
   pages: number;
+  /**
+   * Pages beyond each start URL's first (pagination, detail pages): what
+   * `maxPages` bounds. Claimed with `claimExtraPage` before the page opens, so
+   * concurrent listings never overshoot the budget. `pages` counts every page.
+   */
+  extraPages: number;
   unhealed: number;
   failedItems: number;
   traceReplays: number;
@@ -559,6 +566,9 @@ const REPLAY_LOAD_CAP_MS = 10_000;
 /** How many off-template URLs the summary lists by name; the count is always whole. */
 const OFF_TEMPLATE_LISTED = 50;
 
+/** Listings read, all empty under the anchor, before the summary says the anchor may have drifted. */
+const ANCHOR_DRIFT_LISTINGS = 3;
+
 function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePlan[], chooser: Chooser | null, charger: Charger): RunSummary {
   const usage = chooser?.usage();
   const clean: Status =
@@ -621,6 +631,16 @@ function summaryOf(input: RunInput, state: RunState, plans: readonly TemplatePla
   // alike: the scraper is stored either way, and every later run replays it
   // without asking the chooser again.
   if (partial) summary.message = `fields not found: ${fieldsNotFound.join(", ")} — every row carries them as null, and so will every replay of this scraper; --force-recompile compiles it again`;
+  // Every listing read came back with nothing under the item anchor: a thousand
+  // queries that all found nothing is far likelier a site that changed its
+  // results markup than a thousand empty searches. `emptyListings` alone reads
+  // as the queries' fault.
+  if (!state.stop && status === "no_items_found" && state.emptyListings.length >= ANCHOR_DRIFT_LISTINGS) {
+    const anchors = [...new Set(plans.flatMap((p) => (p.scraper?.item ? [p.scraper.item.anchorSelector] : [])))];
+    if (anchors.length > 0) {
+      summary.message = `all ${state.emptyListings.length} listings read came back with no item under the anchor ${anchors.map((a) => `\`${a}\``).join(", ")}: the anchor may have drifted; --force-recompile compiles the scraper again`;
+    }
+  }
   if (state.stop) {
     summary.message = state.stop.message;
     if (state.stop.needsHuman) summary.needsHuman = state.stop.needsHuman;
@@ -778,6 +798,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     fatal: null,
     items: 0,
     pages: 0,
+    extraPages: 0,
     unhealed: 0,
     failedItems: 0,
     traceReplays: 0,
@@ -1410,6 +1431,13 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     return true;
   }
 
+  /** Claims one page of the `maxPages` budget (pages beyond each start URL's first), synchronously; false when it is spent. */
+  function claimExtraPage(): boolean {
+    if (state.extraPages >= input.maxPages) return false;
+    state.extraPages += 1;
+    return true;
+  }
+
   /** R20: `scraper-compiled` once per template, the first time a page extracted with a scraper compiled this run passes the fingerprint check. */
   async function chargeCompiled(plan: TemplatePlan, extracted: Extracted, where: string): Promise<boolean> {
     if (plan.compileCharged || extracted.items.length === 0 || needsHealing(extracted)) return true;
@@ -1802,7 +1830,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     const samples = new Map<string, ItemExtraction>();
     const links = items.map((item) => detailLinkOf(live, item));
     if (!hasDetailTemplate(live)) {
-      const room = input.maxPages - state.pages;
+      const room = input.maxPages - state.extraPages;
       const sampleLinks = [...new Set(links.filter((l): l is string => l !== null))].slice(0, Math.max(0, room));
       if (sampleLinks.length === 0) return items.map((item) => mergeDetail(item, null, detailFieldNames));
       const result = await compileDetail({
@@ -1818,6 +1846,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
         allowedDomains: input.allowedDomains,
         prepare: (page) => dismissConsent(page).then(() => undefined),
       });
+      state.extraPages += result.pagesOpened;
       const counted = await countPages(result.pagesOpened, `detail samples of ${ctx.page.url()}`);
       for (const name of result.fieldsNotFound) state.fieldsNotFound.add(name);
       if (!counted || !result.ok) return items.map((item) => mergeDetail(item, null, detailFieldNames));
@@ -1834,7 +1863,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       for (const [i, item] of items.entries()) {
         const link = links[i] ?? null;
         let detail = link ? (samples.get(link) ?? null) : null;
-        if (link && !detail && !pagesSpent && state.pages < input.maxPages && !state.stop) {
+        if (link && !detail && !pagesSpent && !state.stop && claimExtraPage()) {
           detailPage ??= await ctx.page.context().newPage();
           // A row already charged as a `result-item` is never dropped for want of a
           // detail page: past either budget it goes out with its detail columns
@@ -1965,15 +1994,18 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
 
   /**
    * A replay page that is not the page the scraper reads: dead (404/410, or a
-   * redirect off the template for a scraper that never logs in), transient
-   * (5xx, thrown so the crawler retries it) or a bot challenge. Counted and
-   * listed; no row, no healing. Record and list replays alike (R12).
+   * record page redirected off the template for a scraper that never logs in),
+   * transient (5xx, thrown so the crawler retries it) or a bot challenge.
+   * Counted and listed; no row, no healing. Record and list replays alike
+   * (R12), except the off-template rule, which is for records only. After a
+   * login trace (`standsOn: "trace"`) the request's own response is not the
+   * page's, and the status is left unknown.
    */
-  async function unreadable(ctx: PlaywrightCrawlingContext, plan: TemplatePlan, scraper: CompiledScraper): Promise<boolean> {
+  async function unreadable(ctx: PlaywrightCrawlingContext, plan: TemplatePlan, scraper: CompiledScraper, standsOn: "request" | "trace" = "request"): Promise<boolean> {
+    const status = standsOn === "request" ? ctx.response?.status() : undefined;
     // A page the site says is gone is a dead URL in the caller's list, not
     // drift: healing it spent chooser questions binding fields on an error
     // page, every run. Counted and listed; no row.
-    const status = ctx.response?.status();
     if (status !== undefined && GONE_STATUSES.has(status)) {
       state.deadPages.push(ctx.request.url);
       return true;
@@ -1989,10 +2021,13 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     // home page: one store retires products that way, and the category page's
     // newsletter reCAPTCHA read as a challenge (2026-09-28). Only for a scraper
     // that never logs in: under a login, a redirect off the page is a session
-    // lost, which is drift.
+    // lost, which is drift. Never for a listing: a search that redirects to a
+    // category listing, or gains a pagination parameter, still holds results,
+    // and its item anchor decides whether it does (an empty listing if not).
     const landed = ctx.page.url();
     const neverLogsIn = input.profile === "store" && entryModeFor(scraper) !== "trace";
-    if (neverLogsIn && landed !== ctx.request.url && !matchesTemplate(plan.templateKey, landed)) {
+    const isListing = (ctx.request.userData as UserData | undefined)?.label === "list";
+    if (neverLogsIn && !isListing && landed !== ctx.request.url && !matchesTemplate(plan.templateKey, landed)) {
       state.deadPages.push(ctx.request.url);
       return true;
     }
@@ -2071,12 +2106,18 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
     const scraper = plan.scraper;
     if (!scraper || state.items >= input.maxItems) return;
     const { page } = ctx;
-    if (await unreadable(ctx, plan, scraper)) return;
+    const traced = entryModeFor(scraper) === "trace";
+    // A login trace's start page is judged after the trace: before it, a
+    // private page may answer 404 or a login wall, which says nothing about
+    // the listing the trace reaches.
+    if (!traced && (await unreadable(ctx, plan, scraper))) return;
     await dismissConsent(page).catch(() => undefined);
 
-    if (entryModeFor(scraper) === "trace") {
+    if (traced) {
       const key = replayKey(ctx);
+      let replayedHere = false;
       if (!state.replayed.has(key)) {
+        replayedHere = true;
         state.replayed.add(key);
         state.traceReplays += 1;
         if (page.url() !== scraper.entry.url) await page.goto(scraper.entry.url, { waitUntil: "domcontentloaded" });
@@ -2102,6 +2143,7 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
           return;
         }
       }
+      if (await unreadable(ctx, plan, plan.scraper ?? scraper, replayedHere ? "trace" : "request")) return;
     }
 
     await listPages(ctx, plan);
@@ -2141,10 +2183,15 @@ export async function runCrawl(input: RunInput, deps: CrawlDeps = {}): Promise<R
       }
       pageIndex += 1;
       emptyStreak = pushed === 0 ? emptyStreak + 1 : 0;
-      if (emptyStreak >= 2 || state.items >= input.maxItems || state.pages >= input.maxPages) return;
+      if (emptyStreak >= 2 || state.items >= input.maxItems) return;
       if (input.maxPagesPerStart !== undefined && pageIndex >= input.maxPagesPerStart) return;
+      // `maxPages` bounds the pages beyond each listing's first, never the first pages themselves
+      if (!claimExtraPage()) return;
       const moved = await paginateHook(ctx.page, plan.scraper ?? scraper, pageIndex);
-      if (!moved) return;
+      if (!moved) {
+        state.extraPages -= 1;
+        return;
+      }
     }
   }
 

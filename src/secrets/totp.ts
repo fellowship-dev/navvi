@@ -125,7 +125,8 @@ const usedWindowsByClock = new WeakMap<TotpClock, Map<string, number>>();
  * The code to type now. With less than `MIN_REMAINING_MS` left in the current
  * window, or when this process already generated this seed's code for the
  * current window, it waits for the next one, so the site never receives a code
- * that expires in transit or was already spent. Seed and code stay wrapped in
+ * that expires in transit or was already spent. The window is reserved
+ * synchronously, before the wait, so concurrent calls get distinct windows. Seed and code stay wrapped in
  * `Secret`.
  */
 export async function generateTotp(seed: Secret | string, clock: TotpClock = systemClock): Promise<Secret> {
@@ -135,14 +136,17 @@ export async function generateTotp(seed: Secret | string, clock: TotpClock = sys
   let usedWindows = usedWindowsByClock.get(clock);
   if (!usedWindows) usedWindowsByClock.set(clock, (usedWindows = new Map()));
   const periodMs = params.period * 1000;
-  let now = clock.now();
-  const remaining = periodMs - (now % periodMs);
-  if (remaining < MIN_REMAINING_MS || usedWindows.get(key) === Math.floor(now / periodMs)) {
-    await clock.sleep(remaining);
-    now = clock.now();
-  }
-  usedWindows.set(key, Math.floor(now / periodMs));
-  return new Secret(totpAt(params, now));
+  const now = clock.now();
+  let target = Math.floor(now / periodMs);
+  if (periodMs - (now % periodMs) < MIN_REMAINING_MS) target += 1;
+  const used = usedWindows.get(key);
+  if (used !== undefined && used >= target) target = used + 1;
+  // Reserve the window before any await: two concurrent logins with one seed
+  // must never both claim the same window (the second would type a spent code).
+  usedWindows.set(key, target);
+  const wait = target * periodMs - now;
+  if (wait > 0) await clock.sleep(wait);
+  return new Secret(totpAt(params, target * periodMs));
 }
 
 /** The strings of a seed worth masking: the seed as given and, for a URI, its base32 secret. */

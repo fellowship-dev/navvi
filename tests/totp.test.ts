@@ -121,6 +121,25 @@ describe("generateTotp: at step time, never an expiring code", () => {
   });
 });
 
+describe("generateTotp: concurrent logins in one window", () => {
+  it("reserves a window per seed before sleeping, so two concurrent calls get different windows", async () => {
+    // A shared wall clock: concurrent sleeps overlap, they do not add up.
+    let now = 1111111107_000; // 3 s left in the window
+    const clock: TotpClock = {
+      now: () => now,
+      sleep: async (ms) => {
+        const wake = now + ms;
+        await Promise.resolve();
+        now = Math.max(now, wake);
+      },
+    };
+    const [a, b] = await Promise.all([generateTotp(SHA1_BASE32, clock), generateTotp(SHA1_BASE32, clock)]);
+    expect(a.reveal()).not.toBe(b.reveal());
+    const params = parseTotpSeed(SHA1_BASE32);
+    expect([a.reveal(), b.reveal()].sort()).toEqual([totpAt(params, 1111111110_000), totpAt(params, 1111111140_000)].sort());
+  });
+});
+
 describe("{{totp:name}} resolution (R20)", () => {
   it("finds totp placeholders in text as totp:<name>", () => {
     expect(findPlaceholders("log in with {{secret:password}} and {{totp:acme}}")).toEqual(["password", "totp:acme"]);

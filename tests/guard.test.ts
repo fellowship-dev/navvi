@@ -256,7 +256,7 @@ describe("pinned replay never runs the filter (R17)", () => {
     };
     await (await ScraperStore.open({ actor })).put(scraper);
     const chooser = new RecordedChooser({ fixture: "crawler/empty" });
-    const summary = await runCrawl(fixtureInput({ startUrls: urls, mode: "list", fields: F(...fields), maxPages: 3 }), makeDeps(dir, actor, chooser));
+    const summary = await runCrawl(fixtureInput({ startUrls: urls, mode: "list", fields: F(...fields), maxPages: 2 }), makeDeps(dir, actor, chooser));
     expect(summary.status).toBe("succeeded");
     expect(summary.pages).toBe(3);
     expect((await datasetItems(actor)).length).toBeGreaterThan(0);

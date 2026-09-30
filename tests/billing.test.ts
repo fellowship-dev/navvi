@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { NavviError } from "../src/billing/budget.js";
 import { CHARGE_EVENTS, Charger, billDecisions, type ChargeEvent, type ChargingActor } from "../src/billing/charge.js";
 import type { Answer, Chooser, ChooserUsage, Question } from "../src/chooser/chooser.js";
-import { hasCallerKey } from "../src/main.js";
+import { callerPays, hasCallerKey } from "../src/main.js";
 import { RecordedChooser } from "../src/chooser/recorded.js";
 import { runCrawl, type CrawlActor } from "../src/replay/crawler.js";
 import { cacheKey } from "../src/scraper/schema.js";
@@ -411,6 +411,27 @@ describe("the decision event (U12, R16)", () => {
     expect(hasCallerKey({ typesafeApiKey: "  ", gatewayApiKey: "" })).toBe(false);
     expect(hasCallerKey({ startUrls: ["https://example.org/"] })).toBe(false);
     expect(hasCallerKey(null)).toBe(false);
+  });
+
+  it("the caller pays only when the resolved decider (and writer) run on the caller's own key", () => {
+    const operator = { TYPESAFE_API_KEY: "op-ts" };
+    // an Anthropic key does not pay for Jev over the operator's TypeSafe key
+    expect(callerPays({ anthropicApiKey: "ant", chooser: "jev" }, operator)).toBe(false);
+    // Jev over TypeSafe on the caller's TypeSafe key, no writer needed beyond the decider's: caller pays
+    expect(callerPays({ typesafeApiKey: "ts", decider: "jev", deciderTransport: "typesafe" }, {})).toBe(true);
+    // ...but a text question would go to a model on the operator's Anthropic key
+    expect(callerPays({ typesafeApiKey: "ts", decider: "jev", deciderTransport: "typesafe" }, { ANTHROPIC_API_KEY: "op-ant" })).toBe(false);
+    // ...unless the caller brought that key too
+    expect(callerPays({ typesafeApiKey: "ts", anthropicApiKey: "ant", decider: "jev", deciderTransport: "typesafe" }, { ANTHROPIC_API_KEY: "op-ant" })).toBe(true);
+    // Jev over the gateway on the caller's gateway key; the gateway also writes
+    expect(callerPays({ gatewayApiKey: "gw" }, operator)).toBe(true);
+    // a gateway transport named explicitly, but only a TypeSafe key from the caller
+    expect(callerPays({ typesafeApiKey: "ts", deciderTransport: "gateway" }, { AI_GATEWAY_API_KEY: "op-gw" })).toBe(false);
+    // the model decider: Anthropic wins over the gateway
+    expect(callerPays({ anthropicApiKey: "ant", decider: "model" }, { AI_GATEWAY_API_KEY: "op-gw" })).toBe(true);
+    expect(callerPays({ gatewayApiKey: "gw", decider: "model" }, { ANTHROPIC_API_KEY: "op-ant" })).toBe(false);
+    // no caller key: the operator pays
+    expect(callerPays({ decider: "jev" }, operator)).toBe(false);
   });
 
   const jobs = (over: Record<string, unknown> = {}) => ({ ...over, startUrls: [`${server.baseUrl}/fixtures/python-jobs.html`], mode: "list", fields: F("title", "company", "location", "date", "link"), description: "python job listing" });
