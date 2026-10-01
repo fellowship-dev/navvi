@@ -27,7 +27,7 @@ transcripts under "The flow" are `tests/make.test.ts`'s specification,
 
 ## Rules
 
-- `playwright` stays pinned to 1.60.0: `camoufox-js` caps `playwright-core`
+- `playwright` stays pinned to 1.60.0 (the Apify Dockerfiles and `.devcontainer/` follow it; `scripts/check-image-pins.mjs` checks): `camoufox-js` caps `playwright-core`
   below 1.61 and the Apify Camoufox image tops out at 1.60.0.
 - Secrets are `{{secret:name}}` placeholders filled by code. A secret value
   never enters a chooser question, a log, a trace or the scraper JSON.

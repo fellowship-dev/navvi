@@ -1,6 +1,7 @@
-// Fails when the Playwright version in package.json and the Apify image tags
-// in the Dockerfiles disagree (KTD4: one package.json, two Dockerfiles, one
-// Playwright pin; the Camoufox image tops out at the pinned version).
+// Fails when the Playwright version in package.json and the image tags in the
+// Dockerfiles disagree (KTD4: one package.json, two Apify Dockerfiles plus the
+// devcontainer, one Playwright pin; the Camoufox image tops out at the pinned
+// version).
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,5 +32,20 @@ for (const file of dockerfiles) {
   } else {
     console.log(`check-image-pins: ${file}: ${browser} image on Node ${node}, Playwright ${playwright} matches package.json`);
   }
+}
+
+// The devcontainer (and the devbox image built from it) uses Microsoft's
+// Playwright image, whose browsers match exactly one Playwright version.
+const devcontainer = join(root, ".devcontainer", "Dockerfile");
+const DEV_FROM = /^FROM\s+mcr\.microsoft\.com\/playwright:v(\d+\.\d+\.\d+)-[a-z]+\s*$/m;
+const devMatch = DEV_FROM.exec(readFileSync(devcontainer, "utf8"));
+if (!devMatch) {
+  console.error(`check-image-pins: ${devcontainer}: no FROM mcr.microsoft.com/playwright:v<version>-<distro> line`);
+  failed = true;
+} else if (devMatch[1] !== pin) {
+  console.error(`check-image-pins: ${devcontainer}: image tag carries Playwright ${devMatch[1]}, package.json pins ${pin}`);
+  failed = true;
+} else {
+  console.log(`check-image-pins: ${devcontainer}: Playwright ${devMatch[1]} matches package.json`);
 }
 process.exit(failed ? 1 : 0);

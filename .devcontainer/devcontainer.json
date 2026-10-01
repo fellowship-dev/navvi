@@ -1,0 +1,13 @@
+{
+  "name": "navvi",
+  "build": {
+    "context": ".",
+    "dockerfile": "Dockerfile"
+  },
+  "workspaceFolder": "/workspaces/navvi",
+  "remoteUser": "pwuser",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "postCreateCommand": "npm ci"
+}
